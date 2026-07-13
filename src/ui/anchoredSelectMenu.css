@@ -1,0 +1,110 @@
+.anchored-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.anchored-select-trigger:hover:not(:disabled),
+.anchored-select-trigger[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+
+.anchored-select-chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.anchored-select-trigger[aria-expanded='true'] .anchored-select-chevron {
+  transform: rotate(180deg);
+}
+
+.anchored-select-trigger-icon {
+  flex: 0 0 auto;
+}
+
+.anchored-select-popover {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  max-height: 240px;
+  gap: 2px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 10px 26px var(--shadow);
+}
+
+.anchored-select-option {
+  display: grid;
+  min-height: 30px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--control-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 560;
+  text-align: left;
+}
+
+.anchored-select-option:hover,
+.anchored-select-option:focus-visible {
+  background: var(--surface-hover);
+}
+
+.anchored-select-option[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.anchored-select-check {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+}
+
+.anchored-select-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.anchored-select-option-primary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.anchored-select-option-primary > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anchored-select-option-primary small {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.anchored-select-option-description {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

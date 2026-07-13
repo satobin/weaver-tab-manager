@@ -1,0 +1,5 @@
+dist/
+artifacts/
+local_builds/
+node_modules/
+pnpm-lock.yaml

@@ -1,0 +1,61 @@
+{
+  "name": "weaver-tab-manager",
+  "version": "1.0.0",
+  "private": true,
+  "author": "Simon Tobin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/satobin/weaver-tab-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/satobin/weaver-tab-manager/issues"
+  },
+  "homepage": "https://github.com/satobin/weaver-tab-manager#readme",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "vite",
+    "clean": "node scripts/clean.mjs",
+    "build": "pnpm run clean && tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "zip:dist": "node scripts/build-release.mjs",
+    "release:webstore": "pnpm run validate && pnpm run zip:dist",
+    "validate": "pnpm run test && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build"
+  },
+  "dependencies": {
+    "lucide-react": "1.23.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "2.7.1",
+    "@eslint/js": "9.39.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/adm-zip": "0.5.8",
+    "@types/chrome": "0.2.2",
+    "@types/node": "25.9.3",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "4.5.2",
+    "adm-zip": "0.5.16",
+    "eslint": "9.39.1",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.5.3",
+    "globals": "17.7.0",
+    "jsdom": "26.1.0",
+    "prettier": "3.7.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.62.1",
+    "vite": "6.4.3",
+    "vitest": "3.2.6"
+  }
+}

@@ -1,0 +1,8 @@
+packages:
+  - .
+
+allowBuilds:
+  esbuild: true
+
+overrides:
+  '@vitest/pretty-format': 3.2.6

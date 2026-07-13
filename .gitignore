@@ -1,0 +1,15 @@
+node_modules/
+dist/
+artifacts/
+local_builds/
+coverage/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crx
+*.log
