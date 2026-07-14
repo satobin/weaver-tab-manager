@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Manila folders with colored tabs and a heart</title>
+  <desc id="description">A warm manila folder with overlapping red, blue, and green tabs and a large red heart on its face.</desc>
+
+  <defs>
+    <linearGradient id="red-tab-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0" stop-color="#E94336"/>
+      <stop offset="1" stop-color="#E63E32"/>
+    </linearGradient>
+    <linearGradient id="heart-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0" stop-color="#E94336"/>
+      <stop offset="1" stop-color="#E63D31"/>
+    </linearGradient>
+    <linearGradient id="blue-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0" stop-color="#336AA8"/>
+      <stop offset="1" stop-color="#2B5E9A"/>
+    </linearGradient>
+    <linearGradient id="green-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0" stop-color="#35965F"/>
+      <stop offset="1" stop-color="#2F8B5A"/>
+    </linearGradient>
+    <linearGradient id="folder-fill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0" stop-color="#FEE0A1"/>
+      <stop offset="0.52" stop-color="#FEDFA0"/>
+      <stop offset="1" stop-color="#FDDF9F"/>
+    </linearGradient>
+
+    <path id="heart-shape" d="
+      M 256 180
+      C 276 157, 300 140.5, 334 140.5
+      C 385 140.5, 426 182.5, 426 235
+      C 426 269, 410 294, 390 313
+      L 276 423
+      C 270 430, 257 434, 256 434
+      C 247 434, 239 430, 233 423
+      L 122 313
+      C 102 294, 85.5 269, 85.5 235
+      C 85.5 182.5, 130 140.5, 178 140.5
+      C 212 140.5, 236 157, 256 180
+      Z"/>
+  </defs>
+
+  <!-- The tabs overlap right-to-left; those overlaps create the flowing seams. -->
+  <path d="
+    M 374 4.5
+    H 480
+    C 495 4.5, 507.5 16.5, 507.5 31.5
+    V 92
+    H 347
+    V 31.5
+    C 347 16.5, 359 4.5, 374 4.5
+    Z"
+    fill="url(#green-fill)" stroke="#118141" stroke-width="1"/>
+
+  <path d="
+    M 198 4.5
+    H 314
+    C 329 4.5, 341 16.5, 341 31.5
+    C 341 41, 346 55, 351 65
+    V 92
+    H 171
+    V 31.5
+    C 171 16.5, 183 4.5, 198 4.5
+    Z"
+    fill="url(#blue-fill)" stroke="#15599B" stroke-width="1"/>
+
+  <path d="
+    M 31 4.5
+    H 139
+    C 154 4.5, 166 16.5, 166 31.5
+    C 166 41, 171 55, 176.5 65
+    V 92
+    H 4
+    V 31.5
+    C 4 16.5, 16 4.5, 31 4.5
+    Z"
+    fill="url(#red-tab-fill)" stroke="#E30006" stroke-width="1"/>
+
+  <path d="
+    M 31.5 65
+    H 479.5
+    C 495 65, 507.5 77, 507.5 92
+    V 482
+    C 507.5 497.5, 495 510, 479.5 510
+    H 31.5
+    C 16 510, 3.5 497.5, 3.5 482
+    V 92
+    C 3.5 77, 16 65, 31.5 65
+    Z"
+    fill="url(#folder-fill)" stroke="#FDDC94" stroke-width="1"/>
+
+  <!-- A pale outer keyline and a dark inner hairline preserve the source edge treatment. -->
+  <use href="#heart-shape" fill="none" stroke="#FFFBC4" stroke-width="3" stroke-linejoin="round"/>
+  <use href="#heart-shape" fill="url(#heart-fill)" stroke="#E30D16" stroke-width="1.25" stroke-linejoin="round"/>
+</svg>

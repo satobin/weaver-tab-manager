@@ -27,6 +27,13 @@ body,
   margin: 0;
 }
 
+html,
+body,
+#popup-root,
+.popup-shell {
+  background-color: var(--page-bg);
+}
+
 button,
 input {
   font: inherit;
