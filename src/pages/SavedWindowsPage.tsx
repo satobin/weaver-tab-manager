@@ -44,7 +44,7 @@ function pluralize(count: number, singular: string) {
 function describeActionError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome could not complete that saved-window action.';
+    : 'The browser could not complete that saved-window action.';
 }
 
 function formatSavedTime(timestamp: string): string {

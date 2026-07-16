@@ -2,6 +2,8 @@ import {
   ArrowDownAZ,
   ArrowUpZA,
   AppWindow,
+  ChevronDown,
+  ChevronRight,
   CirclePause,
   GripVertical,
   Pause,
@@ -12,7 +14,13 @@ import {
 } from 'lucide-react';
 import { Fragment, useEffect, useRef } from 'react';
 
-import { formatTabLocation, isNewTabUrl, type ManagedTab, type ManagedWindow } from './model';
+import {
+  formatTabLocation,
+  isNewTabUrl,
+  isTabSuspended,
+  type ManagedTab,
+  type ManagedWindow,
+} from './model';
 import { type ToggleTabSelection } from './selection';
 import { SortCriterionMenu } from './SortCriterionMenu';
 import { TabIcon } from './TabIcon';
@@ -20,6 +28,7 @@ import { type SortCriterion, type SortDirection, type TabSortOptions } from './t
 
 interface WindowCardProps {
   allWindowTabs: readonly ManagedTab[];
+  collapsed: boolean;
   disabled: boolean;
   extensionOrigin: string;
   draggedGroupId: number | null;
@@ -32,6 +41,7 @@ interface WindowCardProps {
   onFocusWindow: (windowId: number) => void;
   onSaveWindow: (windowId: number, trigger: HTMLButtonElement) => void;
   onSuspendWindow: (windowId: number) => void;
+  onUnsuspendTab: (tabId: number) => void;
   onUnsuspendWindow: (windowId: number) => void;
   onSetGroupSelected: (groupId: number, tabIds: readonly number[], checked: boolean) => void;
   onSortCriterionChange: (criterion: SortCriterion) => void;
@@ -47,6 +57,7 @@ interface WindowCardProps {
     options: Pick<TabSortOptions, 'criterion' | 'direction'>,
   ) => void;
   onToggleTabSelected: (selection: ToggleTabSelection) => void;
+  onToggleCollapsed: (windowId: number) => void;
   selectedGroupIds: ReadonlySet<number>;
   selectedTabIds: ReadonlySet<number>;
   showTabUrls: boolean;
@@ -109,6 +120,7 @@ function SelectionCheckbox({
 
 export function WindowCard({
   allWindowTabs,
+  collapsed,
   disabled,
   extensionOrigin,
   draggedGroupId,
@@ -121,6 +133,7 @@ export function WindowCard({
   onFocusWindow,
   onSaveWindow,
   onSuspendWindow,
+  onUnsuspendTab,
   onUnsuspendWindow,
   onSetGroupSelected,
   onSortCriterionChange,
@@ -133,6 +146,7 @@ export function WindowCard({
   onSetTabsSelected,
   onSortWindow,
   onToggleTabSelected,
+  onToggleCollapsed,
   selectedGroupIds,
   selectedTabIds,
   showTabUrls,
@@ -166,14 +180,16 @@ export function WindowCard({
   const visibleTabIds = window.tabs.map((tab) => tab.id);
   const selectedCount = visibleTabIds.filter((tabId) => selectedTabIds.has(tabId)).length;
   const allSelected = visibleTabIds.length > 0 && selectedCount === visibleTabIds.length;
-  const suspendableTabCount = allWindowTabs.filter((tab) => !tab.active && !tab.discarded).length;
-  const suspendedTabCount = allWindowTabs.filter((tab) => tab.discarded).length;
+  const suspendableTabCount = allWindowTabs.filter(
+    (tab) => !tab.active && !isTabSuspended(tab),
+  ).length;
+  const suspendedTabCount = allWindowTabs.filter(isTabSuspended).length;
   const suspendButtonTitle =
     suspendableTabCount > 0
       ? 'Suspend loaded background tabs'
       : suspendedTabCount === allWindowTabs.length
         ? 'All tabs are suspended'
-        : 'All background tabs are suspended. Chrome keeps the active tab loaded.';
+        : 'All background tabs are suspended. Your browser keeps the active tab loaded.';
   const appendDropTarget: TabDropTarget = {
     browserIndex: -1,
     groupId: null,
@@ -225,6 +241,7 @@ export function WindowCard({
         mergeSourceSelected ? 'is-merge-source' : '',
         dropTarget?.windowId === window.id ? 'is-drop-target' : '',
         !showTabUrls ? 'is-compact-tabs' : '',
+        collapsed ? 'is-collapsed' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -257,7 +274,16 @@ export function WindowCard({
             indeterminate={selectedCount > 0 && !allSelected}
             onChange={(checked) => onSetTabsSelected(visibleTabIds, checked)}
           />
-          <AppWindow className="window-browser-icon" aria-hidden="true" size={24} />
+          <button
+            className="window-focus-button"
+            type="button"
+            aria-label={`Focus ${window.label}`}
+            aria-current={window.focused ? 'true' : undefined}
+            title="Focus window"
+            onClick={() => onFocusWindow(window.id)}
+          >
+            <AppWindow className="window-browser-icon" aria-hidden="true" size={24} />
+          </button>
           <div className="window-heading-copy">
             <h3 id={`window-${window.id}-title`}>
               <button
@@ -270,12 +296,30 @@ export function WindowCard({
                 {window.label}
               </button>
             </h3>
-            <span>
+            <span className="window-heading-summary">
               {pluralizeTabs(window.tabs.length)}
               {selectedCount > 0 ? ` (${selectedCount} selected)` : ''}
             </span>
           </div>
+          <span className="window-collapse-state" aria-hidden="true">
+            {collapsed ? (
+              <ChevronRight className="window-heading-chevron" size={15} />
+            ) : (
+              <ChevronDown className="window-heading-chevron" size={15} />
+            )}
+            {collapsed ? <span className="window-collapsed-indicator">Collapsed</span> : null}
+          </span>
         </div>
+
+        <button
+          className="window-collapse-button"
+          type="button"
+          aria-controls={`window-${window.id}-tabs`}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${window.label}`}
+          title={`${collapsed ? 'Expand' : 'Collapse'} window`}
+          onClick={() => onToggleCollapsed(window.id)}
+        />
 
         <div className="window-card-actions">
           <div className="window-sort-controls" role="group" aria-label={`Sort ${window.label}`}>
@@ -357,7 +401,9 @@ export function WindowCard({
 
       {window.tabs.length > 0 ? (
         <ul
+          id={`window-${window.id}-tabs`}
           className="tab-list"
+          hidden={collapsed}
           onDragOver={(event) => {
             if (event.target === event.currentTarget && draggedTabIds.size > 0 && !disabled) {
               event.preventDefault();
@@ -390,7 +436,10 @@ export function WindowCard({
             const groupLabel = group?.title || 'Tab group';
             const firstGroupTab = groupTabs[0] ?? tab;
             const selected = selectedTabIds.has(tab.id);
+            const suspended = isTabSuspended(tab);
             const suspendedDescriptionId = `tab-${tab.id}-suspended-description`;
+            const suspendedBehavior =
+              tab.discarded || tab.unloaded ? 'Reloads when opened.' : 'Resumes when opened.';
 
             const dropBefore =
               dropTarget?.windowId === window.id && dropTarget.visualIndex === index;
@@ -404,7 +453,7 @@ export function WindowCard({
                     tab.active ? 'is-active' : '',
                     tab.active && window.focused ? 'is-active-in-focused-window' : '',
                     selected ? 'is-selected' : '',
-                    tab.discarded ? 'is-suspended' : '',
+                    suspended ? 'is-suspended' : '',
                     draggedTabIds.has(tab.id) ? 'is-dragging' : '',
                     draggedGroupId === null && dropTarget?.groupId === group?.id
                       ? 'is-tab-group-drop-target'
@@ -416,7 +465,9 @@ export function WindowCard({
                   draggable={!disabled}
                   onDragStart={(event) => {
                     if (
-                      (event.target as Element).closest('.tab-close-button, .selection-checkbox')
+                      (event.target as Element).closest(
+                        '.tab-close-button, .tab-suspended-button, .selection-checkbox',
+                      )
                     ) {
                       event.preventDefault();
                       return;
@@ -537,7 +588,7 @@ export function WindowCard({
                       type="button"
                       draggable={!disabled}
                       aria-label={`Focus ${tab.title}`}
-                      aria-describedby={tab.discarded ? suspendedDescriptionId : undefined}
+                      aria-describedby={suspended ? suspendedDescriptionId : undefined}
                       aria-current={tab.active ? 'page' : undefined}
                       title={tab.url || tab.title}
                       onDragStart={(event) => {
@@ -562,29 +613,39 @@ export function WindowCard({
                           </span>
                         ) : null}
                       </span>
-                      {tab.discarded || tab.pinned ? (
+                      {tab.pinned ? (
                         <span className="tab-state-icons">
-                          {tab.discarded ? (
-                            <span
-                              className="tab-suspended-indicator"
-                              title="Suspended · Tabs reload when opened"
-                            >
-                              <CirclePause aria-hidden="true" size={14} />
-                              <span className="tab-suspended-label" aria-hidden="true">
-                                Suspended
-                              </span>
-                              <span id={suspendedDescriptionId} className="sr-only">
-                                Suspended. Tabs reload when opened.
-                              </span>
-                            </span>
-                          ) : null}
-                          {tab.pinned ? (
-                            <Pin className="tab-pin" aria-label="Pinned" size={13} />
-                          ) : null}
+                          <Pin className="tab-pin" aria-label="Pinned" size={13} />
                         </span>
                       ) : null}
                       {tab.active ? <span className="sr-only">Active tab</span> : null}
                     </button>
+                    {suspended ? (
+                      <button
+                        className="tab-suspended-button"
+                        type="button"
+                        draggable={false}
+                        aria-label={`Unsuspend ${tab.title} without opening it`}
+                        title="Unsuspend without opening this tab"
+                        disabled={disabled}
+                        onDragStart={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onUnsuspendTab(tab.id);
+                        }}
+                      >
+                        <CirclePause aria-hidden="true" size={14} />
+                        <span className="tab-suspended-label" aria-hidden="true">
+                          Suspended
+                        </span>
+                        <span id={suspendedDescriptionId} className="sr-only">
+                          Suspended. {suspendedBehavior}
+                        </span>
+                      </button>
+                    ) : null}
                     <button
                       className="tab-close-button"
                       type="button"

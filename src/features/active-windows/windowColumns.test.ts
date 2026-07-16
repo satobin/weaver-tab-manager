@@ -51,5 +51,6 @@ describe('window columns', () => {
 
     expect(estimateWindowCardHeight(window, true)).toBe(223);
     expect(estimateWindowCardHeight(window, false)).toBe(193);
+    expect(estimateWindowCardHeight(window, true, true)).toBe(88);
   });
 });

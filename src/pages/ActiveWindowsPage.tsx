@@ -25,7 +25,11 @@ import {
 } from '../features/active-windows/chromeActiveWindowsService';
 import { MergeWindowsDialog } from '../features/active-windows/MergeWindowsDialog';
 import { getMergeDialogHorizontalOffset } from '../features/active-windows/mergeDialogPosition';
-import { filterActiveWindows, type ManagedWindow } from '../features/active-windows/model';
+import {
+  filterActiveWindows,
+  isTabSuspended,
+  type ManagedWindow,
+} from '../features/active-windows/model';
 import { createRestorableTabs } from '../features/active-windows/restorableTabs';
 import { type ToggleTabSelection } from '../features/active-windows/selection';
 import {
@@ -203,6 +207,9 @@ export function ActiveWindowsPage({
   );
   const selection = useTabSelection(snapshot?.windows ?? EMPTY_WINDOWS);
   const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [collapsedWindowIds, setCollapsedWindowIds] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const [query, setQuery] = useState('');
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -253,9 +260,10 @@ export function ActiveWindowsPage({
       distributeAcrossWindowColumns(
         filtered?.windows ?? EMPTY_WINDOWS,
         windowColumnCount,
-        (window) => estimateWindowCardHeight(window, settings.showTabUrls),
+        (window) =>
+          estimateWindowCardHeight(window, settings.showTabUrls, collapsedWindowIds.has(window.id)),
       ),
-    [filtered?.windows, settings.showTabUrls, windowColumnCount],
+    [collapsedWindowIds, filtered?.windows, settings.showTabUrls, windowColumnCount],
   );
 
   const updateNewWindowDropTarget = (target: NewWindowDropTarget | null) => {
@@ -450,6 +458,18 @@ export function ActiveWindowsPage({
     });
   };
 
+  const toggleWindowCollapsed = (windowId: number) => {
+    setCollapsedWindowIds((current) => {
+      const next = new Set(current);
+      if (next.has(windowId)) {
+        next.delete(windowId);
+      } else {
+        next.add(windowId);
+      }
+      return next;
+    });
+  };
+
   const closeMergeDialog = useCallback((restoreFocus = true) => {
     setMergeDialogOpen(false);
     if (restoreFocus) {
@@ -567,7 +587,7 @@ export function ActiveWindowsPage({
     try {
       await service.focusWindow(windowId);
     } catch {
-      setNavigationError('Chrome could not focus that window.');
+      setNavigationError('The browser could not focus that window.');
     }
   };
 
@@ -576,7 +596,7 @@ export function ActiveWindowsPage({
     try {
       await service.focusTab(windowId, tabId);
     } catch {
-      setNavigationError('Chrome could not focus that tab.');
+      setNavigationError('The browser could not focus that tab.');
     }
   };
 
@@ -584,7 +604,7 @@ export function ActiveWindowsPage({
     const tabIds =
       snapshot?.windows
         .find((window) => window.id === windowId)
-        ?.tabs.filter((tab) => !tab.active && !tab.discarded)
+        ?.tabs.filter((tab) => !tab.active && !isTabSuspended(tab))
         .map((tab) => tab.id) ?? [];
     if (tabIds.length === 0 || !beginOperation(`Suspending ${pluralize(tabIds.length, 'tab')}`)) {
       return;
@@ -595,7 +615,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('suspended', result.failures));
       await refresh();
     } catch {
-      setOperationError('Chrome could not suspend tabs in that window.');
+      setOperationError('The browser could not suspend tabs in that window.');
     } finally {
       finishOperation();
     }
@@ -605,7 +625,7 @@ export function ActiveWindowsPage({
     const tabIds =
       snapshot?.windows
         .find((window) => window.id === windowId)
-        ?.tabs.filter((tab) => tab.discarded)
+        ?.tabs.filter(isTabSuspended)
         .map((tab) => tab.id) ?? [];
     if (tabIds.length === 0 || !beginOperation(`Unsuspending ${pluralize(tabIds.length, 'tab')}`)) {
       return;
@@ -616,7 +636,30 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('unsuspended', result.failures));
       await refresh();
     } catch {
-      setOperationError('Chrome could not unsuspend tabs in that window.');
+      setOperationError('The browser could not unsuspend tabs in that window.');
+    } finally {
+      finishOperation();
+    }
+  };
+
+  const unsuspendTab = async (tabId: number) => {
+    const tabIsStillSuspended =
+      snapshot?.windows.some((window) =>
+        window.tabs.some((tab) => tab.id === tabId && isTabSuspended(tab)),
+      ) ?? false;
+    if (!tabIsStillSuspended) {
+      return;
+    }
+    if (!beginOperation('Unsuspending 1 tab')) {
+      return;
+    }
+
+    try {
+      const result = await service.unsuspendTabs([tabId]);
+      setOperationError(summarizeFailures('unsuspended', result.failures));
+      await refresh();
+    } catch {
+      setOperationError('The browser could not unsuspend that tab.');
     } finally {
       finishOperation();
     }
@@ -632,7 +675,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('closed', result.failures));
       await refresh();
     } catch {
-      setOperationError('Chrome could not close that tab.');
+      setOperationError('The browser could not close that tab.');
     } finally {
       finishOperation();
     }
@@ -655,7 +698,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('closed', result.failures));
       await refresh();
     } catch {
-      setOperationError('Chrome could not close the selected tabs.');
+      setOperationError('The browser could not close the selected tabs.');
     } finally {
       finishOperation();
     }
@@ -682,7 +725,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('moved', result.failures, result.warnings));
       await refresh();
     } catch {
-      setOperationError('Chrome could not move the selected tabs into a new window.');
+      setOperationError('The browser could not move the selected tabs into a new window.');
     } finally {
       finishOperation();
     }
@@ -699,7 +742,7 @@ export function ActiveWindowsPage({
       );
       await refresh();
     } catch {
-      setOperationError('Chrome could not close that window.');
+      setOperationError('The browser could not close that window.');
     } finally {
       finishOperation();
     }
@@ -729,7 +772,7 @@ export function ActiveWindowsPage({
       }
       await refresh();
     } catch {
-      setOperationError('Chrome could not remove duplicate tabs.');
+      setOperationError('The browser could not remove duplicate tabs.');
     } finally {
       finishOperation();
     }
@@ -749,7 +792,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeRestoreFailures(result.failures, result.warnings));
       await refresh();
     } catch {
-      setOperationError('Chrome could not restore the removed duplicate tabs.');
+      setOperationError('The browser could not restore the removed duplicate tabs.');
     } finally {
       finishOperation();
     }
@@ -780,7 +823,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeWindowFailures(result.failures, result.warnings));
       await refresh();
     } catch {
-      setOperationError('Chrome could not sort the requested tabs.');
+      setOperationError('The browser could not sort the requested tabs.');
     } finally {
       finishOperation();
     }
@@ -850,7 +893,7 @@ export function ActiveWindowsPage({
       setOperationError(summarizeFailures('moved', result.failures, result.warnings));
       await refresh();
     } catch {
-      setOperationError('Chrome could not merge the selected windows.');
+      setOperationError('The browser could not merge the selected windows.');
     } finally {
       finishOperation();
       queueMicrotask(() => mergeButtonRef.current?.focus());
@@ -885,8 +928,8 @@ export function ActiveWindowsPage({
     } catch {
       setOperationError(
         tabIds.length === 1
-          ? 'Chrome could not move that tab into a new window.'
-          : 'Chrome could not move that tab group into a new window.',
+          ? 'The browser could not move that tab into a new window.'
+          : 'The browser could not move that tab group into a new window.',
       );
     } finally {
       finishOperation();
@@ -1034,9 +1077,9 @@ export function ActiveWindowsPage({
       setOperationError(
         session.groupId === null
           ? target.groupId === null
-            ? 'Chrome could not move that tab.'
-            : 'Chrome could not add that tab to the group.'
-          : 'Chrome could not move that tab group.',
+            ? 'The browser could not move that tab.'
+            : 'The browser could not add that tab to the group.'
+          : 'The browser could not move that tab group.',
       );
     } finally {
       finishOperation();
@@ -1351,7 +1394,7 @@ export function ActiveWindowsPage({
         <EmptyState
           icon={PanelsTopLeft}
           title="No browser windows available"
-          description="Open a normal Chrome window to see it here."
+          description="Open a normal browser window to see it here."
         />
       ) : null}
 
@@ -1398,6 +1441,7 @@ export function ActiveWindowsPage({
                       {newWindowDropTarget?.placement === 'before' ? dropZone : null}
                       <WindowCard
                         allWindowTabs={allWindowTabs}
+                        collapsed={collapsedWindowIds.has(window.id)}
                         disabled={operationLabel !== null}
                         extensionOrigin={snapshot.extensionOrigin}
                         draggedGroupId={draggedGroupId}
@@ -1422,10 +1466,12 @@ export function ActiveWindowsPage({
                         sortDirection={windowSortSelection.direction}
                         onSetTabsSelected={setTabsSelected}
                         onToggleTabSelected={toggleTabSelected}
+                        onToggleCollapsed={toggleWindowCollapsed}
                         onFocusWindow={(windowId) => void focusWindow(windowId)}
                         onFocusTab={(windowId, tabId) => void focusTab(windowId, tabId)}
                         onSaveWindow={openSaveWindowDialog}
                         onSuspendWindow={(windowId) => void suspendWindowTabs(windowId)}
+                        onUnsuspendTab={(tabId) => void unsuspendTab(tabId)}
                         onUnsuspendWindow={(windowId) => void unsuspendWindowTabs(windowId)}
                         onSetGroupSelected={setGroupSelected}
                         onTabDragEnd={endTabDrag}

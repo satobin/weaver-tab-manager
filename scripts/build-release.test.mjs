@@ -36,10 +36,10 @@ function createManifest(overrides = {}) {
     },
     commands: {
       'open-manager': {
-        description: 'Open Weaver',
+        description: 'Open Window Manager',
         suggested_key: {
-          default: 'Ctrl+Shift+O',
-          mac: 'Command+Shift+O',
+          default: 'Ctrl+Shift+1',
+          mac: 'Command+Shift+1',
         },
       },
     },

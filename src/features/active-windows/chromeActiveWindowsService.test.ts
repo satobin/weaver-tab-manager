@@ -210,7 +210,14 @@ function createApi() {
 
 describe('createChromeActiveWindowsService', () => {
   it('loads normal non-incognito windows with the current window first', async () => {
-    const { api } = createApi();
+    const { api, windows } = createApi();
+    const unloadedTab = windows[0]?.tabs?.find((tab) => tab.id === 11);
+    const frozenTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
+    if (!unloadedTab || !frozenTab) {
+      throw new Error('Missing sleeping tab fixtures');
+    }
+    unloadedTab.status = 'unloaded';
+    frozenTab.frozen = true;
     const service = createChromeActiveWindowsService(api);
 
     const snapshot = await service.loadSnapshot();
@@ -248,6 +255,8 @@ describe('createChromeActiveWindowsService', () => {
       'https://example.com/favicon.ico',
     ]);
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.discarded)).toEqual([false, true]);
+    expect(snapshot.windows[1]?.tabs.map((tab) => tab.frozen)).toEqual([false, true]);
+    expect(snapshot.windows[1]?.tabs.map((tab) => tab.unloaded)).toEqual([true, false]);
   });
 
   it('uses restored metadata in snapshots and sort planning while Chrome metadata is missing', async () => {
@@ -310,13 +319,14 @@ describe('createChromeActiveWindowsService', () => {
     const tab = createChromeTab({ id: 21 });
 
     const unsubscribe = service.subscribe(listener);
-    tabEvents.onUpdated.emit(21, { status: 'complete' }, tab);
     tabEvents.onUpdated.emit(21, { audible: true }, tab);
     expect(listener).not.toHaveBeenCalled();
 
+    tabEvents.onUpdated.emit(21, { status: 'unloaded' }, tab);
     tabEvents.onUpdated.emit(21, { discarded: true }, tab);
+    tabEvents.onUpdated.emit(21, { frozen: true }, tab);
     tabEvents.onUpdated.emit(21, { url: 'https://example.com/updated' }, tab);
-    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledTimes(4);
     unsubscribe();
   });
 
@@ -550,7 +560,7 @@ describe('createChromeActiveWindowsService', () => {
       affectedTabIds: [11],
       failures: [
         {
-          message: 'Chrome did not suspend the tab. Active tabs cannot be suspended.',
+          message: 'The browser did not suspend the tab. Active tabs cannot be suspended.',
           tabId: 12,
         },
       ],
@@ -561,6 +571,25 @@ describe('createChromeActiveWindowsService', () => {
     });
     expect(api.tabs.discard).toHaveBeenCalledTimes(2);
     expect(api.tabs.reload).toHaveBeenCalledTimes(2);
+  });
+
+  it('wakes frozen tabs, reloads unloaded tabs, and restores the previously active tab', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query).mockResolvedValue([
+      createChromeTab({ active: true, id: 10, windowId: 1 }),
+      createChromeTab({ frozen: true, id: 11, windowId: 1 }),
+      createChromeTab({ id: 12, status: 'unloaded', windowId: 1 }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.unsuspendTabs([11, 12])).resolves.toEqual({
+      affectedTabIds: [11, 12],
+      failures: [],
+    });
+
+    expect(api.tabs.update).toHaveBeenCalledWith(11, { active: true });
+    expect(api.tabs.update).toHaveBeenCalledWith(10, { active: true });
+    expect(api.tabs.reload).toHaveBeenCalledWith(12);
   });
 
   it('sorts grouped runs in place and restores all group metadata', async () => {
@@ -853,7 +882,7 @@ describe('createChromeActiveWindowsService', () => {
     const service = createChromeActiveWindowsService(api);
 
     await expect(service.moveTabGroup(7, 1, -1)).rejects.toThrow(
-      'Chrome did not return the moved tab group.',
+      'The browser did not return the moved tab group.',
     );
   });
 });

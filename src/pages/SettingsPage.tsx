@@ -7,6 +7,7 @@ import {
 } from '../features/active-windows/useActiveWindows';
 import { DedupeRuleEditor } from '../features/deduplication/DedupeRuleEditor';
 import { AppearanceControl } from '../features/settings/AppearanceControl';
+import { KeyboardShortcutsSetting } from '../features/settings/KeyboardShortcutsSetting';
 import { SettingSwitch } from '../features/settings/SettingSwitch';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useSettings } from '../features/settings/useSettings';
@@ -72,7 +73,7 @@ export function SettingsPage({
         Weaver settings
       </h2>
 
-      <div className="settings-layout">
+      <div className="settings-layout appearance-settings-layout">
         <div className="settings-group appearance-settings-group">
           <div>
             <h3>Appearance</h3>
@@ -86,35 +87,51 @@ export function SettingsPage({
           />
         </div>
 
-        <div className="settings-group">
-          <div>
-            <h3>Show tab URLs</h3>
-            <p>Show URLs below tab titles in Active Windows. Turn this off for denser cards.</p>
-          </div>
-          <SettingSwitch
-            checked={settings.showTabUrls}
-            disabled={isLoading || savingSettings.has('showTabUrls')}
-            label="Show tab URLs"
-            onChange={(checked) => void setShowTabUrls(checked)}
-          />
-        </div>
-
-        <div className="settings-group">
-          <div>
-            <h3>Preserve groups when sorting</h3>
-            <p>
-              Keep each Chrome tab group together. Turning this off removes group membership during
-              a sort.
-            </p>
-          </div>
-          <SettingSwitch
-            checked={settings.preserveGroupsDuringSort}
-            disabled={isLoading || savingSettings.has('preserveGroupsDuringSort')}
-            label="Preserve groups when sorting"
-            onChange={(checked) => void setPreserveGroupsDuringSort(checked)}
-          />
-        </div>
+        <KeyboardShortcutsSetting />
       </div>
+
+      <section
+        className="settings-rule-section behavior-settings-section"
+        aria-labelledby="tab-behavior-heading"
+      >
+        <header className="settings-rule-heading behavior-settings-heading">
+          <div>
+            <h3 id="tab-behavior-heading">Tab behavior</h3>
+            <p>Choose how tabs appear and how browser tab groups behave when sorting.</p>
+          </div>
+        </header>
+
+        <div className="behavior-settings-list">
+          <div className="settings-group behavior-settings-row">
+            <div>
+              <h4>Show tab URLs</h4>
+              <p>Show URLs below tab titles in Active Windows. Turn this off for denser cards.</p>
+            </div>
+            <SettingSwitch
+              checked={settings.showTabUrls}
+              disabled={isLoading || savingSettings.has('showTabUrls')}
+              label="Show tab URLs"
+              onChange={(checked) => void setShowTabUrls(checked)}
+            />
+          </div>
+
+          <div className="settings-group behavior-settings-row">
+            <div>
+              <h4>Preserve groups when sorting</h4>
+              <p>
+                Keep each browser tab group together. Turning this off removes group membership
+                during a sort.
+              </p>
+            </div>
+            <SettingSwitch
+              checked={settings.preserveGroupsDuringSort}
+              disabled={isLoading || savingSettings.has('preserveGroupsDuringSort')}
+              label="Preserve groups when sorting"
+              onChange={(checked) => void setPreserveGroupsDuringSort(checked)}
+            />
+          </div>
+        </div>
+      </section>
 
       {errorMessage ? (
         <div className="settings-error" role="alert">

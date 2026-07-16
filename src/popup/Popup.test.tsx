@@ -115,15 +115,28 @@ describe('Popup', () => {
     Promise.resolve({ ok: true }),
   );
   const getCommands = vi.fn(() =>
-    Promise.resolve([{ name: 'open-manager', shortcut: 'Command+Shift+O' }]),
+    Promise.resolve([{ name: 'open-manager', shortcut: 'Command+Shift+1' }]),
   );
+  const createTab = vi.fn<(_properties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>>(
+    () => Promise.resolve({ id: 301 } as chrome.tabs.Tab),
+  );
+  const defaultUserAgent = navigator.userAgent;
 
   beforeEach(() => {
     sendMessage.mockClear();
     getCommands.mockClear();
+    createTab.mockClear();
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: defaultUserAgent,
+    });
     Object.defineProperty(globalThis, 'chrome', {
       configurable: true,
-      value: { commands: { getAll: getCommands }, runtime: { sendMessage } },
+      value: {
+        commands: { getAll: getCommands },
+        runtime: { sendMessage },
+        tabs: { create: createTab },
+      },
     });
     vi.spyOn(window, 'close').mockImplementation(() => undefined);
   });
@@ -158,8 +171,9 @@ describe('Popup', () => {
     renderPopup(createService());
 
     const openButton = await screen.findByRole('button', { name: 'Open Window Manager' });
-    expect(await screen.findByText('⌘⇧O')).toHaveAttribute('title', 'Keyboard shortcut: ⌘⇧O');
+    expect(await screen.findByText('⌘⇧1')).toHaveAttribute('title', 'Keyboard shortcut: ⌘⇧1');
     expect(openButton.querySelector('.lucide-external-link')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set Shortcut' })).not.toBeInTheDocument();
     expect(getCommands).toHaveBeenCalledTimes(1);
     await user.click(openButton);
 
@@ -172,10 +186,89 @@ describe('Popup', () => {
     expect(window.close).toHaveBeenCalled();
   });
 
+  it('keeps the manager action available when the shortcut is unassigned', async () => {
+    const user = userEvent.setup();
+    getCommands.mockResolvedValueOnce([{ name: 'open-manager', shortcut: '' }]);
+    renderPopup(createService());
+
+    const actions = await screen.findByRole('group', { name: 'Window Manager actions' });
+    const openButton = within(actions).getByRole('button', { name: 'Open Window Manager' });
+    expect(within(actions).getByRole('button', { name: 'Set Shortcut' })).toBeVisible();
+    expect(screen.queryByText('Not assigned')).not.toBeInTheDocument();
+
+    await user.click(openButton);
+
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+    expect(createTab).not.toHaveBeenCalled();
+  });
+
+  it('opens Chrome shortcut settings from the unassigned split action', async () => {
+    const user = userEvent.setup();
+    getCommands.mockResolvedValueOnce([{ name: 'open-manager', shortcut: '' }]);
+    renderPopup(createService());
+
+    await user.click(await screen.findByRole('button', { name: 'Set Shortcut' }));
+
+    expect(createTab).toHaveBeenCalledWith({ url: 'chrome://extensions/shortcuts' });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(window.close).toHaveBeenCalled();
+  });
+
+  it('opens Edge shortcut settings when running in Edge', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0',
+    });
+    getCommands.mockResolvedValueOnce([{ name: 'open-manager', shortcut: '' }]);
+    renderPopup(createService());
+
+    await user.click(await screen.findByRole('button', { name: 'Set Shortcut' }));
+
+    expect(createTab).toHaveBeenCalledWith({ url: 'edge://extensions/shortcuts' });
+    expect(createTab).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the Chromium shortcut page if Edge rejects its native page', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0',
+    });
+    createTab.mockRejectedValueOnce(new Error('URL blocked'));
+    getCommands.mockResolvedValueOnce([{ name: 'open-manager', shortcut: '' }]);
+    renderPopup(createService());
+
+    await user.click(await screen.findByRole('button', { name: 'Set Shortcut' }));
+
+    expect(createTab).toHaveBeenNthCalledWith(1, { url: 'edge://extensions/shortcuts' });
+    expect(createTab).toHaveBeenNthCalledWith(2, { url: 'chrome://extensions/shortcuts' });
+    expect(window.close).toHaveBeenCalled();
+  });
+
+  it('keeps the popup open with the shortcut address if browser navigation fails', async () => {
+    const user = userEvent.setup();
+    createTab.mockRejectedValueOnce(new Error('URL blocked'));
+    getCommands.mockResolvedValueOnce([{ name: 'open-manager', shortcut: '' }]);
+    renderPopup(createService());
+
+    await user.click(await screen.findByRole('button', { name: 'Set Shortcut' }));
+
+    expect(
+      await screen.findByText(
+        "Open chrome://extensions/shortcuts in the address bar to set Weaver's shortcut.",
+      ),
+    ).toBeInTheDocument();
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
   it('stays open and reports when the manager cannot be launched', async () => {
     const user = userEvent.setup();
     sendMessage.mockResolvedValueOnce({
-      error: 'Chrome could not open the Window Manager.',
+      error: 'The browser could not open the Window Manager.',
       ok: false,
     });
     renderPopup(createService());
@@ -183,7 +276,7 @@ describe('Popup', () => {
     await user.click(await screen.findByRole('button', { name: 'Open Window Manager' }));
 
     expect(
-      await screen.findByText('Chrome could not open the Window Manager.'),
+      await screen.findByText('The browser could not open the Window Manager.'),
     ).toBeInTheDocument();
     expect(window.close).not.toHaveBeenCalled();
   });
@@ -385,24 +478,24 @@ describe('Popup', () => {
     expect(await screen.findByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled();
   });
 
-  it('suspends inactive tabs and unsuspends discarded tabs in the current window', async () => {
+  it('suspends inactive tabs and unsuspends sleeping or discarded tabs in the current window', async () => {
     const user = userEvent.setup();
     const service = createService();
-    const createSnapshot = (discardedTabIds: readonly number[]) =>
+    const createSnapshot = (suspendedTabIds: readonly number[]) =>
       createActiveWindowsSnapshot({
         windows: [
           createManagedWindow({
             tabs: [
               createManagedTab({ active: true, id: 101 }),
               createManagedTab({
-                discarded: discardedTabIds.includes(102),
+                discarded: suspendedTabIds.includes(102),
                 id: 102,
                 index: 1,
               }),
               createManagedTab({
-                discarded: discardedTabIds.includes(103),
                 id: 103,
                 index: 2,
+                unloaded: suspendedTabIds.includes(103),
               }),
             ],
           }),
@@ -417,7 +510,7 @@ describe('Popup', () => {
     expect(await screen.findByText('Current window')).toBeInTheDocument();
     expect(screen.queryByText('1 suspended')).not.toBeInTheDocument();
     expect(
-      await screen.findByText('1 tab suspended · Tabs reload when opened'),
+      await screen.findByText('1 tab suspended · Resumes or reloads when opened'),
     ).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Suspend tabs 1' }));
 
@@ -425,14 +518,14 @@ describe('Popup', () => {
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
     expect(screen.queryByText('2 suspended')).not.toBeInTheDocument();
     expect(
-      await screen.findByText('2 tabs suspended · Tabs reload when opened'),
+      await screen.findByText('2 tabs suspended · Resumes or reloads when opened'),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Unsuspend all 2' }));
 
     expect(service.unsuspendTabs).toHaveBeenCalledWith([102, 103]);
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
     expect(screen.queryByText('0 suspended')).not.toBeInTheDocument();
-    expect(screen.queryByText(/tabs? suspended · Tabs reload/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/tabs? suspended · Resumes or reloads/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unsuspend all 0' })).toBeDisabled();
     expect(window.close).not.toHaveBeenCalled();
   });

@@ -14,7 +14,7 @@ interface SaveWindowDialogProps {
 function describeSaveError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome could not save this window.';
+    : 'The browser could not save this window.';
 }
 
 export function SaveWindowDialog({

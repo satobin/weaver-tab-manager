@@ -31,7 +31,7 @@ export interface SettingsState {
 function describeError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome could not save this setting.';
+    : 'The browser could not save this setting.';
 }
 
 export function useSettings(service: SettingsService): SettingsState {

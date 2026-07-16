@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type ActiveWindowsDataSource } from '../features/active-windows/useActiveWindows';
 import { type DedupeRule } from '../features/deduplication/deduplication';
@@ -85,6 +85,39 @@ function createService(
 }
 
 describe('SettingsPage', () => {
+  const getCommands = vi.fn(() =>
+    Promise.resolve([
+      { name: '_execute_action', shortcut: '' },
+      { name: 'open-manager', shortcut: 'Ctrl+Shift+1' },
+    ]),
+  );
+  const createTab = vi.fn<(_properties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>>(
+    () => Promise.resolve({ id: 301 } as chrome.tabs.Tab),
+  );
+  const defaultUserAgent = navigator.userAgent;
+
+  beforeEach(() => {
+    getCommands.mockReset();
+    getCommands.mockResolvedValue([
+      { name: '_execute_action', shortcut: '' },
+      { name: 'open-manager', shortcut: 'Ctrl+Shift+1' },
+    ]);
+    createTab.mockReset();
+    createTab.mockResolvedValue({ id: 301 } as chrome.tabs.Tab);
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: defaultUserAgent,
+    });
+    Object.defineProperty(globalThis, 'chrome', {
+      configurable: true,
+      value: {
+        commands: { getAll: getCommands },
+        tabs: { create: createTab },
+      },
+    });
+    vi.spyOn(window, 'close').mockImplementation(() => undefined);
+  });
+
   it('loads and updates the appearance setting', async () => {
     const user = userEvent.setup();
     const service = createService();
@@ -104,6 +137,162 @@ describe('SettingsPage', () => {
 
     expect(service.setColorMode).toHaveBeenCalledWith('dark');
     await waitFor(() => expect(dark).toBeChecked());
+  });
+
+  it('groups appearance settings separately from tab behavior settings', async () => {
+    const { container } = render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    const appearanceGroup = screen
+      .getByRole('heading', { name: 'Appearance', level: 3 })
+      .closest('.settings-group');
+    const shortcutGroup = screen
+      .getByRole('heading', { name: 'Keyboard shortcuts', level: 3 })
+      .closest('.settings-group');
+    const showUrlsGroup = screen
+      .getByRole('heading', { name: 'Show tab URLs', level: 4 })
+      .closest('.settings-group');
+    const preserveGroupsGroup = screen
+      .getByRole('heading', { name: 'Preserve groups when sorting', level: 4 })
+      .closest('.settings-group');
+    const appearanceCard = container.querySelector('.appearance-settings-layout');
+    const behaviorCard = screen.getByRole('region', { name: 'Tab behavior' });
+    const behaviorHeading = screen.getByRole('heading', { name: 'Tab behavior', level: 3 });
+    const behaviorHeader = behaviorHeading.closest('.behavior-settings-heading');
+    const behaviorList = behaviorCard.querySelector('.behavior-settings-list');
+
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'System' })).toBeEnabled());
+    expect(container.querySelectorAll('.settings-layout')).toHaveLength(1);
+    expect(Array.from(appearanceCard?.children ?? [])).toEqual([appearanceGroup, shortcutGroup]);
+    expect(Array.from(behaviorCard.children)).toEqual([behaviorHeader, behaviorList]);
+    expect(Array.from(behaviorList?.children ?? [])).toEqual([showUrlsGroup, preserveGroupsGroup]);
+    expect(
+      within(behaviorCard).getByText(
+        'Choose how tabs appear and how browser tab groups behave when sorting.',
+      ),
+    ).toBeVisible();
+    expect(appearanceCard?.nextElementSibling).toBe(behaviorCard);
+  });
+
+  it('lists live keyboard shortcuts as sub-rows below their heading and description', async () => {
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    const shortcutHeading = screen.getByRole('heading', { name: 'Keyboard shortcuts', level: 3 });
+    const shortcutGroup = shortcutHeading.closest('.settings-group');
+    const shortcutHeader = shortcutHeading.closest('.keyboard-shortcuts-header');
+    const shortcutList = shortcutGroup?.querySelector('.keyboard-shortcuts-list');
+    const rows = Array.from(shortcutList?.children ?? []);
+
+    expect(shortcutGroup).not.toBeNull();
+    expect(shortcutHeader?.nextElementSibling).toBe(shortcutList);
+    expect(shortcutList?.parentElement).toBe(shortcutGroup);
+    expect(
+      within(shortcutHeader as HTMLElement).getByRole('button', { name: 'Edit shortcuts' }),
+    ).toBeVisible();
+    expect(shortcutList).toHaveAttribute('aria-live', 'polite');
+    expect(rows).toHaveLength(2);
+
+    const activateShortcut = within(rows[0] as HTMLElement);
+    expect(activateShortcut.getByText('Activate the extension')).toBeVisible();
+    expect(activateShortcut.getByText('Opens the Weaver popup.')).toBeVisible();
+    expect(await activateShortcut.findByText('Not assigned')).toBeVisible();
+    expect(activateShortcut.queryByRole('button')).not.toBeInTheDocument();
+
+    const managerShortcut = within(rows[1] as HTMLElement);
+    expect(managerShortcut.getByText('Open Window Manager')).toBeVisible();
+    expect(managerShortcut.getByText('Opens the full window and tab manager.')).toBeVisible();
+    expect(managerShortcut.getByText('Ctrl+Shift+1')).toBeVisible();
+    expect(managerShortcut.getByText('Ctrl+Shift+1').tagName).toBe('KBD');
+    expect(managerShortcut.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('opens browser shortcut settings without closing Weaver', async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    const editButton = screen.getByRole('button', { name: 'Edit shortcuts' });
+    expect(editButton).toHaveAccessibleDescription(
+      'Opens your browser’s extension shortcut settings in a new tab.',
+    );
+    await user.click(editButton);
+
+    expect(createTab).toHaveBeenCalledWith({ url: 'chrome://extensions/shortcuts' });
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('refreshes displayed shortcuts after returning from the browser settings tab', async () => {
+    getCommands
+      .mockResolvedValueOnce([
+        { name: '_execute_action', shortcut: '' },
+        { name: 'open-manager', shortcut: 'Ctrl+Shift+1' },
+      ])
+      .mockResolvedValueOnce([
+        { name: '_execute_action', shortcut: 'Ctrl+Shift+2' },
+        { name: 'open-manager', shortcut: 'Ctrl+Shift+9' },
+      ]);
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    expect(await screen.findByText('Ctrl+Shift+1')).toBeVisible();
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('Ctrl+Shift+2')).toBeVisible();
+    expect(await screen.findByText('Ctrl+Shift+9')).toBeVisible();
+  });
+
+  it('shows the manual shortcut address if browser navigation is blocked', async () => {
+    const user = userEvent.setup();
+    createTab.mockRejectedValue(new Error('URL blocked'));
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Edit shortcuts' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t open shortcut settings. Enter chrome://extensions/shortcuts in the address bar.',
+    );
+    expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('marks shortcuts unavailable and disables editing when browser APIs are missing', async () => {
+    Object.defineProperty(globalThis, 'chrome', {
+      configurable: true,
+      value: { commands: {}, tabs: {} },
+    });
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    expect(await screen.findAllByText('Unavailable')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Edit shortcuts' })).toBeDisabled();
   });
 
   it('loads and updates the group-preserving sort preference', async () => {

@@ -32,10 +32,10 @@ export default defineManifest({
   commands: {
     'open-manager': {
       suggested_key: {
-        default: 'Ctrl+Shift+O',
-        mac: 'Command+Shift+O',
+        default: 'Ctrl+Shift+1',
+        mac: 'Command+Shift+1',
       },
-      description: 'Open Weaver',
+      description: 'Open Window Manager',
     },
   },
 });

@@ -20,14 +20,22 @@ export interface ManagedTabGroup {
 export interface ManagedTab {
   active: boolean;
   discarded: boolean;
+  frozen: boolean;
   groupId: number | null;
   iconUrl: string | null;
   id: number;
   index: number;
   pinned: boolean;
   title: string;
+  unloaded: boolean;
   url: string;
   windowId: number;
+}
+
+export function isTabSuspended(
+  tab: Pick<ManagedTab, 'discarded' | 'frozen' | 'unloaded'>,
+): boolean {
+  return tab.discarded || tab.frozen || tab.unloaded;
 }
 
 export interface ManagedWindow {

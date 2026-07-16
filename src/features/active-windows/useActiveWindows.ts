@@ -21,7 +21,7 @@ function describeLoadError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
   }
-  return 'Chrome did not return window and tab data.';
+  return 'The browser did not return window and tab data.';
 }
 
 function retainFocusedWindow(

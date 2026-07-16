@@ -322,7 +322,7 @@ describe('createChromeSavedWindowsService', () => {
     const service = createChromeSavedWindowsService(fake.api, environment);
 
     await expect(service.openTab('https://docs.example.com/plan')).rejects.toThrow(
-      'Chrome created a tab without an ID.',
+      'The browser created a tab without an ID.',
     );
   });
 

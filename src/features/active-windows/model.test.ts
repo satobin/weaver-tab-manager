@@ -5,7 +5,7 @@ import {
   createManagedTab,
   createManagedWindow,
 } from '../../test/activeWindowsFixtures';
-import { filterActiveWindows, formatTabLocation, isNewTabUrl } from './model';
+import { filterActiveWindows, formatTabLocation, isNewTabUrl, isTabSuspended } from './model';
 
 describe('isNewTabUrl', () => {
   it.each([
@@ -20,6 +20,17 @@ describe('isNewTabUrl', () => {
 
   it.each(['https://example.com/', 'chrome://extensions/', 'not a url'])('rejects %s', (url) => {
     expect(isNewTabUrl(url)).toBe(false);
+  });
+});
+
+describe('isTabSuspended', () => {
+  it.each([
+    [{ discarded: true }, true],
+    [{ frozen: true }, true],
+    [{ unloaded: true }, true],
+    [{}, false],
+  ] as const)('recognizes browser suspension state %#', (overrides, expected) => {
+    expect(isTabSuspended(createManagedTab(overrides))).toBe(expected);
   });
 });
 

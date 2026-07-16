@@ -16,7 +16,7 @@ export interface SavedWindowsState {
 function describeLoadError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome could not load saved windows.';
+    : 'The browser could not load saved windows.';
 }
 
 export function useSavedWindows(service: SavedWindowsService): SavedWindowsState {

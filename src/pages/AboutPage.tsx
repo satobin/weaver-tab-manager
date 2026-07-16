@@ -1,6 +1,9 @@
 import { CloudOff, Eye, HardDrive } from 'lucide-react';
 
 import packageMetadata from '../../package.json';
+import { CHROME_WEB_STORE_URL } from '../shared/storeLinks';
+
+const GITHUB_ISSUES_URL = 'https://github.com/satobin/weaver-tab-manager/issues';
 
 export function AboutPage() {
   return (
@@ -34,11 +37,11 @@ export function AboutPage() {
                 <HardDrive aria-hidden="true" size={20} />
               </span>
               <div>
-                <h4>Saves locally in Chrome</h4>
+                <h4>Saves locally in your browser</h4>
                 <p>
-                  Saved windows, settings, and custom rules stay in Chrome. Restored suspended tabs
-                  may keep their titles and URLs in memory until they load, change, close, or Chrome
-                  exits.
+                  Saved windows, settings, and custom rules stay in your browser. Restored suspended
+                  tabs may keep their titles and URLs in memory until they load, change, close, or
+                  the browser exits.
                 </p>
               </div>
             </article>
@@ -67,6 +70,26 @@ export function AboutPage() {
             <dd>Processed and stored locally</dd>
           </div>
         </dl>
+        <div className="about-community">
+          <p>
+            If you enjoy this extension,{' '}
+            <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
+              please leave a review
+            </a>
+            .
+          </p>
+          <p>
+            For issues or feature requests, please{' '}
+            <a href={GITHUB_ISSUES_URL} target="_blank" rel="noreferrer">
+              open a GitHub issue
+            </a>
+            .
+          </p>
+          <p>
+            For other questions, email{' '}
+            <a href="mailto:weavertabmanager@gmail.com">weavertabmanager@gmail.com</a>.
+          </p>
+        </div>
       </div>
     </section>
   );

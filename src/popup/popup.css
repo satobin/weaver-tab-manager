@@ -377,7 +377,8 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
-.popup-summary + .open-manager-button {
+.popup-summary + .open-manager-button,
+.popup-summary + .open-manager-split {
   margin-top: 6px;
 }
 
@@ -474,23 +475,27 @@ input {
   background: var(--danger-soft);
 }
 
-.open-manager-button {
-  display: grid;
+.open-manager-button,
+.open-manager-split {
   width: 100%;
   min-height: 40px;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
   margin-top: 12px;
-  padding: 8px 11px;
   border: 1px solid var(--primary-border);
   border-radius: 6px;
   background: var(--accent);
   color: var(--text-on-accent);
-  cursor: pointer;
   font-size: 12px;
   font-weight: 620;
+}
+
+.open-manager-button {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 11px;
+  cursor: pointer;
 }
 
 .open-manager-label {
@@ -513,6 +518,42 @@ input {
 
 .open-manager-button:hover {
   background: var(--accent-hover);
+}
+
+.open-manager-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.open-manager-split button {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: inherit;
+}
+
+.open-manager-split-primary {
+  border-radius: 5px 0 0 5px;
+}
+
+.open-manager-split .open-manager-shortcut-action {
+  border-left: 1px solid color-mix(in srgb, var(--text-on-accent) 48%, transparent);
+  border-radius: 0 5px 5px 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.open-manager-split button:hover {
+  background: var(--accent-hover);
+}
+
+.open-manager-split button:focus-visible {
+  position: relative;
+  z-index: 1;
 }
 
 .popup-sr-only {

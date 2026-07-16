@@ -7,7 +7,7 @@ import {
   type ActiveWindowsService,
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
-import { formatTabLocation, isNewTabUrl } from '../features/active-windows/model';
+import { formatTabLocation, isNewTabUrl, isTabSuspended } from '../features/active-windows/model';
 import { createRestorableTabs } from '../features/active-windows/restorableTabs';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
 import { TabIcon } from '../features/active-windows/TabIcon';
@@ -17,6 +17,12 @@ import { planDuplicateTabs } from '../features/deduplication/deduplication';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useSettings } from '../features/settings/useSettings';
 import { useAppearance } from '../features/settings/useAppearance';
+import {
+  getCommandShortcutState,
+  getSuggestedOpenManagerShortcut,
+  OPEN_MANAGER_COMMAND,
+  openExtensionShortcutSettings,
+} from '../platform/chrome/extensionShortcuts';
 import { OPEN_APP_MESSAGE, isOpenAppResponse, type OpenAppMessage } from '../shared/messages';
 
 interface PopupProps {
@@ -24,34 +30,8 @@ interface PopupProps {
   settingsService?: SettingsService | undefined;
 }
 
-const OPEN_MANAGER_COMMAND = 'open-manager';
-
 function defaultManagerShortcut(): string {
-  return navigator.platform.toLocaleLowerCase().includes('mac') ? '⌘⇧O' : 'Ctrl+Shift+O';
-}
-
-function formatCommandShortcut(shortcut: string): string {
-  const parts = shortcut.split('+').filter(Boolean);
-  const compact = parts.some((part) => /command|macctrl|⌘/iu.test(part));
-  const formatted = parts.map((part) => {
-    switch (part.toLocaleLowerCase()) {
-      case 'command':
-      case '⌘':
-        return '⌘';
-      case 'shift':
-        return compact ? '⇧' : 'Shift';
-      case 'alt':
-      case 'option':
-        return compact ? '⌥' : 'Alt';
-      case 'ctrl':
-      case 'control':
-      case 'macctrl':
-        return compact ? '⌃' : 'Ctrl';
-      default:
-        return part.length === 1 ? part.toLocaleUpperCase() : part;
-    }
-  });
-  return formatted.join(compact ? '' : '+');
+  return getSuggestedOpenManagerShortcut(navigator.platform);
 }
 
 export function Popup({
@@ -69,7 +49,7 @@ export function Popup({
   const { errorMessage, refresh, snapshot } = useActiveWindows(service);
   const { isLoading: settingsLoading, settings } = useSettings(settingsService);
   useAppearance(settings.colorMode);
-  const [managerShortcut, setManagerShortcut] = useState(defaultManagerShortcut);
+  const [managerShortcut, setManagerShortcut] = useState<string | null>(defaultManagerShortcut);
   const [query, setQuery] = useState('');
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -112,9 +92,9 @@ export function Popup({
   const sortUnavailable = !currentWindow || settingsLoading;
   const dedupeUnavailable = sortUnavailable || duplicatePlan.duplicateTabIds.length === 0;
   const suspendableTabIds =
-    currentWindow?.tabs.filter((tab) => !tab.active && !tab.discarded).map((tab) => tab.id) ?? [];
-  const suspendedTabIds =
-    currentWindow?.tabs.filter((tab) => tab.discarded).map((tab) => tab.id) ?? [];
+    currentWindow?.tabs.filter((tab) => !tab.active && !isTabSuspended(tab)).map((tab) => tab.id) ??
+    [];
+  const suspendedTabIds = currentWindow?.tabs.filter(isTabSuspended).map((tab) => tab.id) ?? [];
 
   useEffect(() => {
     let cancelled = false;
@@ -124,11 +104,9 @@ export function Popup({
     void chrome.commands
       .getAll()
       .then((commands) => {
-        const shortcut = commands.find(
-          (command) => command.name === OPEN_MANAGER_COMMAND,
-        )?.shortcut;
-        if (!cancelled && shortcut) {
-          setManagerShortcut(formatCommandShortcut(shortcut));
+        const shortcut = getCommandShortcutState(commands, OPEN_MANAGER_COMMAND);
+        if (!cancelled && shortcut.status !== 'missing') {
+          setManagerShortcut(shortcut.status === 'assigned' ? shortcut.display : null);
         }
       })
       .catch(() => undefined);
@@ -143,7 +121,7 @@ export function Popup({
     try {
       const response: unknown = await chrome.runtime.sendMessage(message);
       if (!isOpenAppResponse(response)) {
-        setActionError('Chrome could not open the Window Manager.');
+        setActionError('The browser could not open the Window Manager.');
         return;
       }
       if (!response.ok) {
@@ -152,8 +130,18 @@ export function Popup({
       }
       window.close();
     } catch {
-      setActionError('Chrome could not open the Window Manager.');
+      setActionError('The browser could not open the Window Manager.');
     }
+  };
+
+  const openShortcutSettings = async () => {
+    setActionError(null);
+    const result = await openExtensionShortcutSettings(chrome.tabs, navigator.userAgent);
+    if (result.ok) {
+      window.close();
+      return;
+    }
+    setActionError(`Open ${result.manualUrl} in the address bar to set Weaver's shortcut.`);
   };
 
   const focusTab = async (windowId: number, tabId: number) => {
@@ -162,7 +150,7 @@ export function Popup({
       await service.focusTab(windowId, tabId);
       window.close();
     } catch {
-      setActionError('Chrome could not focus that tab.');
+      setActionError('The browser could not focus that tab.');
     }
   };
 
@@ -177,12 +165,12 @@ export function Popup({
     try {
       const result = await service.closeTabs([tabId]);
       if (result.failures.length > 0) {
-        setActionError(result.failures[0]?.message ?? 'Chrome could not close that tab.');
+        setActionError(result.failures[0]?.message ?? 'The browser could not close that tab.');
         return;
       }
       await refresh();
     } catch {
-      setActionError('Chrome could not close that tab.');
+      setActionError('The browser could not close that tab.');
     } finally {
       pendingCloseTabIds.current.delete(tabId);
     }
@@ -212,7 +200,7 @@ export function Popup({
       }
       await refresh();
     } catch {
-      setActionError('Chrome could not sort the current window.');
+      setActionError('The browser could not sort the current window.');
     } finally {
       actionInFlight.current = false;
       setPendingAction(null);
@@ -249,7 +237,7 @@ export function Popup({
       }
       await refresh();
     } catch {
-      setActionError('Chrome could not remove duplicate tabs.');
+      setActionError('The browser could not remove duplicate tabs.');
     } finally {
       actionInFlight.current = false;
       setPendingAction(null);
@@ -278,7 +266,7 @@ export function Popup({
       setActionError(issues.length > 0 ? issues.join(' ') : null);
       await refresh();
     } catch {
-      setActionError('Chrome could not restore the removed duplicate tabs.');
+      setActionError('The browser could not restore the removed duplicate tabs.');
     } finally {
       actionInFlight.current = false;
       setPendingAction(null);
@@ -311,8 +299,8 @@ export function Popup({
     } catch {
       setActionError(
         mode === 'suspend'
-          ? 'Chrome could not suspend the other tabs in this window.'
-          : 'Chrome could not unsuspend the tabs in this window.',
+          ? 'The browser could not suspend the other tabs in this window.'
+          : 'The browser could not unsuspend the tabs in this window.',
       );
     } finally {
       actionInFlight.current = false;
@@ -419,7 +407,7 @@ export function Popup({
               }
               disabled={suspendableTabIds.length === 0 || pendingAction !== null}
               aria-busy={pendingAction === 'suspend'}
-              title="Suspend loaded background tabs in this window. Tabs reload when opened."
+              title="Suspend loaded background tabs in this window. Tabs resume or reload when opened."
               onClick={() => void changeCurrentWindowSuspension('suspend')}
             >
               <Pause aria-hidden="true" size={16} />
@@ -445,8 +433,8 @@ export function Popup({
               <span className="popup-suspension-state">
                 <CirclePause aria-hidden="true" size={13} />
                 {suspendedTabIds.length}{' '}
-                {suspendedTabIds.length === 1 ? 'tab suspended' : 'tabs suspended'} · Tabs reload
-                when opened
+                {suspendedTabIds.length === 1 ? 'tab suspended' : 'tabs suspended'} · Resumes or
+                reloads when opened
               </span>
             ) : null}
           </div>
@@ -545,21 +533,41 @@ export function Popup({
         </p>
       )}
 
-      <button
-        className="open-manager-button"
-        type="button"
-        aria-label="Open Window Manager"
-        onClick={() => void openManager()}
-      >
-        <span className="open-manager-label">Open Window Manager</span>
-        <kbd
-          className="open-manager-shortcut"
-          aria-hidden="true"
-          title={`Keyboard shortcut: ${managerShortcut}`}
+      {managerShortcut === null ? (
+        <div className="open-manager-split" role="group" aria-label="Window Manager actions">
+          <button
+            className="open-manager-split-primary"
+            type="button"
+            onClick={() => void openManager()}
+          >
+            Open Window Manager
+          </button>
+          <button
+            className="open-manager-shortcut-action"
+            type="button"
+            title="Open browser extension shortcut settings"
+            onClick={() => void openShortcutSettings()}
+          >
+            Set Shortcut
+          </button>
+        </div>
+      ) : (
+        <button
+          className="open-manager-button"
+          type="button"
+          aria-label="Open Window Manager"
+          onClick={() => void openManager()}
         >
-          {managerShortcut}
-        </kbd>
-      </button>
+          <span className="open-manager-label">Open Window Manager</span>
+          <kbd
+            className="open-manager-shortcut"
+            aria-hidden="true"
+            title={`Keyboard shortcut: ${managerShortcut}`}
+          >
+            {managerShortcut}
+          </kbd>
+        </button>
+      )}
     </main>
   );
 }

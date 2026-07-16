@@ -46,7 +46,7 @@ function createService(): ActiveWindowsService {
             url: 'https://docs.example.com/quarterly-plan',
           }),
           createManagedTab({
-            discarded: true,
+            unloaded: true,
             groupId: 7,
             id: 102,
             index: 1,
@@ -203,8 +203,10 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('button', { name: 'Focus first tab in Planning' })).toBeInTheDocument();
     expect(screen.getByText('Collapsed')).toBeInTheDocument();
     expect(screen.getByLabelText('Pinned')).toBeInTheDocument();
-    const suspendedIndicator = screen.getByTitle('Suspended · Tabs reload when opened');
-    expect(suspendedIndicator).toBeInTheDocument();
+    const suspendedButton = screen.getByRole('button', {
+      name: 'Unsuspend Issue tracker without opening it',
+    });
+    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend without opening this tab');
     expect(screen.getByText('Suspended')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toHaveAttribute(
       'aria-describedby',
@@ -213,8 +215,8 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' }).closest('li')).toHaveClass(
       'is-suspended',
     );
-    expect(suspendedIndicator).toHaveTextContent('Suspended');
-    expect(suspendedIndicator).toHaveTextContent('Tabs reload when opened.');
+    expect(suspendedButton).toHaveTextContent('Suspended');
+    expect(suspendedButton).toHaveTextContent('Reloads when opened.');
     expect(screen.getByRole('button', { name: 'Focus Quarterly plan' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -228,6 +230,10 @@ describe('ActiveWindowsPage', () => {
     expect(currentCard).toHaveClass('is-focused-window');
     expect(otherCard).not.toHaveClass('is-focused-window');
     expect(screen.queryByText('Focused')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Focus Window 1' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
     expect(screen.getByRole('button', { name: 'Window 1' })).toHaveAttribute(
       'aria-current',
       'true',
@@ -399,18 +405,135 @@ describe('ActiveWindowsPage', () => {
     const service = createService();
     render(<ActiveWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Window 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Focus Window 1' }));
     expect(service.focusWindow).toHaveBeenCalledWith(1);
 
     await user.click(screen.getByRole('button', { name: 'Window 2' }));
     expect(service.focusWindow).toHaveBeenLastCalledWith(2);
-    expect(screen.queryByRole('button', { name: 'Focus Window 2' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Focus first tab in Planning' }));
     expect(service.focusTab).toHaveBeenCalledWith(1, 101);
 
     await user.click(screen.getByRole('button', { name: 'Focus Issue tracker' }));
     expect(service.focusTab).toHaveBeenLastCalledWith(1, 102);
+  });
+
+  it('unsuspends from the suspended control without focusing the tab', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.unsuspendTabs).mockResolvedValue({ affectedTabIds: [102], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    const suspendedButton = await screen.findByRole('button', {
+      name: 'Unsuspend Issue tracker without opening it',
+    });
+    expect(suspendedButton.closest('.tab-focus-button')).toBeNull();
+    const setDragData = vi.fn();
+    fireEvent.dragStart(suspendedButton, {
+      dataTransfer: { effectAllowed: 'none', setData: setDragData },
+    });
+    expect(setDragData).not.toHaveBeenCalled();
+
+    await user.click(suspendedButton);
+
+    expect(service.unsuspendTabs).toHaveBeenCalledTimes(1);
+    expect(service.unsuspendTabs).toHaveBeenCalledWith([102]);
+    expect(service.focusTab).not.toHaveBeenCalled();
+    expect(service.focusWindow).not.toHaveBeenCalled();
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole('button', { name: 'Focus Issue tracker' }));
+    expect(service.focusTab).toHaveBeenCalledWith(1, 102);
+    expect(service.unsuspendTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses from header whitespace without hijacking identity or action controls', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const heading = await screen.findByRole('heading', { name: 'Window 1' });
+    const card = heading.closest('article');
+    const header = heading.closest('header');
+    expect(card).not.toBeNull();
+    expect(header).not.toBeNull();
+
+    const collapseButton = within(header as HTMLElement).getByRole('button', {
+      name: 'Collapse Window 1',
+    });
+    const titleButton = within(header as HTMLElement).getByRole('button', { name: 'Window 1' });
+    const iconButton = within(header as HTMLElement).getByRole('button', {
+      name: 'Focus Window 1',
+    });
+    const sortDirectionButton = within(header as HTMLElement).getByRole('button', {
+      name: 'Sort Window 1 direction A to Z',
+    });
+    const selectAllCheckbox = within(header as HTMLElement).getByRole('checkbox', {
+      name: 'Select all visible tabs in Window 1',
+    });
+    expect(collapseButton.parentElement).toBe(header);
+    expect(collapseButton).not.toBe(titleButton);
+    expect(collapseButton).not.toContainElement(selectAllCheckbox);
+    expect(collapseButton).not.toContainElement(iconButton);
+    expect(collapseButton).not.toContainElement(titleButton);
+    expect(collapseButton).not.toContainElement(sortDirectionButton);
+    expect(collapseButton).toHaveAttribute('aria-controls', 'window-1-tabs');
+    expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: 'Focus Quarterly plan' }),
+    ).toBeVisible();
+
+    await user.click(titleButton);
+    expect(service.focusWindow).toHaveBeenCalledWith(1);
+    expect(card).not.toHaveClass('is-collapsed');
+
+    await user.click(iconButton);
+    expect(service.focusWindow).toHaveBeenCalledTimes(2);
+    expect(card).not.toHaveClass('is-collapsed');
+
+    await user.click(sortDirectionButton);
+    expect(card).not.toHaveClass('is-collapsed');
+
+    await user.click(collapseButton);
+
+    expect(card).toHaveClass('is-collapsed');
+    expect(
+      within(header as HTMLElement).getByRole('button', { name: 'Expand Window 1' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(within(header as HTMLElement).getByText('Collapsed')).toBeVisible();
+    expect(
+      within(card as HTMLElement).queryByRole('button', { name: 'Focus Quarterly plan' }),
+    ).not.toBeInTheDocument();
+
+    await user.click(selectAllCheckbox);
+    expect(card).toHaveClass('is-collapsed');
+
+    await user.click(
+      within(header as HTMLElement).getByRole('button', {
+        name: 'Expand Window 1',
+      }),
+    );
+    expect(card).not.toHaveClass('is-collapsed');
+    expect(
+      within(card as HTMLElement).getByRole('button', { name: 'Focus Quarterly plan' }),
+    ).toBeVisible();
+
+    const collapseAgain = within(header as HTMLElement).getByRole('button', {
+      name: 'Collapse Window 1',
+    });
+    collapseAgain.focus();
+    await user.keyboard('{Enter}');
+    const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
+    await user.type(search, 'Reference');
+    expect(screen.queryByRole('heading', { name: 'Window 1' })).not.toBeInTheDocument();
+
+    await user.clear(search);
+    const restoredHeading = await screen.findByRole('heading', { name: 'Window 1' });
+    const restoredCard = restoredHeading.closest('article');
+    expect(restoredCard).toHaveClass('is-collapsed');
+    expect(
+      within(restoredCard as HTMLElement).getByRole('button', { name: 'Expand Window 1' }),
+    ).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('suspends only loaded background tabs in the chosen window', async () => {
@@ -475,7 +598,7 @@ describe('ActiveWindowsPage', () => {
     expect(suspendButton).toBeDisabled();
     expect(suspendButton).toHaveAttribute(
       'title',
-      'All background tabs are suspended. Chrome keeps the active tab loaded.',
+      'All background tabs are suspended. Your browser keeps the active tab loaded.',
     );
     expect(screen.getByRole('button', { name: 'Unsuspend all tabs in Window 1' })).toBeEnabled();
   });

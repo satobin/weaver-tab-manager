@@ -177,7 +177,7 @@ function formatCleanupNotice(notice: SavedWindowsCleanupNotice | null): string |
 function describeChromeError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome rejected the operation.';
+    : 'The browser rejected the operation.';
 }
 
 function cloneSavedWindows(windows: readonly SavedWindow[]): SavedWindow[] {
@@ -312,7 +312,7 @@ export function createChromeSavedWindowsService(
       const createdTab = await api.tabs.create({ active: true, url });
       const tabId = getTabId(createdTab);
       if (tabId === null) {
-        throw new Error('Chrome created a tab without an ID.');
+        throw new Error('The browser created a tab without an ID.');
       }
       return tabId;
     },
@@ -347,7 +347,7 @@ export function createChromeSavedWindowsService(
         const plan = planSavedWindowRestore(savedWindow);
         const destination = await api.windows.create({ focused: false });
         if (destination?.id === undefined) {
-          throw new Error('Chrome did not create the destination window.');
+          throw new Error('The browser did not create the destination window.');
         }
 
         const destinationWindowId = destination.id;
@@ -382,7 +382,7 @@ export function createChromeSavedWindowsService(
             });
             const tabId = getTabId(createdTab);
             if (tabId === null) {
-              throw new Error('Chrome created a tab without an ID.');
+              throw new Error('The browser created a tab without an ID.');
             }
             restoredTabIdsByOrder.set(tab.order, tabId);
             restoredMetadataRegistrations.push({ tabId, title: tab.title, url: tab.url });
@@ -390,7 +390,7 @@ export function createChromeSavedWindowsService(
               try {
                 const discardedTab = await api.tabs.discard(tabId);
                 if (!discardedTab?.discarded) {
-                  throw new Error('Chrome did not suspend the tab.');
+                  throw new Error('The browser did not suspend the tab.');
                 }
                 suspendedTabIds.add(tabId);
               } catch (error) {
@@ -458,7 +458,7 @@ export function createChromeSavedWindowsService(
             try {
               const discardedTab = await api.tabs.discard(tabId);
               if (!discardedTab?.discarded) {
-                throw new Error('Chrome did not suspend the tab.');
+                throw new Error('The browser did not suspend the tab.');
               }
               suspendedTabIds.add(tabId);
             } catch (error) {
@@ -660,7 +660,7 @@ export function createSavedWindowsService(): SavedWindowsService {
         return cloneSavedWindow(keptWindow);
       });
     },
-    openTab: () => Promise.reject(new Error('Chrome is unavailable.')),
+    openTab: () => Promise.reject(new Error('Browser extension APIs are unavailable.')),
     renameWindow(savedWindowId, name) {
       return Promise.resolve().then(() => {
         const existing = windows.find((window) => window.id === savedWindowId);
@@ -677,8 +677,8 @@ export function createSavedWindowsService(): SavedWindowsService {
         return cloneSavedWindow(updated);
       });
     },
-    restoreWindow: () => Promise.reject(new Error('Chrome is unavailable.')),
-    saveWindow: () => Promise.reject(new Error('Chrome is unavailable.')),
+    restoreWindow: () => Promise.reject(new Error('Browser extension APIs are unavailable.')),
+    saveWindow: () => Promise.reject(new Error('Browser extension APIs are unavailable.')),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

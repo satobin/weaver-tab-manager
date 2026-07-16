@@ -42,7 +42,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
       () => sendResponse({ ok: true }),
       (error: unknown) => {
         reportBackgroundFailure('Could not open the window manager.', error);
-        sendResponse({ error: 'Chrome could not open the Window Manager.', ok: false });
+        sendResponse({ error: 'The browser could not open the Window Manager.', ok: false });
       },
     )
     .catch((error: unknown) => reportBackgroundFailure('Could not reply to the popup.', error));

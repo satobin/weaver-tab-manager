@@ -187,7 +187,7 @@ interface MergeWindowsResult {
 function describeChromeError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Chrome rejected the operation.';
+    : 'The browser rejected the operation.';
 }
 
 const CLOSE_TAB_CONCURRENCY = 8;
@@ -283,8 +283,10 @@ function addEventSubscription<TArgs extends unknown[]>(
 const SNAPSHOT_TAB_UPDATE_FIELDS = [
   'discarded',
   'favIconUrl',
+  'frozen',
   'groupId',
   'pinned',
+  'status',
   'title',
   'url',
 ] as const;
@@ -320,12 +322,14 @@ function toManagedTab(
   return {
     active: tab.active,
     discarded: tab.discarded,
+    frozen: tab.frozen ?? false,
     groupId: tab.groupId >= 0 ? tab.groupId : null,
     iconUrl: resolveTabIconUrl(tab, extensionRootUrl, extensionIconUrl),
     id: tab.id,
     index: tab.index,
     pinned: tab.pinned,
     title: tab.title?.trim() || url || 'Untitled tab',
+    unloaded: tab.status === 'unloaded',
     url,
     windowId: tab.windowId,
   };
@@ -532,7 +536,9 @@ export function createChromeActiveWindowsService(
           try {
             const tab = await api.tabs.discard(tabId);
             if (!tab?.discarded) {
-              throw new Error('Chrome did not suspend the tab. Active tabs cannot be suspended.');
+              throw new Error(
+                'The browser did not suspend the tab. Active tabs cannot be suspended.',
+              );
             }
             return { affected: true as const, tabId };
           } catch (error) {
@@ -554,12 +560,34 @@ export function createChromeActiveWindowsService(
       const requestedTabIds = [...new Set(tabIds)];
       const affectedTabIds: number[] = [];
       const failures: TabOperationFailure[] = [];
+      let tabsById = new Map<number, chrome.tabs.Tab>();
+      try {
+        const tabs = await api.tabs.query({});
+        tabsById = new Map(
+          tabs
+            .filter((tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined)
+            .map((tab) => [tab.id, tab]),
+        );
+      } catch {
+        // Fall back to reloading when the browser cannot provide current tab state.
+      }
       const results = await mapWithConcurrency(
         requestedTabIds,
         RELOAD_TAB_CONCURRENCY,
         async (tabId) => {
           try {
-            await api.tabs.reload(tabId);
+            const tab = tabsById.get(tabId);
+            if (tab?.frozen && !tab.discarded) {
+              const previouslyActiveTab = [...tabsById.values()].find(
+                (candidate) => candidate.windowId === tab.windowId && candidate.active,
+              );
+              await api.tabs.update(tabId, { active: true });
+              if (previouslyActiveTab?.id !== undefined && previouslyActiveTab.id !== tabId) {
+                await api.tabs.update(previouslyActiveTab.id, { active: true });
+              }
+            } else {
+              await api.tabs.reload(tabId);
+            }
             return { affected: true as const, tabId };
           } catch (error) {
             return { affected: false as const, error, tabId };
@@ -635,7 +663,7 @@ export function createChromeActiveWindowsService(
           if (destination?.id === undefined) {
             result.failures.push(
               ...orderedTabs.map((tab) => ({
-                message: 'Chrome did not recreate the original window.',
+                message: 'The browser did not recreate the original window.',
                 originalTabId: tab.originalTabId,
               })),
             );
@@ -671,7 +699,7 @@ export function createChromeActiveWindowsService(
             });
             const createdTabId = getTabId(createdTab);
             if (createdTabId === null) {
-              throw new Error('Chrome recreated a tab without an ID.');
+              throw new Error('The browser recreated a tab without an ID.');
             }
             restoredRecords.push({ input: tab, tabId: createdTabId });
             result.restoredOriginalTabIds.push(tab.originalTabId);
@@ -1017,7 +1045,7 @@ export function createChromeActiveWindowsService(
         windowId: destinationWindowId,
       });
       if (!movedGroup) {
-        throw new Error('Chrome did not return the moved tab group.');
+        throw new Error('The browser did not return the moved tab group.');
       }
       const warnings: string[] = [];
       if (activeDestinationTabId !== undefined) {
@@ -1088,7 +1116,7 @@ export function createChromeActiveWindowsService(
 
       const destination = await api.windows.create({ focused: false, tabId: firstTab.id });
       if (destination?.id === undefined) {
-        throw new Error('Chrome did not create the destination window.');
+        throw new Error('The browser did not create the destination window.');
       }
 
       const movedTabIds = [firstTab.id];

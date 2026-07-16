@@ -339,10 +339,41 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Privacy' })).toBeInTheDocument();
     expect(screen.getByText('Your tabs stay on this device.')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Reads open-tab details' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Saves locally in Chrome' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Saves locally in your browser' })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'No external data collection' })).toBeVisible();
+    const reviewLink = screen.getByRole('link', { name: 'please leave a review' });
+    expect(reviewLink).toHaveAttribute(
+      'href',
+      'https://chromewebstore.google.com/detail/weaver-window-tab-manager/lchcjicakojjacjpleolmjcjlppaeobn',
+    );
+    expect(reviewLink).toHaveAttribute('target', '_blank');
+    const issuesLink = screen.getByRole('link', { name: 'open a GitHub issue' });
+    expect(issuesLink).toHaveAttribute(
+      'href',
+      'https://github.com/satobin/weaver-tab-manager/issues',
+    );
+    expect(issuesLink).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('link', { name: 'weavertabmanager@gmail.com' })).toHaveAttribute(
+      'href',
+      'mailto:weavertabmanager@gmail.com',
+    );
+    const facts = container.querySelector('.about-facts');
+    const community = container.querySelector('.about-community');
+    expect(facts).not.toBeNull();
+    expect(facts?.nextElementSibling).toBe(community);
+    const communityParagraphs = community?.querySelectorAll('p');
+    expect(communityParagraphs).toHaveLength(3);
+    expect(communityParagraphs?.[0]).toHaveTextContent(
+      'If you enjoy this extension, please leave a review.',
+    );
+    expect(communityParagraphs?.[1]).toHaveTextContent(
+      'For issues or feature requests, please open a GitHub issue.',
+    );
+    expect(communityParagraphs?.[2]).toHaveTextContent(
+      'For other questions, email weavertabmanager@gmail.com.',
+    );
     expect(
-      screen.getByText(/saved windows, settings, and custom rules stay in Chrome/i),
+      screen.getByText(/saved windows, settings, and custom rules stay in your browser/i),
     ).toBeVisible();
     expect(screen.getByText(/does not send your tab list.*off your device/i)).toBeVisible();
     expect(screen.queryByText(/Chrome may retrieve a site's icon/i)).not.toBeInTheDocument();

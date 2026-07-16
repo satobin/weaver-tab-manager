@@ -51,7 +51,14 @@ export function distributeAcrossWindowColumns<T>(
   return columns;
 }
 
-export function estimateWindowCardHeight(window: ManagedWindow, showTabUrls: boolean): number {
+export function estimateWindowCardHeight(
+  window: ManagedWindow,
+  showTabUrls: boolean,
+  collapsed = false,
+): number {
+  if (collapsed) {
+    return 88;
+  }
   const groupHeaderCount = window.tabs.reduce(
     (count, tab, index) =>
       tab.groupId !== null && window.tabs[index - 1]?.groupId !== tab.groupId ? count + 1 : count,
