@@ -1,7 +1,7 @@
 import { CloudOff, Eye, HardDrive } from 'lucide-react';
 
 import packageMetadata from '../../package.json';
-import { CHROME_WEB_STORE_URL } from '../shared/storeLinks';
+import { STORE_REVIEW_URL } from '../shared/storeLinks';
 
 const GITHUB_ISSUES_URL = 'https://github.com/satobin/weaver-tab-manager/issues';
 
@@ -71,13 +71,15 @@ export function AboutPage() {
           </div>
         </dl>
         <div className="about-community">
-          <p>
-            If you enjoy this extension,{' '}
-            <a href={CHROME_WEB_STORE_URL} target="_blank" rel="noreferrer">
-              please leave a review
-            </a>
-            .
-          </p>
+          {STORE_REVIEW_URL ? (
+            <p>
+              If you enjoy this extension,{' '}
+              <a href={STORE_REVIEW_URL} target="_blank" rel="noreferrer">
+                please leave a review
+              </a>
+              .
+            </p>
+          ) : null}
           <p>
             For issues or feature requests, please{' '}
             <a href={GITHUB_ISSUES_URL} target="_blank" rel="noreferrer">

@@ -14,6 +14,14 @@ const DIST = join(ROOT, 'dist');
 const ARTIFACTS = join(ROOT, 'artifacts');
 const ARCHIVE_TIMESTAMP = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
 
+const RELEASE_TARGETS = {
+  chrome: {
+    archivePrefix: 'weaver-chrome-web-store',
+    metadataPrefix: 'weaver-chrome-release',
+  },
+  edge: { archivePrefix: 'weaver-edge-addons', metadataPrefix: 'weaver-edge-release' },
+};
+
 const REQUIRED_RELEASE_ENTRIES = [
   'THIRD_PARTY_NOTICES.txt',
   'app.html',
@@ -165,7 +173,7 @@ export function validateReleaseManifest(manifest, expectedVersion) {
   }
 }
 
-export function validateReleaseContents(entryContents) {
+export function validateReleaseContents(entryContents, target = 'chrome') {
   for (const [entryName, bytes] of entryContents) {
     if (!/\.(?:css|html|js)$/u.test(entryName)) {
       continue;
@@ -193,10 +201,25 @@ export function validateReleaseContents(entryContents) {
     ) {
       throw new Error(`Release JavaScript contains remote or dynamic code: ${entryName}`);
     }
+    if (target === 'edge' && /(?:chromewebstore\.google\.com|Chrome Web Store)/u.test(contents)) {
+      throw new Error(`Edge release references the Chrome Web Store: ${entryName}`);
+    }
   }
 }
 
-export async function buildRelease() {
+export function parseReleaseTarget(arguments_) {
+  const targetArgument = arguments_.find((argument) => argument.startsWith('--target='));
+  const target = targetArgument?.slice('--target='.length) || 'chrome';
+  if (!Object.prototype.hasOwnProperty.call(RELEASE_TARGETS, target)) {
+    throw new Error(`Unknown release target: ${target}`);
+  }
+  return target;
+}
+
+export async function buildRelease(target = 'chrome') {
+  if (!Object.prototype.hasOwnProperty.call(RELEASE_TARGETS, target)) {
+    throw new Error(`Unknown release target: ${target}`);
+  }
   const distInfo = await stat(DIST).catch(() => undefined);
   if (!distInfo?.isDirectory()) {
     throw new Error('dist/ does not exist. Run the production build first.');
@@ -213,11 +236,12 @@ export async function buildRelease() {
   for (const file of files) {
     entryContents.set(normalizeEntryName(file), await readFile(file));
   }
-  validateReleaseContents(entryContents);
+  validateReleaseContents(entryContents, target);
 
   await mkdir(ARTIFACTS, { recursive: true });
-  const archivePath = join(ARTIFACTS, `weaver-webstore-${manifest.version}.zip`);
-  const metadataPath = join(ARTIFACTS, `weaver-release-${manifest.version}.json`);
+  const { archivePrefix, metadataPrefix } = RELEASE_TARGETS[target];
+  const archivePath = join(ARTIFACTS, `${archivePrefix}-${manifest.version}.zip`);
+  const metadataPath = join(ARTIFACTS, `${metadataPrefix}-${manifest.version}.json`);
 
   const archive = new AdmZip();
   for (const file of files) {
@@ -237,12 +261,14 @@ export async function buildRelease() {
   validateEntryNames(verifiedEntries);
   validateReleaseContents(
     new Map(verifiedArchiveEntries.map((entry) => [entry.entryName, entry.getData()])),
+    target,
   );
 
   const archiveBytes = await readFile(archivePath);
   const sha256 = createHash('sha256').update(archiveBytes).digest('hex');
   const metadata = {
     schemaVersion: 1,
+    target,
     name: basename(archivePath),
     version: manifest.version,
     sha256,
@@ -258,5 +284,5 @@ export async function buildRelease() {
 }
 
 if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? '')) {
-  await buildRelease();
+  await buildRelease(parseReleaseTarget(process.argv.slice(2)));
 }

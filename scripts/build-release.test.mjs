@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  parseReleaseTarget,
   validateEntryNames,
   validateReleaseContents,
   validateReleaseManifest,
@@ -128,5 +129,21 @@ describe('release package contract', () => {
         new Map([['assets/app.css', '@import url("https://cdn.example.test/app.css");']]),
       ),
     ).toThrow('remote asset');
+  });
+
+  it('rejects another browser store reference in an Edge package', () => {
+    const reference = 'const store = "Chrome Web Store at chromewebstore.google.com";';
+
+    expect(() => validateReleaseContents(new Map([['assets/app.js', reference]]), 'edge')).toThrow(
+      'Edge release references the Chrome Web Store',
+    );
+    expect(() => validateReleaseContents(new Map([['assets/app.js', reference]]))).not.toThrow();
+  });
+
+  it('accepts only known release targets', () => {
+    expect(parseReleaseTarget([])).toBe('chrome');
+    expect(parseReleaseTarget(['--target=chrome'])).toBe('chrome');
+    expect(parseReleaseTarget(['--target=edge'])).toBe('edge');
+    expect(() => parseReleaseTarget(['--target=other'])).toThrow('Unknown release target');
   });
 });

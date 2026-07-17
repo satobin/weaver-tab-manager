@@ -15,7 +15,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "types": ["chrome", "vitest/globals", "node"]
+    "types": ["chrome", "vitest/globals", "node", "vite/client"]
   },
   "include": [
     "src",
