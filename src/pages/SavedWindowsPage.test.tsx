@@ -77,7 +77,6 @@ function createService(
         failures: [],
         restoredTabCount: 2,
         savedWindowRemoved: true,
-        suspendedTabCount: 1,
         warnings: restoreWarnings,
       });
     }),
@@ -154,9 +153,7 @@ describe('SavedWindowsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Restore' }));
     expect(service.restoreWindow).toHaveBeenCalledWith('saved-1');
     expect(
-      await screen.findByText(
-        'Restored 2 tabs from "Research". 1 background tab suspended. Removed it from Saved Windows.',
-      ),
+      await screen.findByText('Restored 2 tabs from "Research". Removed it from Saved Windows.'),
     ).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'No saved windows' })).toBeInTheDocument();
     expect(screen.queryByText('Research')).not.toBeInTheDocument();
@@ -182,6 +179,71 @@ describe('SavedWindowsPage', () => {
     expect(service.renameWindow).not.toHaveBeenCalled();
     expect(service.deleteWindow).not.toHaveBeenCalled();
     expect(screen.getByText('Research')).toBeInTheDocument();
+  });
+
+  it('copies a local-file URL without adding copy actions to web tabs', async () => {
+    const user = userEvent.setup();
+    const fileUrl = 'file:///Users/simont/Downloads/reference.svg';
+    const service = createService([
+      createSavedWindow({
+        tabs: [
+          {
+            active: false,
+            order: 0,
+            pinned: false,
+            title: 'Local reference',
+            url: fileUrl,
+          },
+          {
+            active: true,
+            order: 1,
+            pinned: false,
+            title: 'Web reference',
+            url: 'https://example.com/reference',
+          },
+        ],
+      }),
+    ]);
+    render(<SavedWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    expect(screen.getByRole('button', { name: 'Copy URL for Local reference' })).toHaveAttribute(
+      'title',
+      'Copy URL',
+    );
+    expect(screen.queryByRole('button', { name: 'Copy URL for Web reference' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Copy URL for Local reference' }));
+
+    await expect(navigator.clipboard.readText()).resolves.toBe(fileUrl);
+    expect(await screen.findByText('Copied URL for "Local reference".')).toBeInTheDocument();
+    expect(service.openTab).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a local-file URL copy failure', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('Clipboard blocked'));
+    const service = createService([
+      createSavedWindow({
+        tabs: [
+          {
+            active: true,
+            order: 0,
+            pinned: false,
+            title: 'Local reference',
+            url: 'file:///Users/simont/Downloads/reference.svg',
+          },
+        ],
+      }),
+    ]);
+    render(<SavedWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(screen.getByRole('button', { name: 'Copy URL for Local reference' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The browser could not copy that URL.',
+    );
   });
 
   it('surfaces a saved-tab open failure without collapsing the preview', async () => {
@@ -238,7 +300,6 @@ describe('SavedWindowsPage', () => {
       ],
       restoredTabCount: 1,
       savedWindowRemoved: false,
-      suspendedTabCount: 0,
       warnings: [],
     });
     render(<SavedWindowsPage service={service} />);
@@ -254,17 +315,14 @@ describe('SavedWindowsPage', () => {
 
   it('offers Keep saved after a complete restore that includes warnings', async () => {
     const user = userEvent.setup();
-    const service = createService(
-      [createSavedWindow()],
-      ['One background tab could not be suspended.'],
-    );
+    const service = createService([createSavedWindow()], ['One tab group could not be restored.']);
     render(<SavedWindowsPage service={service} />);
 
     await user.click(await screen.findByRole('button', { name: 'Restore' }));
 
     expect(
       await screen.findByText(
-        'Restored 2 tabs from "Research". 1 background tab suspended. Removed it from Saved Windows. One background tab could not be suspended.',
+        'Restored 2 tabs from "Research". Removed it from Saved Windows. One tab group could not be restored.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Keep saved' })).toBeInTheDocument();

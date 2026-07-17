@@ -10,14 +10,17 @@ import {
 function createTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
     active: false,
-    discarded: true,
+    discarded: false,
     groupId: -1,
     highlighted: false,
     id: 42,
     incognito: false,
     index: 0,
     pinned: false,
+    pendingUrl: 'https://docs.example/plan',
     selected: false,
+    status: 'loading',
+    url: 'about:blank',
     windowId: 1,
     ...overrides,
   } as chrome.tabs.Tab;
@@ -64,9 +67,9 @@ describe('restored tab metadata', () => {
       { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
     ]);
 
-    const suspendedTab = createTab();
-    const fallback = await service.resolve([suspendedTab]);
-    expect(applyRestoredTabMetadata(suspendedTab, fallback)).toMatchObject({
+    const loadingTab = createTab();
+    const fallback = await service.resolve([loadingTab]);
+    expect(applyRestoredTabMetadata(loadingTab, fallback)).toMatchObject({
       title: 'Quarterly plan',
       url: 'https://docs.example/plan',
     });

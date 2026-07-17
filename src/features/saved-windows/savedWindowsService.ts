@@ -46,7 +46,6 @@ export interface SavedWindowsChromeApi extends RestoredTabMetadataChromeApi {
   };
   tabs: {
     create: (createProperties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>;
-    discard: (tabId?: number) => Promise<chrome.tabs.Tab | undefined>;
     group: (options: chrome.tabs.GroupOptions) => Promise<number>;
     query: (queryInfo: chrome.tabs.QueryInfo) => Promise<chrome.tabs.Tab[]>;
     remove: (tabIds: number[]) => Promise<void>;
@@ -87,7 +86,6 @@ export interface RestoreSavedWindowResult {
   failures: SavedTabRestoreFailure[];
   restoredTabCount: number;
   savedWindowRemoved: boolean;
-  suspendedTabCount: number;
   warnings: string[];
 }
 
@@ -353,7 +351,6 @@ export function createChromeSavedWindowsService(
         const destinationWindowId = destination.id;
         const restoredTabIdsByOrder = new Map<number, number>();
         const restoredMetadataRegistrations: RestoredTabMetadataRegistration[] = [];
-        const suspendedTabIds = new Set<number>();
         const failures: SavedTabRestoreFailure[] = [];
         const warnings: string[] = [];
         let placeholderTabIds = (destination.tabs ?? [])
@@ -386,19 +383,6 @@ export function createChromeSavedWindowsService(
             }
             restoredTabIdsByOrder.set(tab.order, tabId);
             restoredMetadataRegistrations.push({ tabId, title: tab.title, url: tab.url });
-            if (tab.order !== plan.activeTabOrder) {
-              try {
-                const discardedTab = await api.tabs.discard(tabId);
-                if (!discardedTab?.discarded) {
-                  throw new Error('The browser did not suspend the tab.');
-                }
-                suspendedTabIds.add(tabId);
-              } catch (error) {
-                warnings.push(
-                  `"${tab.title}" could not be suspended: ${describeChromeError(error)}`,
-                );
-              }
-            }
           } catch (error) {
             failures.push({
               message: describeChromeError(error),
@@ -414,7 +398,7 @@ export function createChromeSavedWindowsService(
             await restoredTabMetadataService.register(restoredMetadataRegistrations);
           } catch (error) {
             warnings.push(
-              `Restored tab titles and URLs could not be retained while suspended: ${describeChromeError(error)}`,
+              `Restored tab titles and URLs could not be retained while pages load: ${describeChromeError(error)}`,
             );
           }
         }
@@ -430,7 +414,6 @@ export function createChromeSavedWindowsService(
           try {
             await api.tabs.update(candidateTabId, { active: true });
             activeTabId = candidateTabId;
-            suspendedTabIds.delete(candidateTabId);
             break;
           } catch (error) {
             activeSelectionError = error;
@@ -447,24 +430,6 @@ export function createChromeSavedWindowsService(
           activeTabId !== preferredActiveTabId
         ) {
           warnings.push('The intended active tab could not be selected; another tab was focused.');
-        }
-
-        if (activeTabId !== undefined) {
-          for (const tab of plan.tabs) {
-            const tabId = restoredTabIdsByOrder.get(tab.order);
-            if (tabId === undefined || tabId === activeTabId || suspendedTabIds.has(tabId)) {
-              continue;
-            }
-            try {
-              const discardedTab = await api.tabs.discard(tabId);
-              if (!discardedTab?.discarded) {
-                throw new Error('The browser did not suspend the tab.');
-              }
-              suspendedTabIds.add(tabId);
-            } catch (error) {
-              warnings.push(`"${tab.title}" could not be suspended: ${describeChromeError(error)}`);
-            }
-          }
         }
 
         if (activeTabId !== undefined && placeholderTabIds.length > 0) {
@@ -551,7 +516,6 @@ export function createChromeSavedWindowsService(
           failures,
           restoredTabCount: restoredTabIdsByOrder.size,
           savedWindowRemoved,
-          suspendedTabCount: suspendedTabIds.size,
           warnings,
         };
       });

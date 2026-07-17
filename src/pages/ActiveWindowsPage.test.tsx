@@ -10,6 +10,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../app/routes';
 import {
   type ActiveWindowsService,
   type RestorableTab,
@@ -130,6 +131,62 @@ function createService(): ActiveWindowsService {
   };
 }
 
+function createDuplicateSelectionService(): ActiveWindowsService {
+  const service = createService();
+  const duplicateUrl = 'https://example.test/same-page';
+  vi.mocked(service.loadSnapshot).mockResolvedValue(
+    createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          groups: [
+            {
+              collapsed: false,
+              color: 'purple',
+              id: 7,
+              title: 'Planning',
+              windowId: 1,
+            },
+          ],
+          tabs: [
+            createManagedTab({
+              active: true,
+              groupId: 7,
+              id: 101,
+              title: 'Keep this tab',
+              url: duplicateUrl,
+              windowId: 1,
+            }),
+            createManagedTab({
+              groupId: 7,
+              id: 102,
+              index: 1,
+              title: 'Hidden selection',
+              url: 'https://example.test/other',
+              windowId: 1,
+            }),
+          ],
+        }),
+        createManagedWindow({
+          focused: false,
+          id: 2,
+          isCurrent: false,
+          label: 'Window 2',
+          tabs: [
+            createManagedTab({
+              active: true,
+              id: 201,
+              title: 'Close this tab',
+              url: duplicateUrl,
+              windowId: 2,
+            }),
+          ],
+        }),
+      ],
+    }),
+  );
+  return service;
+}
+
 function createSettingsService(
   rules: DedupeRule[],
   showTabUrls = true,
@@ -187,17 +244,277 @@ function createSavedWindowsService(): SavedWindowsService {
 }
 
 afterEach(() => {
+  window.history.replaceState(
+    null,
+    '',
+    `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}`,
+  );
   vi.unstubAllGlobals();
 });
 
 describe('ActiveWindowsPage', () => {
+  it('opens duplicate tabs view from the popup launch route', async () => {
+    const service = createService();
+    const duplicateUrl = 'https://example.test/same-page';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                title: 'Keep this tab',
+                url: duplicateUrl,
+                windowId: 1,
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 201,
+                title: 'Close this tab',
+                url: duplicateUrl,
+                windowId: 2,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_LAUNCH_ROUTES.duplicateTabs}`,
+    );
+
+    render(<ActiveWindowsPage service={service} />);
+
+    const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
+    expect(duplicateBanner).toHaveTextContent('Green tabs stay open. Red tabs will close.');
+    const bannerButtons = within(duplicateBanner).getAllByRole('button');
+    expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
+    expect(within(bannerButtons[0] as HTMLElement).getByText('1')).toHaveClass('toolbar-count');
+    expect(bannerButtons[1]).toHaveAccessibleName('Exit duplicate tabs view');
+    expect(screen.getByRole('button', { name: 'Show duplicate tabs only' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect((await screen.findByText('Keep this tab')).closest('li')).toHaveClass(
+      'is-duplicate-preview-keep',
+    );
+    expect(screen.getByText('Close this tab').closest('li')).toHaveClass(
+      'is-duplicate-preview-close',
+    );
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+  });
+
+  it('clears the query and selected group when the toolbar enters duplicate tabs view', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const selectGroup = await screen.findByRole('checkbox', {
+      name: 'Select all tabs in Planning',
+    });
+    const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
+    await user.click(selectGroup);
+    await user.type(search, 'Hidden selection');
+    expect(screen.getByRole('button', { name: 'Clear selected 2' })).toBeInTheDocument();
+
+    const previewButton = screen.getByRole('button', { name: 'Show duplicate tabs only' });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+
+    expect(search).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Clear selected 2' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
+    expect(screen.getByRole('checkbox', { name: 'Select all tabs in Planning' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Hidden selection' })).not.toBeChecked();
+  });
+
+  it('clears the query and selected tab when the popup route enters duplicate tabs view', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const hiddenSelection = await screen.findByRole('checkbox', {
+      name: 'Select Hidden selection',
+    });
+    const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
+    await user.click(hiddenSelection);
+    await user.type(search, 'Hidden selection');
+    expect(screen.getByRole('button', { name: 'Clear selected 1' })).toBeInTheDocument();
+
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_LAUNCH_ROUTES.duplicateTabs}`,
+    );
+    fireEvent(window, new Event('hashchange'));
+
+    expect(await screen.findByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
+    expect(search).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Clear selected 1' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+
+    await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
+    expect(screen.getByRole('checkbox', { name: 'Select Hidden selection' })).not.toBeChecked();
+  });
+
+  it('limits duplicate-view group selection and bulk actions to visible duplicate tabs', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [101], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    const selectGroup = screen.getByRole('checkbox', {
+      name: 'Select all tabs in Planning',
+    });
+    const groupFocusButton = screen.getByRole('button', {
+      name: 'Focus first tab in Planning',
+    });
+
+    expect(groupFocusButton).toHaveProperty('draggable', false);
+    const partialGroupDragData = { effectAllowed: '', setData: vi.fn() };
+    fireEvent.dragStart(groupFocusButton, { dataTransfer: partialGroupDragData });
+    expect(partialGroupDragData.setData).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Save Window 1' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Suspend tabs in Window 1' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Unsuspend all tabs in Window 1' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close Window 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sort Window 1' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge windows' })).toBeDisabled();
+    within(screen.getByRole('group', { name: 'Sort all windows' }))
+      .getAllByRole('button')
+      .forEach((button) => expect(button).toBeDisabled());
+
+    await user.click(selectGroup);
+
+    expect(selectGroup).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Open in new window 1' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Close 1' }));
+    await waitFor(() => expect(service.closeTabs).toHaveBeenCalledWith([101]));
+    expect(service.closeTabs).not.toHaveBeenCalledWith(expect.arrayContaining([102]));
+  });
+
+  it('clears duplicate-view selection whenever the search changes', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    await user.click(screen.getByRole('checkbox', { name: 'Select Keep this tab' }));
+    expect(screen.getByRole('button', { name: 'Close 1' })).toBeEnabled();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' }), {
+      target: { value: 'Close this' },
+    });
+
+    expect(screen.getByRole('checkbox', { name: 'Select Keep this tab' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Open in new window 0' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close 0' })).toBeDisabled();
+    expect(service.closeTabs).not.toHaveBeenCalled();
+  });
+
+  it('clears a selected keeper when closing its duplicate removes the live duplicate group', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    const initialSnapshot = await service.loadSnapshot();
+    const postCloseSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          groups: [
+            {
+              collapsed: false,
+              color: 'purple',
+              id: 7,
+              title: 'Planning',
+              windowId: 1,
+            },
+          ],
+          tabs: [
+            createManagedTab({
+              active: true,
+              groupId: 7,
+              id: 101,
+              title: 'Keep this tab',
+              url: 'https://example.test/same-page',
+              windowId: 1,
+            }),
+            createManagedTab({
+              groupId: 7,
+              id: 102,
+              index: 1,
+              title: 'Hidden selection',
+              url: 'https://example.test/other',
+              windowId: 1,
+            }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockReset()
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockResolvedValue(postCloseSnapshot);
+    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    await user.click(screen.getByRole('checkbox', { name: 'Select Keep this tab' }));
+    await user.click(
+      within(screen.getByRole('status', { name: 'Duplicate tabs view' })).getByRole('button', {
+        name: 'Close duplicate tabs: 1 tab',
+      }),
+    );
+
+    const emptyHeading = await screen.findByRole('heading', { name: 'No duplicate tabs' });
+    expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open in new window 0' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close 0' })).toBeDisabled();
+    expect(service.closeTabs).toHaveBeenCalledWith([201]);
+
+    await user.click(
+      within(emptyHeading.closest('.filter-empty') as HTMLElement).getByRole('button', {
+        name: 'Show all tabs',
+      }),
+    );
+    expect(screen.getByRole('checkbox', { name: 'Select Keep this tab' })).not.toBeChecked();
+  });
+
   it('renders window identity, groups, tab state, and summary', async () => {
     const service = createService();
     const { container } = render(<ActiveWindowsPage service={service} />);
 
     expect(await screen.findByRole('heading', { name: 'Window 1' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Window 2' })).toBeInTheDocument();
-    expect(container.querySelector('.window-browser-icon')).toHaveAttribute('width', '24');
+    expect(container.querySelector('.window-browser-icon')).not.toBeInTheDocument();
     expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus first tab in Planning' })).toBeInTheDocument();
@@ -206,8 +523,9 @@ describe('ActiveWindowsPage', () => {
     const suspendedButton = screen.getByRole('button', {
       name: 'Unsuspend Issue tracker without opening it',
     });
-    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend without opening this tab');
-    expect(screen.getByText('Suspended')).toBeVisible();
+    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend');
+    expect(suspendedButton.querySelector('.tab-suspended-icon-pause')).toBeInTheDocument();
+    expect(suspendedButton.querySelector('.tab-suspended-icon-play')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toHaveAttribute(
       'aria-describedby',
       'tab-102-suspended-description',
@@ -215,7 +533,6 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' }).closest('li')).toHaveClass(
       'is-suspended',
     );
-    expect(suspendedButton).toHaveTextContent('Suspended');
     expect(suspendedButton).toHaveTextContent('Reloads when opened.');
     expect(screen.getByRole('button', { name: 'Focus Quarterly plan' })).toHaveAttribute(
       'aria-current',
@@ -230,10 +547,6 @@ describe('ActiveWindowsPage', () => {
     expect(currentCard).toHaveClass('is-focused-window');
     expect(otherCard).not.toHaveClass('is-focused-window');
     expect(screen.queryByText('Focused')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Focus Window 1' })).toHaveAttribute(
-      'aria-current',
-      'true',
-    );
     expect(screen.getByRole('button', { name: 'Window 1' })).toHaveAttribute(
       'aria-current',
       'true',
@@ -405,7 +718,7 @@ describe('ActiveWindowsPage', () => {
     const service = createService();
     render(<ActiveWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Focus Window 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Window 1' }));
     expect(service.focusWindow).toHaveBeenCalledWith(1);
 
     await user.click(screen.getByRole('button', { name: 'Window 2' }));
@@ -462,9 +775,6 @@ describe('ActiveWindowsPage', () => {
       name: 'Collapse Window 1',
     });
     const titleButton = within(header as HTMLElement).getByRole('button', { name: 'Window 1' });
-    const iconButton = within(header as HTMLElement).getByRole('button', {
-      name: 'Focus Window 1',
-    });
     const sortDirectionButton = within(header as HTMLElement).getByRole('button', {
       name: 'Sort Window 1 direction A to Z',
     });
@@ -474,7 +784,6 @@ describe('ActiveWindowsPage', () => {
     expect(collapseButton.parentElement).toBe(header);
     expect(collapseButton).not.toBe(titleButton);
     expect(collapseButton).not.toContainElement(selectAllCheckbox);
-    expect(collapseButton).not.toContainElement(iconButton);
     expect(collapseButton).not.toContainElement(titleButton);
     expect(collapseButton).not.toContainElement(sortDirectionButton);
     expect(collapseButton).toHaveAttribute('aria-controls', 'window-1-tabs');
@@ -487,10 +796,6 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusWindow).toHaveBeenCalledWith(1);
     expect(card).not.toHaveClass('is-collapsed');
 
-    await user.click(iconButton);
-    expect(service.focusWindow).toHaveBeenCalledTimes(2);
-    expect(card).not.toHaveClass('is-collapsed');
-
     await user.click(sortDirectionButton);
     expect(card).not.toHaveClass('is-collapsed');
 
@@ -500,7 +805,7 @@ describe('ActiveWindowsPage', () => {
     expect(
       within(header as HTMLElement).getByRole('button', { name: 'Expand Window 1' }),
     ).toHaveAttribute('aria-expanded', 'false');
-    expect(within(header as HTMLElement).getByText('Collapsed')).toBeVisible();
+    expect(within(header as HTMLElement).queryByText('Collapsed')).not.toBeInTheDocument();
     expect(
       within(card as HTMLElement).queryByRole('button', { name: 'Focus Quarterly plan' }),
     ).not.toBeInTheDocument();
@@ -710,7 +1015,7 @@ describe('ActiveWindowsPage', () => {
       'indeterminate',
       true,
     );
-    await user.click(screen.getByRole('button', { name: 'New window 2' }));
+    await user.click(screen.getByRole('button', { name: 'Open in new window 2' }));
 
     await waitFor(() => {
       expect(service.moveTabsToNewWindow).toHaveBeenCalledWith([101, 102], []);
@@ -735,7 +1040,7 @@ describe('ActiveWindowsPage', () => {
     });
     await user.click(groupCheckbox);
     expect(groupCheckbox).toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'New window 2' }));
+    await user.click(screen.getByRole('button', { name: 'Open in new window 2' }));
 
     await waitFor(() => {
       expect(service.moveTabsToNewWindow).toHaveBeenCalledWith([101, 102], [7]);
@@ -748,7 +1053,7 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     await user.click(await screen.findByRole('checkbox', { name: 'Select Reference' }));
-    const newWindowButton = screen.getByRole('button', { name: 'New window 1' });
+    const newWindowButton = screen.getByRole('button', { name: 'Open in new window 1' });
 
     expect(newWindowButton).toBeDisabled();
     await user.click(newWindowButton);
@@ -901,68 +1206,62 @@ describe('ActiveWindowsPage', () => {
     expect(screen.queryByRole('menu', { name: 'Sort all windows by' })).not.toBeInTheDocument();
   });
 
-  it('merges explicit source windows into the selected destination', async () => {
+  it('merges selected windows in display order', async () => {
     const user = userEvent.setup();
     const service = createService();
-    const { container } = render(<ActiveWindowsPage service={service} />);
+    render(<ActiveWindowsPage service={service} />);
 
     const mergeButton = await screen.findByRole('button', { name: 'Merge windows' });
-    const destinationCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
-    const sourceCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
+    expect(mergeButton).toHaveAttribute('aria-controls', 'merge-windows-dialog');
+    expect(mergeButton).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(mergeButton).toHaveClass('toolbar-button', 'topbar-merge-button');
+    expect(mergeButton).not.toHaveClass('merge-apply-button');
+    const firstCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    const secondCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
     vi.spyOn(mergeButton, 'getBoundingClientRect').mockReturnValue({ left: 200 } as DOMRect);
     await user.click(mergeButton);
     const dialog = screen.getByRole('dialog', { name: 'Merge windows' });
     expect(dialog.parentElement).toHaveClass('merge-control');
     expect(dialog).toHaveStyle({ left: '0px' });
     expect(dialog).toBeInTheDocument();
-    const destinationTrigger = screen.getByRole('button', {
-      name: 'Destination: Window 1 (2)',
-    });
-    expect(screen.queryByRole('combobox', { name: 'Destination' })).not.toBeInTheDocument();
-    expect(destinationCard).toHaveClass('is-focused-window');
-    expect(destinationCard).not.toHaveClass('is-merge-destination');
-    expect(sourceCard).not.toHaveClass('is-merge-source');
-    expect(container.querySelector('.merge-role-label')).not.toBeInTheDocument();
-    expect(dialog.querySelector('.merge-color-swatch')).not.toBeInTheDocument();
-
-    await user.click(destinationTrigger);
-    const destinationMenu = screen.getByRole('menu', { name: 'Destination' });
-    expect(destinationMenu.parentElement).toBe(document.body);
+    expect(within(dialog).getByText('0 selected')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Destination')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Select windows')).not.toBeInTheDocument();
     expect(
-      within(destinationMenu).getByRole('menuitemradio', {
-        name: /Window 1.*2 tabs.*Quarterly plan/,
-      }),
-    ).toHaveAttribute('aria-checked', 'true');
-    expect(
-      within(destinationMenu).getByRole('menuitemradio', {
-        name: /Window 2.*1 tab.*Reference/,
-      }),
-    ).toBeInTheDocument();
-    await user.click(
-      within(destinationMenu).getByRole('menuitemradio', { name: /Window 2.*1 tab/ }),
-    );
-    expect(screen.getByRole('dialog', { name: 'Merge windows' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Destination: Window 2 (1)' })).toBeInTheDocument();
-    expect(sourceCard).not.toHaveClass('is-merge-destination');
-
-    const sourceCheckbox = within(dialog).getByRole('checkbox', {
+      within(dialog).queryByText('The first selected window in the list stays open.'),
+    ).not.toBeInTheDocument();
+    const firstWindowCheckbox = within(dialog).getByRole('checkbox', {
       name: /Window 1.*Quarterly plan.*2 tabs/,
+    });
+    const secondWindowCheckbox = within(dialog).getByRole('checkbox', {
+      name: /Window 2.*Reference.*1 tab/,
     });
     const selectAll = within(dialog).getByRole('button', { name: 'Select all' });
     expect(selectAll.closest('footer')).toBe(dialog.querySelector('footer'));
     expect(selectAll.querySelector('.lucide-list-checks')).toBeInTheDocument();
     await user.click(selectAll);
-    expect(sourceCheckbox).toBeChecked();
+    expect(firstWindowCheckbox).toBeChecked();
+    expect(secondWindowCheckbox).toBeChecked();
     const clearAll = within(dialog).getByRole('button', { name: 'Clear all' });
     expect(clearAll.querySelector('.lucide-list-x')).toBeInTheDocument();
     await user.click(clearAll);
-    expect(sourceCheckbox).not.toBeChecked();
-    await user.click(sourceCheckbox);
-    expect(destinationCard).toHaveClass('is-merge-source');
-    expect(sourceCheckbox.closest('label')).toHaveClass('is-selected');
-    await user.click(screen.getByRole('button', { name: 'Merge 2 windows' }));
+    expect(firstWindowCheckbox).not.toBeChecked();
+    expect(secondWindowCheckbox).not.toBeChecked();
 
-    await waitFor(() => expect(service.mergeWindows).toHaveBeenCalledWith([2, 1]));
+    const applyButton = within(dialog).getByRole('button', { name: 'Merge windows' });
+    expect(applyButton).toBeDisabled();
+    await user.click(secondWindowCheckbox);
+    expect(applyButton).toBeDisabled();
+    expect(secondWindowCheckbox).toHaveFocus();
+    expect(secondCard).toHaveClass('is-merge-selected');
+    await user.click(firstWindowCheckbox);
+    expect(firstCard).toHaveClass('is-merge-selected');
+    expect(firstWindowCheckbox.closest('label')).toHaveClass('is-selected');
+    const enabledApplyButton = within(dialog).getByRole('button', { name: 'Merge 2 windows' });
+    expect(enabledApplyButton).toHaveClass('toolbar-button', 'merge-apply-button');
+    await user.click(enabledApplyButton);
+
+    await waitFor(() => expect(service.mergeWindows).toHaveBeenCalledWith([1, 2]));
     expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
   });
 
@@ -977,20 +1276,34 @@ describe('ActiveWindowsPage', () => {
     expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
   });
 
-  it('lets the destination menu consume Escape before closing Merge', async () => {
+  it('closes Merge without stealing focus when keyboard focus leaves the dialog', async () => {
     const user = userEvent.setup();
     render(<ActiveWindowsPage service={createService()} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Merge windows' }));
-    await user.click(screen.getByRole('button', { name: 'Destination: Window 1 (2)' }));
-    expect(screen.getByRole('menu', { name: 'Destination' })).toBeInTheDocument();
+    const mergeButton = await screen.findByRole('button', { name: 'Merge windows' });
+    await user.click(mergeButton);
+    const dialog = screen.getByRole('dialog', { name: 'Merge windows' });
+    const selectAllButton = within(dialog).getByRole('button', { name: 'Select all' });
 
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('menu', { name: 'Destination' })).not.toBeInTheDocument();
+    selectAllButton.focus();
+    await user.tab();
+
+    expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
+    expect(mergeButton).not.toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('closes Merge with Escape', async () => {
+    const user = userEvent.setup();
+    render(<ActiveWindowsPage service={createService()} />);
+
+    const mergeButton = await screen.findByRole('button', { name: 'Merge windows' });
+    await user.click(mergeButton);
     expect(screen.getByRole('dialog', { name: 'Merge windows' })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
+    await waitFor(() => expect(mergeButton).toHaveFocus());
   });
 
   it('removes duplicates while keeping the active copy in the current window', async () => {
@@ -1057,6 +1370,373 @@ describe('ActiveWindowsPage', () => {
       expect(screen.queryByText('2 duplicate tabs restored.')).not.toBeInTheDocument(),
     );
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
+  it('previews the duplicate keeper and closures without changing tabs', async () => {
+    class ResizeObserverMock {
+      readonly disconnect = vi.fn();
+      readonly unobserve = vi.fn();
+
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe = (target: Element) => {
+        this.callback([{ contentRect: { width: 1412 }, target } as ResizeObserverEntry], this);
+      };
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/same';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                title: 'Keep this tab',
+                url: duplicateUrl,
+                windowId: 1,
+              }),
+              createManagedTab({
+                active: false,
+                id: 102,
+                index: 1,
+                title: 'Unrelated tab',
+                url: 'https://example.test/other',
+                windowId: 1,
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 201,
+                title: 'Close this tab',
+                url: duplicateUrl,
+                windowId: 2,
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 3,
+            isCurrent: false,
+            label: 'Window 3',
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 301,
+                title: 'Third window tab',
+                url: 'https://example.test/third',
+                windowId: 3,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    const { container } = render(<ActiveWindowsPage service={service} />);
+
+    await screen.findByRole('heading', { name: 'Window 3' });
+    await waitFor(() => expect(container.querySelectorAll('.window-grid-column')).toHaveLength(3));
+    const initialColumns = container.querySelectorAll('.window-grid-column');
+    expect(
+      within(initialColumns[0] as HTMLElement).getByRole('heading', { name: 'Window 1' }),
+    ).toBeInTheDocument();
+    expect(
+      within(initialColumns[1] as HTMLElement).getByRole('heading', { name: 'Window 2' }),
+    ).toBeInTheDocument();
+    expect(
+      within(initialColumns[2] as HTMLElement).getByRole('heading', { name: 'Window 3' }),
+    ).toBeInTheDocument();
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+
+    const previewToggle = screen.getByRole('button', { name: 'Show duplicate tabs only' });
+    expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
+    expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
+    expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
+      'Green tabs stay open. Red tabs will close.',
+    );
+    expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
+    expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(
+      'is-duplicate-preview-keep',
+    );
+    expect(screen.getByText('Close this tab').closest('li')).toHaveClass(
+      'is-duplicate-preview-close',
+    );
+    expect(screen.queryByText('Unrelated tab')).not.toBeInTheDocument();
+    expect(screen.queryByText('Third window tab')).not.toBeInTheDocument();
+    const previewColumns = container.querySelectorAll('.window-grid-column');
+    expect(previewColumns).toHaveLength(3);
+    expect(
+      within(previewColumns[0] as HTMLElement).getByRole('heading', { name: 'Window 1' }),
+    ).toBeInTheDocument();
+    expect(
+      within(previewColumns[1] as HTMLElement).getByRole('heading', { name: 'Window 2' }),
+    ).toBeInTheDocument();
+    expect(previewColumns[2]).toBeEmptyDOMElement();
+    expect(service.closeTabs).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
+
+    expect(await screen.findByText('Unrelated tab')).toBeInTheDocument();
+    expect(screen.getByText('Third window tab')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show duplicate tabs only' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('filters duplicate groups atomically and closes only the visible group', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const createDuplicateSnapshot = (includeFirstCopy: boolean) =>
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                title: 'Needle keeper',
+                url: 'https://example.test/first-duplicate',
+                windowId: 1,
+              }),
+              createManagedTab({
+                id: 102,
+                index: 1,
+                title: 'Other keeper',
+                url: 'https://example.test/second-duplicate',
+                windowId: 1,
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              ...(includeFirstCopy
+                ? [
+                    createManagedTab({
+                      active: true,
+                      id: 201,
+                      title: 'First mirrored copy',
+                      url: 'https://example.test/first-duplicate',
+                      windowId: 2,
+                    }),
+                  ]
+                : []),
+              createManagedTab({
+                active: !includeFirstCopy,
+                id: 202,
+                index: includeFirstCopy ? 1 : 0,
+                title: 'Other mirrored copy',
+                url: 'https://example.test/second-duplicate',
+                windowId: 2,
+              }),
+            ],
+          }),
+        ],
+      });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(createDuplicateSnapshot(true))
+      .mockResolvedValue(createDuplicateSnapshot(false));
+    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' }),
+      'Needle',
+    );
+
+    expect(screen.getByText('Needle keeper').closest('li')).toHaveClass(
+      'is-duplicate-preview-keep',
+    );
+    expect(screen.getByText('First mirrored copy').closest('li')).toHaveClass(
+      'is-duplicate-preview-close',
+    );
+    expect(screen.queryByText('Other keeper')).not.toBeInTheDocument();
+    expect(screen.queryByText('Other mirrored copy')).not.toBeInTheDocument();
+    const closeButton = screen.getByRole('button', {
+      name: 'Close filtered duplicate tabs 1',
+    });
+    expect(closeButton).toHaveAttribute('title', 'Close filtered duplicate tabs');
+    expect(
+      within(screen.getByRole('status', { name: 'Duplicate tabs view' })).getByRole('button', {
+        name: 'Close filtered duplicate tabs: 1 tab',
+      }),
+    ).toHaveAttribute('title', 'Close filtered duplicate tabs');
+
+    await user.click(closeButton);
+
+    expect(service.closeTabs).toHaveBeenCalledWith([201]);
+    expect(await screen.findByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
+    const noMatches = await screen.findByRole('heading', {
+      name: 'No matching duplicate tabs',
+    });
+    await user.click(
+      within(noMatches.closest('.filter-empty') as HTMLElement).getByRole('button', {
+        name: 'Clear filter',
+      }),
+    );
+    expect(await screen.findByText('Other keeper')).toBeInTheDocument();
+    expect(screen.getByText('Other mirrored copy')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(service.restoreTabs).toHaveBeenCalledWith([
+      expect.objectContaining({ originalTabId: 201 }),
+    ]);
+  });
+
+  it('distinguishes a duplicate filter with no matching groups and clears it', async () => {
+    const user = userEvent.setup();
+    render(<ActiveWindowsPage service={createDuplicateSelectionService()} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
+    await user.type(search, 'No tab has this text');
+
+    const heading = screen.getByRole('heading', { name: 'No matching duplicate tabs' });
+    const emptyState = heading.closest('.filter-empty');
+    expect(emptyState).not.toBeNull();
+    const closeButton = screen.getByRole('button', {
+      name: 'Close filtered duplicate tabs 0',
+    });
+    expect(closeButton).toBeDisabled();
+    const bannerCloseButton = within(
+      screen.getByRole('status', { name: 'Duplicate tabs view' }),
+    ).getByRole('button', { name: 'Close filtered duplicate tabs: 0 tabs' });
+    expect(bannerCloseButton).toBeDisabled();
+    expect(within(bannerCloseButton).getByText('0')).toHaveClass('toolbar-count');
+
+    await user.click(
+      within(emptyState as HTMLElement).getByRole('button', { name: 'Clear filter' }),
+    );
+
+    expect(search).toHaveValue('');
+    expect(await screen.findByText('Keep this tab')).toBeInTheDocument();
+    expect(screen.getByText('Close this tab')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled();
+  });
+
+  it('reports a genuinely empty duplicate plan without calling it a filter miss', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_LAUNCH_ROUTES.duplicateTabs}`,
+    );
+    render(<ActiveWindowsPage service={createService()} />);
+
+    const heading = await screen.findByRole('heading', { name: 'No duplicate tabs' });
+    const emptyState = heading.closest('.filter-empty');
+    expect(emptyState).not.toBeNull();
+    expect(
+      within(emptyState as HTMLElement).getByRole('button', { name: 'Show all tabs' }),
+    ).toBeInTheDocument();
+    expect(
+      within(emptyState as HTMLElement).queryByRole('button', { name: 'Clear filter' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'No matching duplicate tabs' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('waits for advanced duplicate settings before declaring the plan empty', async () => {
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                title: 'Workspace one',
+                url: 'https://app.example.test/one',
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 201,
+                title: 'Workspace two',
+                url: 'https://app.example.test/two',
+                windowId: 2,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    const rules: DedupeRule[] = [
+      {
+        comparisonMode: 'host',
+        enabled: true,
+        glob: 'app.example.test/*',
+        id: 'custom-host',
+      },
+    ];
+    const loadedSettings = {
+      ...DEFAULT_SETTINGS,
+      advancedDuplicateMatchingEnabled: true,
+      deduplicationRules: rules,
+    };
+    let resolveSettings: (settings: typeof loadedSettings) => void = () => undefined;
+    const settingsPromise = new Promise<typeof loadedSettings>((resolve) => {
+      resolveSettings = resolve;
+    });
+    const settingsService = createSettingsService(rules);
+    vi.mocked(settingsService.load).mockReturnValue(settingsPromise);
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_LAUNCH_ROUTES.duplicateTabs}`,
+    );
+
+    render(<ActiveWindowsPage service={service} settingsService={settingsService} />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Loading duplicate tabs…' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
+
+    resolveSettings(loadedSettings);
+    await act(() => settingsPromise);
+
+    expect(await screen.findByText('Workspace one')).toBeInTheDocument();
+    expect(screen.getByText('Workspace two')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Loading duplicate tabs…' }),
+    ).not.toBeInTheDocument();
   });
 
   it('applies a saved site-wide rule to different paths', async () => {

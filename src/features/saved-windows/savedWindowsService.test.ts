@@ -144,21 +144,21 @@ function createApi(initialWindows: SavedWindow[] = []) {
       update: vi.fn(() => Promise.resolve(undefined)),
     },
     tabs: {
-      create: vi.fn((properties: chrome.tabs.CreateProperties) =>
-        Promise.resolve(
+      create: vi.fn((properties: chrome.tabs.CreateProperties) => {
+        const requestedUrl =
+          typeof properties.url === 'string' ? properties.url : properties.url?.[0];
+        return Promise.resolve(
           createChromeTab({
             active: properties.active ?? false,
             id: nextTabId++,
             index: properties.index ?? 0,
+            pendingUrl: requestedUrl,
             pinned: properties.pinned ?? false,
-            url: typeof properties.url === 'string' ? properties.url : properties.url?.[0],
+            url: 'about:blank',
             windowId: properties.windowId ?? 9,
           }),
-        ),
-      ),
-      discard: vi.fn((tabId?: number) =>
-        Promise.resolve(createChromeTab({ discarded: true, id: tabId, windowId: 9 })),
-      ),
+        );
+      }),
       group: vi.fn(() => Promise.resolve(70)),
       query: vi.fn(() => Promise.resolve([createChromeTab({ active: true, id: 90, windowId: 9 })])),
       remove: vi.fn(() => {
@@ -234,14 +234,14 @@ describe('createChromeSavedWindowsService', () => {
     ]);
   });
 
-  it('uses restored session metadata when saving suspended tabs again', async () => {
+  it('uses restored session metadata when saving a recently restored tab again', async () => {
     const fake = createApi();
-    const suspendedTab = fake.sourceWindow.tabs?.[1];
-    if (!suspendedTab) {
-      throw new Error('Missing suspended tab fixture');
+    const restoredTab = fake.sourceWindow.tabs?.[1];
+    if (!restoredTab) {
+      throw new Error('Missing restored tab fixture');
     }
-    delete suspendedTab.title;
-    delete suspendedTab.url;
+    delete restoredTab.title;
+    delete restoredTab.url;
     const restoredTabMetadataService: RestoredTabMetadataService = {
       register: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
@@ -412,7 +412,6 @@ describe('createChromeSavedWindowsService', () => {
       failures: [],
       restoredTabCount: 3,
       savedWindowRemoved: true,
-      suspendedTabCount: 2,
       warnings: [],
     });
     expect(fake.api.tabs.create).toHaveBeenNthCalledWith(1, {
@@ -440,9 +439,6 @@ describe('createChromeSavedWindowsService', () => {
       createProperties: { windowId: 9 },
       tabIds: [101, 102],
     });
-    expect(fake.api.tabs.discard).toHaveBeenCalledTimes(2);
-    expect(fake.api.tabs.discard).toHaveBeenNthCalledWith(1, 100);
-    expect(fake.api.tabs.discard).toHaveBeenNthCalledWith(2, 102);
     expect(fake.api.tabs.update).toHaveBeenCalledWith(101, { active: true });
     expect(fake.callOrder.indexOf('activate:101')).toBeLessThan(
       fake.callOrder.indexOf('remove-placeholder'),
@@ -467,7 +463,6 @@ describe('createChromeSavedWindowsService', () => {
       failures: [],
       restoredTabCount: 3,
       savedWindowRemoved: false,
-      suspendedTabCount: 2,
       warnings: [
         'The window was restored, but its saved copy could not be removed: Storage unavailable',
       ],
@@ -567,12 +562,12 @@ describe('createChromeSavedWindowsService', () => {
       restoredTabCount: 3,
       savedWindowRemoved: true,
       warnings: [
-        'Restored tab titles and URLs could not be retained while suspended: Session storage unavailable',
+        'Restored tab titles and URLs could not be retained while pages load: Session storage unavailable',
       ],
     });
   });
 
-  it('focuses a fallback before removing the placeholder and suspends every other tab', async () => {
+  it('focuses a fallback before removing the placeholder without discarding other tabs', async () => {
     const savedWindow = createSavedWindow();
     const fake = createApi([savedWindow]);
     vi.mocked(fake.api.tabs.update).mockImplementation((tabId: number) => {
@@ -588,15 +583,102 @@ describe('createChromeSavedWindowsService', () => {
     expect(result).toMatchObject({
       restoredTabCount: 3,
       savedWindowRemoved: true,
-      suspendedTabCount: 2,
       warnings: ['The intended active tab could not be selected; another tab was focused.'],
     });
     expect(fake.api.tabs.update).toHaveBeenNthCalledWith(1, 101, { active: true });
     expect(fake.api.tabs.update).toHaveBeenNthCalledWith(2, 100, { active: true });
-    expect(fake.api.tabs.discard).toHaveBeenCalledWith(101);
     expect(fake.callOrder.indexOf('activate:100')).toBeLessThan(
       fake.callOrder.indexOf('remove-placeholder'),
     );
+  });
+
+  it('does not discard pending web navigations and retains a failed active file URL for retry', async () => {
+    const savedWindow = createSavedWindow({
+      groups: [],
+      tabs: [
+        {
+          active: false,
+          order: 0,
+          pinned: false,
+          title: 'Web one',
+          url: 'https://one.example.com/',
+        },
+        {
+          active: true,
+          order: 1,
+          pinned: false,
+          title: 'Local file',
+          url: 'file:///Users/example/travel.html',
+        },
+        {
+          active: false,
+          order: 2,
+          pinned: false,
+          title: 'Web two',
+          url: 'https://two.example.com/',
+        },
+      ],
+    });
+    const fake = createApi([savedWindow]);
+    const pendingTabs = new Map<number, chrome.tabs.Tab>();
+    vi.mocked(fake.api.tabs.create).mockImplementation((properties) => {
+      const url = properties.url as string;
+      if (url.startsWith('file:')) {
+        return Promise.reject(
+          new Error('Cannot navigate to a file URL without local file access.'),
+        );
+      }
+      const id = properties.index === 0 ? 100 : 102;
+      const tab = createChromeTab({
+        id,
+        index: properties.index ?? 0,
+        pendingUrl: url,
+        url: 'about:blank',
+        windowId: 9,
+      });
+      pendingTabs.set(id, tab);
+      return Promise.resolve(tab);
+    });
+    const discard = vi.fn((tabId?: number) => {
+      const tab = tabId === undefined ? undefined : pendingTabs.get(tabId);
+      if (tab) {
+        delete tab.pendingUrl;
+        tab.discarded = true;
+      }
+      return Promise.resolve(tab);
+    });
+    Object.assign(fake.api.tabs, { discard });
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.restoreWindow(savedWindow.id);
+
+    expect(result).toEqual({
+      destinationWindowId: 9,
+      failures: [
+        {
+          message: 'Cannot navigate to a file URL without local file access.',
+          order: 1,
+          title: 'Local file',
+          url: 'file:///Users/example/travel.html',
+        },
+      ],
+      restoredTabCount: 2,
+      savedWindowRemoved: false,
+      warnings: [],
+    });
+    expect(discard).not.toHaveBeenCalled();
+    expect([...pendingTabs.values()].map((tab) => tab.pendingUrl)).toEqual([
+      'https://one.example.com/',
+      'https://two.example.com/',
+    ]);
+    expect(fake.api.tabs.update).toHaveBeenCalledWith(100, { active: true });
+    await expect(service.load()).resolves.toEqual([
+      {
+        ...savedWindow,
+        tabs: [{ ...savedWindow.tabs[1], order: 0 }],
+        updatedAt: '2026-07-10T21:00:00.000Z',
+      },
+    ]);
   });
 
   it('continues a partial restore, rebuilds available groups, and falls back from a failed active tab', async () => {
@@ -633,7 +715,6 @@ describe('createChromeSavedWindowsService', () => {
       ],
       restoredTabCount: 2,
       savedWindowRemoved: false,
-      suspendedTabCount: 1,
       warnings: [],
     });
     expect(fake.api.tabs.remove).toHaveBeenCalledWith([90]);
@@ -702,7 +783,6 @@ describe('createChromeSavedWindowsService', () => {
 
     expect(result.restoredTabCount).toBe(0);
     expect(result.savedWindowRemoved).toBe(false);
-    expect(result.suspendedTabCount).toBe(0);
     expect(result.failures).toHaveLength(3);
     expect(fake.api.tabs.remove).not.toHaveBeenCalled();
     expect(fake.api.tabs.group).not.toHaveBeenCalled();

@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   ChevronDown,
   ChevronRight,
+  Copy,
   ExternalLink,
   Pencil,
   Pin,
@@ -54,13 +55,18 @@ function formatSavedTime(timestamp: string): string {
   }).format(new Date(timestamp));
 }
 
+function isLocalFileUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'file:';
+  } catch {
+    return false;
+  }
+}
+
 function summarizeRestore(savedWindow: SavedWindow, result: RestoreSavedWindowResult) {
   const parts = [
     `Restored ${pluralize(result.restoredTabCount, 'tab')} from "${savedWindow.name}".`,
   ];
-  if (result.suspendedTabCount > 0) {
-    parts.push(`${pluralize(result.suspendedTabCount, 'background tab')} suspended.`);
-  }
   if (result.savedWindowRemoved) {
     parts.push('Removed it from Saved Windows.');
   }
@@ -77,10 +83,12 @@ function summarizeRestore(savedWindow: SavedWindow, result: RestoreSavedWindowRe
 
 function SavedWindowPreview({
   disabled,
+  onCopyTabUrl,
   onOpenTab,
   savedWindow,
 }: {
   disabled: boolean;
+  onCopyTabUrl: (url: string, title: string) => void;
   onOpenTab: (url: string) => void;
   savedWindow: SavedWindow;
 }) {
@@ -105,23 +113,37 @@ function SavedWindowPreview({
             ) : null}
             <li className="saved-tab-row">
               <span className="saved-tab-order">{tab.order + 1}</span>
-              <button
-                className="saved-tab-open-button"
-                type="button"
-                aria-label={`Open ${tab.title} in a new tab`}
-                title="Open in a new tab"
-                disabled={disabled}
-                onClick={() => onOpenTab(tab.url)}
-              >
-                <span className="saved-tab-copy">
-                  <strong>{tab.title}</strong>
-                  <span>{formatTabLocation(tab.url)}</span>
-                </span>
-                <span className="saved-tab-meta">
-                  {tab.pinned ? <Pin aria-label="Pinned" size={13} /> : null}
-                  <ExternalLink aria-hidden="true" size={14} />
-                </span>
-              </button>
+              <div className="saved-tab-content">
+                <button
+                  className="saved-tab-open-button"
+                  type="button"
+                  aria-label={`Open ${tab.title} in a new tab`}
+                  title="Open in a new tab"
+                  disabled={disabled}
+                  onClick={() => onOpenTab(tab.url)}
+                >
+                  <span className="saved-tab-copy">
+                    <strong>{tab.title}</strong>
+                    <span>{formatTabLocation(tab.url)}</span>
+                  </span>
+                  <span className="saved-tab-meta">
+                    {tab.pinned ? <Pin aria-label="Pinned" size={13} /> : null}
+                    <ExternalLink aria-hidden="true" size={14} />
+                  </span>
+                </button>
+                {isLocalFileUrl(tab.url) ? (
+                  <button
+                    className="saved-tab-copy-url-button"
+                    type="button"
+                    aria-label={`Copy URL for ${tab.title}`}
+                    title="Copy URL"
+                    disabled={disabled}
+                    onClick={() => onCopyTabUrl(tab.url, tab.title)}
+                  >
+                    <Copy aria-hidden="true" size={14} />
+                  </button>
+                ) : null}
+              </div>
             </li>
           </Fragment>
         );
@@ -231,6 +253,17 @@ export function SavedWindowsPage({
       await service.openTab(url);
     } catch (error) {
       setActionError(describeActionError(error));
+    }
+  };
+
+  const copySavedTabUrl = async (url: string, title: string) => {
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await navigator.clipboard.writeText(url);
+      setActionNotice({ message: `Copied URL for "${title}".` });
+    } catch {
+      setActionError('The browser could not copy that URL.');
     }
   };
 
@@ -526,6 +559,7 @@ export function SavedWindowsPage({
                   <div id={`saved-window-${savedWindow.id}-preview`}>
                     <SavedWindowPreview
                       disabled={disabled}
+                      onCopyTabUrl={(url, title) => void copySavedTabUrl(url, title)}
                       onOpenTab={(url) => void openSavedTab(url)}
                       savedWindow={savedWindow}
                     />

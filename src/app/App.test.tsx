@@ -126,7 +126,6 @@ function createSavedService(windowCount: number): SavedWindowsService {
         failures: [],
         restoredTabCount: 1,
         savedWindowRemoved: true,
-        suspendedTabCount: 0,
         warnings: [],
       }),
     ),

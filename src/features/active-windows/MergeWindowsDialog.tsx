@@ -1,19 +1,16 @@
 import { ListChecks, ListX, Merge, X } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
-import { AnchoredSelectMenu, type AnchoredSelectOption } from '../../ui/AnchoredSelectMenu';
 import { type ManagedWindow } from './model';
 
 interface MergeWindowsDialogProps {
-  destinationWindowId: number;
   disabled: boolean;
   horizontalOffset: number;
   onApply: () => void;
-  onChangeDestination: (windowId: number) => void;
-  onClose: () => void;
-  onSetAllSources: (selected: boolean) => void;
-  onToggleSource: (windowId: number, selected: boolean) => void;
-  sourceWindowIds: ReadonlySet<number>;
+  onClose: (restoreFocus?: boolean) => void;
+  onSetAllWindows: (selected: boolean) => void;
+  onToggleWindow: (windowId: number, selected: boolean) => void;
+  selectedWindowIds: ReadonlySet<number>;
   windows: readonly ManagedWindow[];
 }
 
@@ -23,31 +20,26 @@ function getMainTabTitle(window: ManagedWindow): string {
 }
 
 export function MergeWindowsDialog({
-  destinationWindowId,
   disabled,
   horizontalOffset,
   onApply,
-  onChangeDestination,
   onClose,
-  onSetAllSources,
-  onToggleSource,
-  sourceWindowIds,
+  onSetAllWindows,
+  onToggleWindow,
+  selectedWindowIds,
   windows,
 }: MergeWindowsDialogProps) {
-  const sourceWindows = windows.filter((window) => window.id !== destinationWindowId);
-  const destinationOptions: readonly AnchoredSelectOption<number>[] = windows.map((window) => ({
-    description: getMainTabTitle(window),
-    label: window.label,
-    secondary: `${window.tabs.length} ${window.tabs.length === 1 ? 'tab' : 'tabs'}`,
-    triggerLabel: `${window.label} (${window.tabs.length})`,
-    value: window.id,
-  }));
-  const allSourcesSelected =
-    sourceWindows.length > 0 && sourceWindows.every((window) => sourceWindowIds.has(window.id));
+  const firstWindowCheckboxRef = useRef<HTMLInputElement>(null);
+  const allWindowsSelected =
+    windows.length > 0 && windows.every((window) => selectedWindowIds.has(window.id));
+
+  useEffect(() => {
+    firstWindowCheckboxRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !document.querySelector('.merge-destination-popover')) {
+      if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
       }
@@ -58,59 +50,48 @@ export function MergeWindowsDialog({
 
   return (
     <div
+      id="merge-windows-dialog"
       className="merge-dialog"
       role="dialog"
       aria-labelledby="merge-dialog-title"
       style={{ left: horizontalOffset }}
+      onBlur={(event) => {
+        const nextFocusedNode = event.relatedTarget;
+        if (nextFocusedNode instanceof Node && !event.currentTarget.contains(nextFocusedNode)) {
+          onClose(false);
+        }
+      }}
     >
       <header>
         <div>
           <h3 id="merge-dialog-title">Merge windows</h3>
-          <span>{sourceWindowIds.size + 1} selected</span>
+          <span>{selectedWindowIds.size} selected</span>
         </div>
         <button
           className="icon-button"
           type="button"
           aria-label="Close merge windows"
           title="Close"
-          onClick={onClose}
+          onClick={() => onClose()}
         >
           <X aria-hidden="true" size={16} />
         </button>
       </header>
 
-      <div className="merge-destination">
-        <span className="merge-section-label">Destination</span>
-        <AnchoredSelectMenu
-          ariaLabel="Destination"
-          disabled={disabled}
-          focusOnMount
-          minimumWidth={180}
-          onChange={onChangeDestination}
-          options={destinationOptions}
-          popoverClassName="merge-destination-popover"
-          triggerClassName="merge-destination-trigger"
-          value={destinationWindowId}
-        />
-      </div>
-
-      <div className="merge-source-heading">
-        <span className="merge-section-label">Move into destination</span>
-      </div>
-
-      <div className="merge-source-list">
-        {sourceWindows.map((window) => {
-          const selected = sourceWindowIds.has(window.id);
+      <div className="merge-window-list">
+        {windows.map((window, index) => {
+          const selected = selectedWindowIds.has(window.id);
           const mainTabTitle = getMainTabTitle(window);
           return (
             <label className={selected ? 'is-selected' : undefined} key={window.id}>
               <input
+                ref={index === 0 ? firstWindowCheckboxRef : null}
                 type="checkbox"
                 checked={selected}
                 disabled={disabled}
-                onChange={(event) => onToggleSource(window.id, event.target.checked)}
+                onChange={(event) => onToggleWindow(window.id, event.target.checked)}
               />
-              <span className="merge-source-copy">
+              <span className="merge-window-copy">
                 <span>{window.label}</span>
                 <small title={mainTabTitle}>{mainTabTitle}</small>
               </span>
@@ -124,24 +105,28 @@ export function MergeWindowsDialog({
         <button
           className="merge-select-all-button"
           type="button"
-          disabled={disabled || sourceWindows.length === 0}
-          onClick={() => onSetAllSources(!allSourcesSelected)}
+          disabled={disabled || windows.length === 0}
+          onClick={() => onSetAllWindows(!allWindowsSelected)}
         >
-          {allSourcesSelected ? (
+          {allWindowsSelected ? (
             <ListX aria-hidden="true" size={15} />
           ) : (
             <ListChecks aria-hidden="true" size={15} />
           )}
-          <span>{allSourcesSelected ? 'Clear all' : 'Select all'}</span>
+          <span>{allWindowsSelected ? 'Clear all' : 'Select all'}</span>
         </button>
         <button
           className="toolbar-button merge-apply-button"
           type="button"
-          disabled={disabled || sourceWindowIds.size === 0}
+          disabled={disabled || selectedWindowIds.size < 2}
           onClick={onApply}
         >
           <Merge aria-hidden="true" size={16} />
-          <span>Merge {sourceWindowIds.size + 1} windows</span>
+          <span>
+            {selectedWindowIds.size < 2
+              ? 'Merge windows'
+              : `Merge ${selectedWindowIds.size} windows`}
+          </span>
         </button>
       </footer>
     </div>

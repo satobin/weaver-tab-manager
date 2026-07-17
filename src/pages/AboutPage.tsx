@@ -39,9 +39,9 @@ export function AboutPage() {
               <div>
                 <h4>Saves locally in your browser</h4>
                 <p>
-                  Saved windows, settings, and custom rules stay in your browser. Restored suspended
-                  tabs may keep their titles and URLs in memory until they load, change, close, or
-                  the browser exits.
+                  Saved windows, settings, and custom rules stay in your browser. Recently restored
+                  tabs may temporarily keep their saved titles and URLs in memory until their pages
+                  load, the tabs navigate or close, or the browser exits.
                 </p>
               </div>
             </article>

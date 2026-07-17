@@ -22,7 +22,7 @@ Weaver stores the following data in the browser's extension storage on the user'
 - saved-window names, tab titles, URLs, order, active and pinned state, and tab-group details;
 - extension preferences and custom duplicate-matching rules.
 
-When restoring suspended tabs, Weaver may temporarily keep the saved title and URL in the browser's session-only extension storage so the restored tab remains identifiable before the browser loads it. That temporary metadata is removed after the browser provides the tab's real metadata, the tab navigates, the tab closes, or the browser session ends.
+When restoring tabs, Weaver may temporarily keep the saved title and URL in the browser's session-only extension storage so each restored tab remains identifiable while its page loads. That temporary metadata is removed after the browser provides the tab's real metadata, the tab navigates, the tab closes, or the browser session ends.
 
 ## Data Transmission and Sharing
 

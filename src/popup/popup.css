@@ -261,6 +261,24 @@ input {
   opacity: 1;
 }
 
+.popup-duplicate-control {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.popup-duplicate-control .popup-duplicate-close-action {
+  min-width: 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.popup-duplicate-control .popup-duplicate-preview-action {
+  min-width: 38px;
+  padding: 0;
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
 .popup-suspension-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

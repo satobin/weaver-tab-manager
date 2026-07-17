@@ -91,6 +91,7 @@ describe('dedupe rule presentation', () => {
         matchType: 'site-rule',
         ruleId: 'custom',
         ruleName: 'app.example.com - Same page',
+        sectionId: 'rule:custom',
       },
     ]);
   });

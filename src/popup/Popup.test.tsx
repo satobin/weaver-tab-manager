@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { APP_ROUTES } from '../app/routes';
+import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../app/routes';
 import {
   type ActiveWindowsService,
   type RestorableTab,
@@ -263,6 +263,25 @@ describe('Popup', () => {
       ),
     ).toBeInTheDocument();
     expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('opens the manager with duplicate tabs visible from the preview action', async () => {
+    const user = userEvent.setup();
+    renderPopup(createService());
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Show duplicate tabs across all windows in Window Manager',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        type: OPEN_APP_MESSAGE,
+        route: APP_LAUNCH_ROUTES.duplicateTabs,
+      });
+    });
+    expect(window.close).toHaveBeenCalled();
   });
 
   it('stays open and reports when the manager cannot be launched', async () => {

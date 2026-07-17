@@ -1,10 +1,8 @@
 import {
   ArrowDownAZ,
   ArrowUpZA,
-  AppWindow,
   ChevronDown,
   ChevronRight,
-  CirclePause,
   GripVertical,
   Pause,
   Pin,
@@ -34,7 +32,10 @@ interface WindowCardProps {
   draggedGroupId: number | null;
   draggedTabIds: ReadonlySet<number>;
   dropTarget: TabDropTarget | null;
-  mergeSourceSelected: boolean;
+  duplicatePreviewCloseTabIds?: ReadonlySet<number>;
+  duplicatePreviewKeepTabIds?: ReadonlySet<number>;
+  groupActionTabs?: readonly ManagedTab[];
+  mergeSelected: boolean;
   onCloseTab: (tabId: number) => void;
   onCloseWindow: (windowId: number) => void;
   onFocusTab: (windowId: number, tabId: number) => void;
@@ -64,6 +65,7 @@ interface WindowCardProps {
   sortCriterion: SortCriterion;
   sortDirection: SortDirection;
   window: ManagedWindow;
+  windowActionsAvailable?: boolean;
 }
 
 export interface TabDropTarget {
@@ -126,7 +128,10 @@ export function WindowCard({
   draggedGroupId,
   draggedTabIds,
   dropTarget,
-  mergeSourceSelected,
+  duplicatePreviewCloseTabIds,
+  duplicatePreviewKeepTabIds,
+  groupActionTabs = allWindowTabs,
+  mergeSelected,
   onCloseTab,
   onCloseWindow,
   onFocusTab,
@@ -153,13 +158,23 @@ export function WindowCard({
   sortCriterion,
   sortDirection,
   window,
+  windowActionsAvailable = true,
 }: WindowCardProps) {
   const suppressGroupFocusRef = useRef(false);
   const groupFocusReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupsById = new Map(window.groups.map((group) => [group.id, group]));
   const groupTabsById = new Map<number, ManagedTab[]>();
+  const completeGroupTabsById = new Map<number, ManagedTab[]>();
   const visibleGroupRangesById = new Map<number, { first: number; last: number }>();
   allWindowTabs.forEach((tab) => {
+    if (tab.groupId === null) {
+      return;
+    }
+    const groupTabs = completeGroupTabsById.get(tab.groupId) ?? [];
+    groupTabs.push(tab);
+    completeGroupTabsById.set(tab.groupId, groupTabs);
+  });
+  groupActionTabs.forEach((tab) => {
     if (tab.groupId === null) {
       return;
     }
@@ -238,7 +253,7 @@ export function WindowCard({
       className={[
         'window-card',
         window.focused ? 'is-focused-window' : '',
-        mergeSourceSelected ? 'is-merge-source' : '',
+        mergeSelected ? 'is-merge-selected' : '',
         dropTarget?.windowId === window.id ? 'is-drop-target' : '',
         !showTabUrls ? 'is-compact-tabs' : '',
         collapsed ? 'is-collapsed' : '',
@@ -274,16 +289,6 @@ export function WindowCard({
             indeterminate={selectedCount > 0 && !allSelected}
             onChange={(checked) => onSetTabsSelected(visibleTabIds, checked)}
           />
-          <button
-            className="window-focus-button"
-            type="button"
-            aria-label={`Focus ${window.label}`}
-            aria-current={window.focused ? 'true' : undefined}
-            title="Focus window"
-            onClick={() => onFocusWindow(window.id)}
-          >
-            <AppWindow className="window-browser-icon" aria-hidden="true" size={24} />
-          </button>
           <div className="window-heading-copy">
             <h3 id={`window-${window.id}-title`}>
               <button
@@ -307,7 +312,6 @@ export function WindowCard({
             ) : (
               <ChevronDown className="window-heading-chevron" size={15} />
             )}
-            {collapsed ? <span className="window-collapsed-indicator">Collapsed</span> : null}
           </span>
         </div>
 
@@ -321,82 +325,84 @@ export function WindowCard({
           onClick={() => onToggleCollapsed(window.id)}
         />
 
-        <div className="window-card-actions">
-          <div className="window-sort-controls" role="group" aria-label={`Sort ${window.label}`}>
-            <SortCriterionMenu
-              ariaLabel={`Sort ${window.label} by`}
-              value={sortCriterion}
-              disabled={disabled}
-              onChange={onSortCriterionChange}
-            />
+        {windowActionsAvailable ? (
+          <div className="window-card-actions">
+            <div className="window-sort-controls" role="group" aria-label={`Sort ${window.label}`}>
+              <SortCriterionMenu
+                ariaLabel={`Sort ${window.label} by`}
+                value={sortCriterion}
+                disabled={disabled}
+                onChange={onSortCriterionChange}
+              />
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Sort ${window.label} direction ${
+                  sortDirection === 'asc' ? 'A to Z' : 'Z to A'
+                }`}
+                title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                disabled={disabled}
+                onClick={() => onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc')}
+              >
+                {sortDirection === 'asc' ? (
+                  <ArrowDownAZ aria-hidden="true" size={17} />
+                ) : (
+                  <ArrowUpZA aria-hidden="true" size={17} />
+                )}
+              </button>
+              <button
+                className="toolbar-button"
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  onSortWindow(window.id, { criterion: sortCriterion, direction: sortDirection })
+                }
+              >
+                Sort
+              </button>
+            </div>
             <button
               className="icon-button"
               type="button"
-              aria-label={`Sort ${window.label} direction ${
-                sortDirection === 'asc' ? 'A to Z' : 'Z to A'
-              }`}
-              title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+              aria-label={`Save ${window.label}`}
+              title="Save window"
               disabled={disabled}
-              onClick={() => onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc')}
+              onClick={(event) => onSaveWindow(window.id, event.currentTarget)}
             >
-              {sortDirection === 'asc' ? (
-                <ArrowDownAZ aria-hidden="true" size={17} />
-              ) : (
-                <ArrowUpZA aria-hidden="true" size={17} />
-              )}
+              <Save aria-hidden="true" size={17} />
             </button>
             <button
-              className="toolbar-button"
+              className="icon-button"
               type="button"
-              disabled={disabled}
-              onClick={() =>
-                onSortWindow(window.id, { criterion: sortCriterion, direction: sortDirection })
-              }
+              aria-label={`Suspend tabs in ${window.label}`}
+              title={suspendButtonTitle}
+              disabled={disabled || suspendableTabCount === 0}
+              onClick={() => onSuspendWindow(window.id)}
             >
-              Sort
+              <Pause aria-hidden="true" size={17} />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={`Unsuspend all tabs in ${window.label}`}
+              title="Unsuspend all tabs"
+              disabled={disabled || suspendedTabCount === 0}
+              onClick={() => onUnsuspendWindow(window.id)}
+            >
+              <Play aria-hidden="true" size={17} />
+            </button>
+            <button
+              className="icon-button danger-icon-button"
+              type="button"
+              aria-label={`Close ${window.label}`}
+              title="Close window"
+              disabled={disabled}
+              onClick={() => onCloseWindow(window.id)}
+            >
+              <X aria-hidden="true" size={17} />
             </button>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={`Save ${window.label}`}
-            title="Save window"
-            disabled={disabled}
-            onClick={(event) => onSaveWindow(window.id, event.currentTarget)}
-          >
-            <Save aria-hidden="true" size={17} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={`Suspend tabs in ${window.label}`}
-            title={suspendButtonTitle}
-            disabled={disabled || suspendableTabCount === 0}
-            onClick={() => onSuspendWindow(window.id)}
-          >
-            <Pause aria-hidden="true" size={17} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={`Unsuspend all tabs in ${window.label}`}
-            title="Unsuspend all tabs"
-            disabled={disabled || suspendedTabCount === 0}
-            onClick={() => onUnsuspendWindow(window.id)}
-          >
-            <Play aria-hidden="true" size={17} />
-          </button>
-          <button
-            className="icon-button danger-icon-button"
-            type="button"
-            aria-label={`Close ${window.label}`}
-            title="Close window"
-            disabled={disabled}
-            onClick={() => onCloseWindow(window.id)}
-          >
-            <X aria-hidden="true" size={17} />
-          </button>
-        </div>
+        ) : null}
       </header>
 
       {window.tabs.length > 0 ? (
@@ -425,7 +431,12 @@ export function WindowCard({
             const beginsGroup =
               group !== undefined && window.tabs[index - 1]?.groupId !== tab.groupId;
             const groupTabs = group ? (groupTabsById.get(group.id) ?? [tab]) : [];
+            const completeGroupTabs = group ? (completeGroupTabsById.get(group.id) ?? [tab]) : [];
             const groupTabIds = groupTabs.map((groupTab) => groupTab.id);
+            const completeGroupTabIds = new Set(completeGroupTabs.map((groupTab) => groupTab.id));
+            const completeGroupAction =
+              groupTabIds.length === completeGroupTabIds.size &&
+              groupTabIds.every((tabId) => completeGroupTabIds.has(tabId));
             const groupSelectedCount = groupTabIds.filter((tabId) =>
               selectedTabIds.has(tabId),
             ).length;
@@ -437,6 +448,11 @@ export function WindowCard({
             const firstGroupTab = groupTabs[0] ?? tab;
             const selected = selectedTabIds.has(tab.id);
             const suspended = isTabSuspended(tab);
+            const duplicatePreviewState = duplicatePreviewCloseTabIds?.has(tab.id)
+              ? 'close'
+              : duplicatePreviewKeepTabIds?.has(tab.id)
+                ? 'keep'
+                : null;
             const suspendedDescriptionId = `tab-${tab.id}-suspended-description`;
             const suspendedBehavior =
               tab.discarded || tab.unloaded ? 'Reloads when opened.' : 'Resumes when opened.';
@@ -453,6 +469,8 @@ export function WindowCard({
                     tab.active ? 'is-active' : '',
                     tab.active && window.focused ? 'is-active-in-focused-window' : '',
                     selected ? 'is-selected' : '',
+                    duplicatePreviewState === 'close' ? 'is-duplicate-preview-close' : '',
+                    duplicatePreviewState === 'keep' ? 'is-duplicate-preview-keep' : '',
                     suspended ? 'is-suspended' : '',
                     draggedTabIds.has(tab.id) ? 'is-dragging' : '',
                     draggedGroupId === null && dropTarget?.groupId === group?.id
@@ -526,10 +544,15 @@ export function WindowCard({
                       <button
                         className="tab-group-focus-button"
                         type="button"
-                        draggable={!disabled}
+                        draggable={!disabled && completeGroupAction}
                         aria-label={`Focus first tab in ${groupLabel}`}
                         title={`Focus ${firstGroupTab.title}`}
                         onDragStart={(event) => {
+                          if (disabled || !completeGroupAction) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            return;
+                          }
                           event.stopPropagation();
                           suppressGroupFocusRef.current = true;
                           beginTabDrag(
@@ -626,7 +649,7 @@ export function WindowCard({
                         type="button"
                         draggable={false}
                         aria-label={`Unsuspend ${tab.title} without opening it`}
-                        title="Unsuspend without opening this tab"
+                        title="Unsuspend"
                         disabled={disabled}
                         onDragStart={(event) => {
                           event.preventDefault();
@@ -637,10 +660,16 @@ export function WindowCard({
                           onUnsuspendTab(tab.id);
                         }}
                       >
-                        <CirclePause aria-hidden="true" size={14} />
-                        <span className="tab-suspended-label" aria-hidden="true">
-                          Suspended
-                        </span>
+                        <Pause
+                          className="tab-suspended-icon tab-suspended-icon-pause"
+                          aria-hidden="true"
+                          size={13}
+                        />
+                        <Play
+                          className="tab-suspended-icon tab-suspended-icon-play"
+                          aria-hidden="true"
+                          size={13}
+                        />
                         <span id={suspendedDescriptionId} className="sr-only">
                           Suspended. {suspendedBehavior}
                         </span>

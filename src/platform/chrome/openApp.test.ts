@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { APP_ROUTES } from '../../app/routes';
+import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../../app/routes';
 import { focusOrOpenApp, type AppNavigationApi } from './openApp';
 
 function createApi(overrides: Partial<AppNavigationApi> = {}): AppNavigationApi {
@@ -60,6 +60,33 @@ describe('focusOrOpenApp', () => {
     expect(api.tabs.update).toHaveBeenCalledWith(14, {
       active: true,
       url: 'chrome-extension://weaver/app.html#/settings',
+    });
+    expect(api.windows.update).toHaveBeenCalledWith(8, { focused: true });
+    expect(api.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('focuses an existing app tab with a duplicate-tabs launch route', async () => {
+    const api = createApi({
+      tabs: {
+        query: vi.fn(() =>
+          Promise.resolve([
+            {
+              id: 14,
+              windowId: 8,
+              url: 'chrome-extension://weaver/app.html#/windows',
+            } as chrome.tabs.Tab,
+          ]),
+        ),
+        create: vi.fn(() => Promise.resolve({ id: 31 } as chrome.tabs.Tab)),
+        update: vi.fn(() => Promise.resolve(undefined)),
+      },
+    });
+
+    await focusOrOpenApp(api, APP_LAUNCH_ROUTES.duplicateTabs);
+
+    expect(api.tabs.update).toHaveBeenCalledWith(14, {
+      active: true,
+      url: 'chrome-extension://weaver/app.html#/windows?view=duplicates',
     });
     expect(api.windows.update).toHaveBeenCalledWith(8, { focused: true });
     expect(api.tabs.create).not.toHaveBeenCalled();

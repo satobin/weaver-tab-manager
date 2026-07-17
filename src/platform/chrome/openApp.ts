@@ -1,4 +1,4 @@
-import { APP_ROUTES, parseAppRoute, type AppRoute } from '../../app/routes';
+import { APP_ROUTES, parseAppNavigationRoute, type AppNavigationRoute } from '../../app/routes';
 
 export interface AppNavigationApi {
   runtime: Pick<typeof chrome.runtime, 'getURL'>;
@@ -15,7 +15,7 @@ export async function focusOrOpenApp(
   api: AppNavigationApi,
   requestedRoute: string = APP_ROUTES.windows,
 ): Promise<OpenAppResult> {
-  const route: AppRoute = parseAppRoute(requestedRoute);
+  const route: AppNavigationRoute = parseAppNavigationRoute(requestedRoute);
   const appBaseUrl = api.runtime.getURL('app.html');
   const appUrl = `${appBaseUrl}${route}`;
   const tabs = await api.tabs.query({ url: `${appBaseUrl}*` });

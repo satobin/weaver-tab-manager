@@ -459,8 +459,9 @@ describe('SettingsPage', () => {
 
     expect(within(preview).getByText('docs.google.com/document/d/doc-id')).toBeInTheDocument();
     expect(within(preview).getByText('Quarterly plan')).toBeInTheDocument();
-    expect(within(preview).getByText('Quarterly plan copy')).toBeInTheDocument();
-    expect(within(preview).getByText('Keep')).toBeInTheDocument();
-    expect(within(preview).getByText('Close')).toBeInTheDocument();
+    expect(within(preview).getByText(/Also closes: Quarterly plan copy/)).toBeInTheDocument();
+    expect(within(preview).getByText('Keep open')).toBeInTheDocument();
+    expect(within(preview).getByText('Close 1')).toBeInTheDocument();
+    expect(within(preview).getByText(/1 match .* 1 tab would close/)).toBeInTheDocument();
   });
 });

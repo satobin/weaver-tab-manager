@@ -4,6 +4,7 @@ import {
   ArrowDownAZ,
   ArrowUpZA,
   CopyX,
+  Eye,
   ListChecks,
   Merge,
   PanelsTopLeft,
@@ -15,6 +16,7 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { APP_ROUTES, isDuplicateTabsLaunchRoute } from '../app/routes';
 import {
   createChromeActiveWindowsService,
   type ActiveWindowsService,
@@ -59,6 +61,7 @@ import {
   type WindowDropPlacement,
 } from '../features/active-windows/windowDisplayOrder';
 import { planDuplicateTabs } from '../features/deduplication/deduplication';
+import { type DedupePreviewTab } from '../features/deduplication/dedupeRulePresentation';
 import { SaveWindowDialog } from '../features/saved-windows/SaveWindowDialog';
 import {
   createSavedWindowsService,
@@ -206,6 +209,7 @@ export function ActiveWindowsPage({
     [liveSnapshot, windowOrderIds],
   );
   const selection = useTabSelection(snapshot?.windows ?? EMPTY_WINDOWS);
+  const clearTabSelection = selection.clear;
   const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<number>>(() => new Set());
   const [collapsedWindowIds, setCollapsedWindowIds] = useState<ReadonlySet<number>>(
     () => new Set(),
@@ -216,12 +220,10 @@ export function ActiveWindowsPage({
   const [windowSortSelections, setWindowSortSelections] = useState<
     ReadonlyMap<number, WindowSortSelection>
   >(() => new Map());
+  const [duplicatePreviewMode, setDuplicatePreviewMode] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeDialogHorizontalOffset, setMergeDialogHorizontalOffset] = useState(0);
-  const [mergeDestinationWindowId, setMergeDestinationWindowId] = useState<number | null>(null);
-  const [mergeSourceWindowIds, setMergeSourceWindowIds] = useState<ReadonlySet<number>>(
-    () => new Set(),
-  );
+  const [mergeWindowIds, setMergeWindowIds] = useState<ReadonlySet<number>>(() => new Set());
   const [draggedGroupId, setDraggedGroupId] = useState<number | null>(null);
   const [draggedTabIds, setDraggedTabIds] = useState<ReadonlySet<number>>(() => new Set());
   const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null);
@@ -253,17 +255,6 @@ export function ActiveWindowsPage({
   const filtered = useMemo(
     () => (snapshot ? filterActiveWindows(snapshot, query) : null),
     [query, snapshot],
-  );
-  const filteredWindowCount = filtered?.windows.length ?? 0;
-  const windowColumns = useMemo(
-    () =>
-      distributeAcrossWindowColumns(
-        filtered?.windows ?? EMPTY_WINDOWS,
-        windowColumnCount,
-        (window) =>
-          estimateWindowCardHeight(window, settings.showTabUrls, collapsedWindowIds.has(window.id)),
-      ),
-    [collapsedWindowIds, filtered?.windows, settings.showTabUrls, windowColumnCount],
   );
 
   const updateNewWindowDropTarget = (target: NewWindowDropTarget | null) => {
@@ -314,24 +305,6 @@ export function ActiveWindowsPage({
   };
 
   useEffect(() => {
-    if (!windowGridElement || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const updateColumnCount = (width: number) => {
-      const nextColumnCount = getWindowColumnCount(width, filteredWindowCount);
-      setWindowColumnCount((current) => (current === nextColumnCount ? current : nextColumnCount));
-    };
-    updateColumnCount(windowGridElement.getBoundingClientRect().width);
-
-    const observer = new ResizeObserver((entries) => {
-      updateColumnCount(entries[0]?.contentRect.width ?? windowGridElement.clientWidth);
-    });
-    observer.observe(windowGridElement);
-    return () => observer.disconnect();
-  }, [filteredWindowCount, windowGridElement]);
-
-  useEffect(() => {
     if (!mergeDialogOpen) {
       return;
     }
@@ -339,10 +312,6 @@ export function ActiveWindowsPage({
     return () => window.removeEventListener('resize', updateMergeDialogPosition);
   }, [mergeDialogOpen, updateMergeDialogPosition]);
 
-  const visibleTabIds = useMemo(
-    () => filtered?.windows.flatMap((window) => window.tabs.map((tab) => tab.id)) ?? [],
-    [filtered],
-  );
   const hasFilter = query.trim().length > 0;
   const selectionButtonClears = selection.selectedCount > 0;
   const selectedTabIdsInOrder = useMemo(
@@ -379,53 +348,211 @@ export function ActiveWindowsPage({
       ) ?? [],
     [snapshot, validSelectedGroupIds],
   );
-  const selectedTabIsOnlyTabInWindow = useMemo(() => {
-    if (!snapshot || selectedTabIdsInOrder.length !== 1) {
-      return false;
-    }
-    const selectedTabId = selectedTabIdsInOrder[0];
-    return snapshot.windows.some(
-      (window) => window.tabs.length === 1 && window.tabs[0]?.id === selectedTabId,
-    );
-  }, [selectedTabIdsInOrder, snapshot]);
-  const canMoveSelectedTabsToNewWindow =
-    selectedTabIdsInOrder.length > 0 && !selectedTabIsOnlyTabInWindow;
-  const resolvedMergeDestinationId = useMemo(() => {
-    if (
-      mergeDestinationWindowId !== null &&
-      snapshot?.windows.some((window) => window.id === mergeDestinationWindowId)
-    ) {
-      return mergeDestinationWindowId;
-    }
-    return snapshot?.windows[0]?.id ?? null;
-  }, [mergeDestinationWindowId, snapshot]);
-  const orderedMergeSourceIds = useMemo(
+  const orderedMergeWindowIds = useMemo(
+    () =>
+      snapshot?.windows.flatMap((window) => (mergeWindowIds.has(window.id) ? [window.id] : [])) ??
+      [],
+    [mergeWindowIds, snapshot],
+  );
+  const visibleMergeWindowIds = useMemo(
+    () => new Set(orderedMergeWindowIds),
+    [orderedMergeWindowIds],
+  );
+  const duplicateTabs = useMemo<DedupePreviewTab[]>(
     () =>
       snapshot?.windows.flatMap((window) =>
-        window.id !== resolvedMergeDestinationId && mergeSourceWindowIds.has(window.id)
-          ? [window.id]
-          : [],
+        window.tabs.map((tab) => ({
+          ...tab,
+          windowLabel: window.label,
+        })),
       ) ?? [],
-    [mergeSourceWindowIds, resolvedMergeDestinationId, snapshot],
+    [snapshot],
   );
-  const visibleMergeSourceIds = useMemo(
-    () => new Set(orderedMergeSourceIds),
-    [orderedMergeSourceIds],
+  const duplicateRules = useMemo(
+    () => (settings.advancedDuplicateMatchingEnabled ? settings.deduplicationRules : []),
+    [settings.advancedDuplicateMatchingEnabled, settings.deduplicationRules],
   );
-  const duplicatePlan = useMemo(() => {
-    const tabs = snapshot?.windows.flatMap((window) => window.tabs) ?? [];
+  const duplicateKeeperPreference = useMemo(() => {
     const preferredWindow =
       snapshot?.windows.find((window) => window.isCurrent) ??
       snapshot?.windows.find((window) => window.focused);
-    return planDuplicateTabs(
-      tabs,
-      settings.advancedDuplicateMatchingEnabled ? settings.deduplicationRules : [],
-      {
-        tabId: preferredWindow?.tabs.find((tab) => tab.active)?.id,
-        windowId: preferredWindow?.id,
-      },
+    return {
+      tabId: preferredWindow?.tabs.find((tab) => tab.active)?.id,
+      windowId: preferredWindow?.id,
+    };
+  }, [snapshot]);
+  const duplicatePlan = useMemo(
+    () => planDuplicateTabs(duplicateTabs, duplicateRules, duplicateKeeperPreference),
+    [duplicateKeeperPreference, duplicateRules, duplicateTabs],
+  );
+  const filteredTabIds = useMemo(
+    () =>
+      new Set(
+        filtered?.windows.flatMap((activeWindow) => activeWindow.tabs.map((tab) => tab.id)) ?? [],
+      ),
+    [filtered],
+  );
+  const visibleDuplicateGroups = useMemo(
+    () =>
+      hasFilter
+        ? duplicatePlan.duplicateGroups.filter((group) =>
+            [group.keeperTabId, ...group.duplicateTabIds].some((tabId) =>
+              filteredTabIds.has(tabId),
+            ),
+          )
+        : duplicatePlan.duplicateGroups,
+    [duplicatePlan.duplicateGroups, filteredTabIds, hasFilter],
+  );
+  const duplicateKeeperTabIds = useMemo(
+    () => new Set(visibleDuplicateGroups.map((group) => group.keeperTabId)),
+    [visibleDuplicateGroups],
+  );
+  const duplicateCloseTabIds = useMemo(
+    () => new Set(visibleDuplicateGroups.flatMap((group) => group.duplicateTabIds)),
+    [visibleDuplicateGroups],
+  );
+  const visibleDuplicateCloseTabIds = useMemo(
+    () => duplicatePlan.duplicateTabIds.filter((tabId) => duplicateCloseTabIds.has(tabId)),
+    [duplicateCloseTabIds, duplicatePlan.duplicateTabIds],
+  );
+  const duplicatePreviewTabIds = useMemo(
+    () => new Set([...duplicateKeeperTabIds, ...duplicateCloseTabIds]),
+    [duplicateCloseTabIds, duplicateKeeperTabIds],
+  );
+  const actionSelectedTabIdsInOrder = useMemo(
+    () =>
+      duplicatePreviewMode
+        ? selectedTabIdsInOrder.filter((tabId) => duplicatePreviewTabIds.has(tabId))
+        : selectedTabIdsInOrder,
+    [duplicatePreviewMode, duplicatePreviewTabIds, selectedTabIdsInOrder],
+  );
+  const actionSelectedTabIsOnlyTabInWindow = useMemo(() => {
+    if (!snapshot || actionSelectedTabIdsInOrder.length !== 1) {
+      return false;
+    }
+    const selectedTabId = actionSelectedTabIdsInOrder[0];
+    return snapshot.windows.some(
+      (window) => window.tabs.length === 1 && window.tabs[0]?.id === selectedTabId,
     );
-  }, [settings.advancedDuplicateMatchingEnabled, settings.deduplicationRules, snapshot]);
+  }, [actionSelectedTabIdsInOrder, snapshot]);
+  const actionSelectedCount = actionSelectedTabIdsInOrder.length;
+  const actionSelectedGroupIdsInOrder = useMemo(() => {
+    if (!duplicatePreviewMode) {
+      return selectedGroupIdsInOrder;
+    }
+    const actionSelectedTabIds = new Set(actionSelectedTabIdsInOrder);
+    return selectedGroupIdsInOrder.filter((groupId) =>
+      snapshot?.windows.some((window) => {
+        const groupTabIds = window.tabs.flatMap((tab) => (tab.groupId === groupId ? [tab.id] : []));
+        return (
+          groupTabIds.length > 0 && groupTabIds.every((tabId) => actionSelectedTabIds.has(tabId))
+        );
+      }),
+    );
+  }, [actionSelectedTabIdsInOrder, duplicatePreviewMode, selectedGroupIdsInOrder, snapshot]);
+  const canMoveSelectedTabsToNewWindow =
+    actionSelectedCount > 0 && !actionSelectedTabIsOnlyTabInWindow;
+  const displayedSelectedGroupIds = duplicatePreviewMode ? selectedGroupIds : validSelectedGroupIds;
+  const duplicateActionTabIds = duplicatePreviewMode
+    ? visibleDuplicateCloseTabIds
+    : duplicatePlan.duplicateTabIds;
+
+  const displayed = useMemo(() => {
+    if (!filtered || !snapshot || !duplicatePreviewMode) {
+      return filtered;
+    }
+
+    return {
+      ...filtered,
+      windows: snapshot.windows
+        .map((activeWindow) => {
+          const tabs = activeWindow.tabs.filter((tab) => duplicatePreviewTabIds.has(tab.id));
+          const groupIds = new Set(
+            tabs.flatMap((tab) => (tab.groupId === null ? [] : [tab.groupId])),
+          );
+
+          return {
+            ...activeWindow,
+            groups: activeWindow.groups.filter((group) => groupIds.has(group.id)),
+            tabs,
+          };
+        })
+        .filter((activeWindow) => activeWindow.tabs.length > 0),
+    };
+  }, [duplicatePreviewMode, duplicatePreviewTabIds, filtered, snapshot]);
+
+  const displayedWindowsById = useMemo(
+    () =>
+      new Map(
+        (displayed?.windows ?? EMPTY_WINDOWS).map((activeWindow) => [
+          activeWindow.id,
+          activeWindow,
+        ]),
+      ),
+    [displayed?.windows],
+  );
+  const layoutWindows = useMemo(
+    () =>
+      duplicatePreviewMode
+        ? (snapshot?.windows ?? EMPTY_WINDOWS)
+        : (displayed?.windows ?? EMPTY_WINDOWS),
+    [displayed?.windows, duplicatePreviewMode, snapshot?.windows],
+  );
+  const layoutWindowCount = layoutWindows.length;
+  const visibleTabIds = useMemo(
+    () =>
+      displayed?.windows.flatMap((activeWindow) => activeWindow.tabs.map((tab) => tab.id)) ?? [],
+    [displayed],
+  );
+  const windowColumns = useMemo(() => {
+    const columns = distributeAcrossWindowColumns(
+      layoutWindows,
+      windowColumnCount,
+      (activeWindow) =>
+        estimateWindowCardHeight(
+          activeWindow,
+          settings.showTabUrls,
+          collapsedWindowIds.has(activeWindow.id),
+        ),
+    );
+
+    if (!duplicatePreviewMode) {
+      return columns;
+    }
+
+    return columns.map((column) =>
+      column.flatMap((activeWindow) => {
+        const displayedWindow = displayedWindowsById.get(activeWindow.id);
+        return displayedWindow ? [displayedWindow] : [];
+      }),
+    );
+  }, [
+    collapsedWindowIds,
+    displayedWindowsById,
+    duplicatePreviewMode,
+    layoutWindows,
+    settings.showTabUrls,
+    windowColumnCount,
+  ]);
+
+  useEffect(() => {
+    if (!windowGridElement || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const updateColumnCount = (width: number) => {
+      const nextColumnCount = getWindowColumnCount(width, layoutWindowCount);
+      setWindowColumnCount((current) => (current === nextColumnCount ? current : nextColumnCount));
+    };
+    updateColumnCount(windowGridElement.getBoundingClientRect().width);
+
+    const observer = new ResizeObserver((entries) => {
+      updateColumnCount(entries[0]?.contentRect.width ?? windowGridElement.clientWidth);
+    });
+    observer.observe(windowGridElement);
+    return () => observer.disconnect();
+  }, [layoutWindowCount, windowGridElement]);
+
   const saveWindowTarget = snapshot?.windows.find((window) => window.id === saveWindowId) ?? null;
 
   const beginOperation = (label: string | null, resetFeedback = true) => {
@@ -483,12 +610,7 @@ export function ActiveWindowsPage({
     }
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
-      const targetElement = target instanceof Element ? target : null;
-      if (
-        target instanceof Node &&
-        !mergeControlRef.current?.contains(target) &&
-        !targetElement?.closest('.merge-destination-popover')
-      ) {
+      if (target instanceof Node && !mergeControlRef.current?.contains(target)) {
         closeMergeDialog(false);
       }
     };
@@ -504,6 +626,7 @@ export function ActiveWindowsPage({
   const openSaveWindowDialog = (windowId: number, trigger: HTMLButtonElement) => {
     saveWindowTriggerRef.current = trigger;
     setMergeDialogOpen(false);
+    setDuplicatePreviewMode(false);
     setSaveWindowId(windowId);
   };
 
@@ -536,10 +659,46 @@ export function ActiveWindowsPage({
     });
   };
 
-  const clearSelection = () => {
-    selection.clear();
+  const clearSelection = useCallback(() => {
+    clearTabSelection();
     setSelectedGroupIds((current) => (current.size === 0 ? current : new Set()));
-  };
+  }, [clearTabSelection]);
+
+  useEffect(() => {
+    if (
+      !duplicatePreviewMode ||
+      ![...selection.selectedIds].some((tabId) => !duplicatePreviewTabIds.has(tabId))
+    ) {
+      return;
+    }
+    const timeoutId = globalThis.setTimeout(clearSelection, 0);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [clearSelection, duplicatePreviewMode, duplicatePreviewTabIds, selection.selectedIds]);
+
+  const enterDuplicatePreview = useCallback(() => {
+    closeMergeDialog(false);
+    clearSelection();
+    setQuery('');
+    setDuplicatePreviewMode(true);
+  }, [clearSelection, closeMergeDialog]);
+
+  useEffect(() => {
+    const consumeDuplicateTabsLaunch = () => {
+      if (!isDuplicateTabsLaunchRoute(window.location.hash)) {
+        return;
+      }
+      enterDuplicatePreview();
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}`,
+      );
+    };
+
+    consumeDuplicateTabsLaunch();
+    window.addEventListener('hashchange', consumeDuplicateTabsLaunch);
+    return () => window.removeEventListener('hashchange', consumeDuplicateTabsLaunch);
+  }, [enterDuplicatePreview]);
 
   const setTabsSelected = (tabIds: readonly number[], checked: boolean) => {
     clearSelectedGroupIntentForTabs(tabIds);
@@ -555,7 +714,7 @@ export function ActiveWindowsPage({
   };
 
   const updateQuery = (nextQuery: string) => {
-    if (query.trim() && !nextQuery.trim()) {
+    if (duplicatePreviewMode ? nextQuery !== query : query.trim() && !nextQuery.trim()) {
       clearSelection();
     }
     setQuery(nextQuery);
@@ -683,13 +842,13 @@ export function ActiveWindowsPage({
 
   const closeSelectedTabs = async () => {
     if (
-      selectedTabIdsInOrder.length === 0 ||
-      !beginOperation(`Closing ${pluralize(selectedTabIdsInOrder.length, 'tab')}`)
+      actionSelectedCount === 0 ||
+      !beginOperation(`Closing ${pluralize(actionSelectedCount, 'tab')}`)
     ) {
       return;
     }
     try {
-      const result = await service.closeTabs(selectedTabIdsInOrder);
+      const result = await service.closeTabs(actionSelectedTabIdsInOrder);
       if (result.failures.length === 0) {
         clearSelection();
       } else {
@@ -707,14 +866,14 @@ export function ActiveWindowsPage({
   const moveSelectedTabs = async () => {
     if (
       !canMoveSelectedTabsToNewWindow ||
-      !beginOperation(`Moving ${pluralize(selectedTabIdsInOrder.length, 'tab')}`)
+      !beginOperation(`Moving ${pluralize(actionSelectedCount, 'tab')}`)
     ) {
       return;
     }
     try {
       const result = await service.moveTabsToNewWindow(
-        selectedTabIdsInOrder,
-        selectedGroupIdsInOrder,
+        actionSelectedTabIdsInOrder,
+        actionSelectedGroupIdsInOrder,
       );
       if (result.failures.length === 0) {
         clearSelection();
@@ -749,19 +908,16 @@ export function ActiveWindowsPage({
   };
 
   const removeDuplicateTabs = async () => {
-    const undoCandidates = snapshot
-      ? createRestorableTabs(snapshot, duplicatePlan.duplicateTabIds)
-      : [];
+    const undoCandidates = snapshot ? createRestorableTabs(snapshot, duplicateActionTabIds) : [];
     if (
-      duplicatePlan.duplicateTabIds.length === 0 ||
+      duplicateActionTabIds.length === 0 ||
       settingsLoading ||
-      !beginOperation(`Removing ${pluralize(duplicatePlan.duplicateTabIds.length, 'duplicate')}`)
+      !beginOperation(`Removing ${pluralize(duplicateActionTabIds.length, 'duplicate')}`)
     ) {
       return;
     }
-
     try {
-      const result = await service.closeTabs(duplicatePlan.duplicateTabIds);
+      const result = await service.closeTabs(duplicateActionTabIds);
       setTabsSelected(result.closedTabIds, false);
       setOperationError(summarizeFailures('closed', result.failures));
       if (result.closedTabIds.length > 0) {
@@ -833,23 +989,14 @@ export function ActiveWindowsPage({
     if (!snapshot || snapshot.windows.length < 2) {
       return;
     }
-    setMergeDestinationWindowId(snapshot.windows[0]?.id ?? null);
-    setMergeSourceWindowIds(new Set());
+    setDuplicatePreviewMode(false);
+    setMergeWindowIds(new Set());
     updateMergeDialogPosition();
     setMergeDialogOpen(true);
   };
 
-  const changeMergeDestination = (windowId: number) => {
-    setMergeDestinationWindowId(windowId);
-    setMergeSourceWindowIds((current) => {
-      const next = new Set(current);
-      next.delete(windowId);
-      return next;
-    });
-  };
-
-  const toggleMergeSource = (windowId: number, selected: boolean) => {
-    setMergeSourceWindowIds((current) => {
+  const toggleMergeWindow = (windowId: number, selected: boolean) => {
+    setMergeWindowIds((current) => {
       const next = new Set(current);
       if (selected) {
         next.add(windowId);
@@ -860,36 +1007,26 @@ export function ActiveWindowsPage({
     });
   };
 
-  const setAllMergeSources = (selected: boolean) => {
-    setMergeSourceWindowIds(
-      new Set(
-        selected
-          ? (snapshot?.windows.flatMap((window) =>
-              window.id === resolvedMergeDestinationId ? [] : [window.id],
-            ) ?? [])
-          : [],
-      ),
+  const setAllMergeWindows = (selected: boolean) => {
+    setMergeWindowIds(
+      new Set(selected ? (snapshot?.windows.map((window) => window.id) ?? []) : []),
     );
   };
 
   const mergeWindows = async () => {
     if (
-      resolvedMergeDestinationId === null ||
-      orderedMergeSourceIds.length === 0 ||
-      !beginOperation(`Merging ${pluralize(orderedMergeSourceIds.length + 1, 'window')}`)
+      orderedMergeWindowIds.length < 2 ||
+      !beginOperation(`Merging ${pluralize(orderedMergeWindowIds.length, 'window')}`)
     ) {
       return;
     }
     setMergeDialogOpen(false);
 
     try {
-      const result = await service.mergeWindows([
-        resolvedMergeDestinationId,
-        ...orderedMergeSourceIds,
-      ]);
+      const result = await service.mergeWindows(orderedMergeWindowIds);
       clearSelection();
       setQuery('');
-      setMergeSourceWindowIds(new Set());
+      setMergeWindowIds(new Set());
       setOperationError(summarizeFailures('moved', result.failures, result.warnings));
       await refresh();
     } catch {
@@ -1124,20 +1261,48 @@ export function ActiveWindowsPage({
       </span>
     </div>
   );
+  const duplicateActionLabel =
+    duplicatePreviewMode && hasFilter ? 'Close filtered duplicate tabs' : 'Close duplicate tabs';
+  const duplicateActionDisabled =
+    settingsLoading || duplicateActionTabIds.length === 0 || operationLabel !== null;
+  const duplicatePreviewDisabled =
+    settingsLoading ||
+    operationLabel !== null ||
+    (!duplicatePreviewMode && duplicatePlan.duplicateTabIds.length === 0);
   const removeDuplicatesControl = (
-    <button
-      className="toolbar-button topbar-remove-duplicates-button"
-      type="button"
-      title="Close duplicate tabs"
-      disabled={
-        settingsLoading || duplicatePlan.duplicateTabIds.length === 0 || operationLabel !== null
-      }
-      onClick={() => void removeDuplicateTabs()}
-    >
-      <CopyX aria-hidden="true" size={16} />
-      <span className="topbar-action-label">Close duplicate tabs</span>
-      <span className="toolbar-count">{duplicatePlan.duplicateTabIds.length}</span>
-    </button>
+    <div className="duplicate-preview-control">
+      <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
+        <button
+          className="toolbar-button topbar-remove-duplicates-button"
+          type="button"
+          title={duplicateActionLabel}
+          disabled={duplicateActionDisabled}
+          onClick={() => void removeDuplicateTabs()}
+        >
+          <CopyX aria-hidden="true" size={16} />
+          <span className="topbar-action-label">{duplicateActionLabel}</span>
+          <span className="toolbar-count">{duplicateActionTabIds.length}</span>
+        </button>
+        <button
+          className="toolbar-button topbar-duplicate-preview-button"
+          type="button"
+          aria-label="Show duplicate tabs only"
+          aria-pressed={duplicatePreviewMode}
+          title={duplicatePreviewMode ? 'Show all tabs' : 'Show duplicate tabs only'}
+          disabled={duplicatePreviewDisabled}
+          onClick={() => {
+            if (duplicatePreviewMode) {
+              closeMergeDialog(false);
+              setDuplicatePreviewMode(false);
+              return;
+            }
+            enterDuplicatePreview();
+          }}
+        >
+          <Eye aria-hidden="true" size={16} />
+        </button>
+      </div>
+    </div>
   );
   const mergeControl = (
     <div className="merge-control" ref={mergeControlRef}>
@@ -1146,26 +1311,31 @@ export function ActiveWindowsPage({
         className="toolbar-button topbar-merge-button"
         type="button"
         aria-label="Merge windows"
+        aria-controls="merge-windows-dialog"
         aria-expanded={mergeDialogOpen}
+        aria-haspopup="dialog"
         title="Merge windows"
-        disabled={!snapshot || snapshot.windows.length < 2 || operationLabel !== null}
+        disabled={
+          duplicatePreviewMode ||
+          !snapshot ||
+          snapshot.windows.length < 2 ||
+          operationLabel !== null
+        }
         onClick={() => (mergeDialogOpen ? closeMergeDialog() : openMergeDialog())}
       >
         <Merge aria-hidden="true" size={16} />
         <span>Merge windows</span>
       </button>
 
-      {mergeDialogOpen && snapshot && resolvedMergeDestinationId !== null ? (
+      {mergeDialogOpen && snapshot ? (
         <MergeWindowsDialog
-          destinationWindowId={resolvedMergeDestinationId}
           disabled={operationLabel !== null}
           horizontalOffset={mergeDialogHorizontalOffset}
           onApply={() => void mergeWindows()}
-          onChangeDestination={changeMergeDestination}
-          onClose={() => closeMergeDialog()}
-          onSetAllSources={setAllMergeSources}
-          onToggleSource={toggleMergeSource}
-          sourceWindowIds={visibleMergeSourceIds}
+          onClose={closeMergeDialog}
+          onSetAllWindows={setAllMergeWindows}
+          onToggleWindow={toggleMergeWindow}
+          selectedWindowIds={visibleMergeWindowIds}
           windows={snapshot.windows}
         />
       ) : null}
@@ -1242,7 +1412,7 @@ export function ActiveWindowsPage({
             <SortCriterionMenu
               ariaLabel="Sort all windows by"
               value={sortCriterion}
-              disabled={!snapshot || operationLabel !== null}
+              disabled={duplicatePreviewMode || !snapshot || operationLabel !== null}
               onChange={setSortCriterion}
             />
             <button
@@ -1250,7 +1420,7 @@ export function ActiveWindowsPage({
               type="button"
               aria-label={`Sort direction ${sortDirection === 'asc' ? 'A to Z' : 'Z to A'}`}
               title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-              disabled={!snapshot || operationLabel !== null}
+              disabled={duplicatePreviewMode || !snapshot || operationLabel !== null}
               onClick={() => setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))}
             >
               {sortDirection === 'asc' ? (
@@ -1264,6 +1434,7 @@ export function ActiveWindowsPage({
               type="button"
               disabled={
                 !snapshot ||
+                duplicatePreviewMode ||
                 snapshot.windows.length === 0 ||
                 settingsLoading ||
                 operationLabel !== null
@@ -1285,19 +1456,19 @@ export function ActiveWindowsPage({
             onClick={() => void moveSelectedTabs()}
           >
             <AppWindow aria-hidden="true" size={16} />
-            <span>New window</span>
-            <span className="toolbar-count">{selection.selectedCount}</span>
+            <span>Open in new window</span>
+            <span className="toolbar-count">{actionSelectedCount}</span>
           </button>
 
           <button
             className="toolbar-button danger-toolbar-button"
             type="button"
-            disabled={selection.selectedCount === 0 || operationLabel !== null}
+            disabled={actionSelectedCount === 0 || operationLabel !== null}
             onClick={() => void closeSelectedTabs()}
           >
             <Trash2 aria-hidden="true" size={16} />
             <span>Close</span>
-            <span className="toolbar-count">{selection.selectedCount}</span>
+            <span className="toolbar-count">{actionSelectedCount}</span>
           </button>
         </div>
 
@@ -1370,6 +1541,39 @@ export function ActiveWindowsPage({
         </div>
       ) : null}
 
+      {duplicatePreviewMode && status === 'ready' ? (
+        <div className="duplicate-preview-banner" role="status" aria-label="Duplicate tabs view">
+          <Eye aria-hidden="true" size={17} />
+          <div className="duplicate-preview-banner-copy">
+            <strong>Duplicate tabs view</strong>
+            <span>Green tabs stay open. Red tabs will close.</span>
+          </div>
+          <div className="duplicate-preview-banner-actions">
+            <button
+              className="duplicate-preview-banner-action duplicate-preview-banner-close"
+              type="button"
+              aria-label={`${duplicateActionLabel}: ${pluralize(duplicateActionTabIds.length, 'tab')}`}
+              title={duplicateActionLabel}
+              disabled={duplicateActionDisabled}
+              onClick={() => void removeDuplicateTabs()}
+            >
+              <span>{duplicateActionLabel}</span>
+              <span className="toolbar-count" aria-hidden="true">
+                {duplicateActionTabIds.length}
+              </span>
+            </button>
+            <button
+              className="duplicate-preview-banner-action duplicate-preview-banner-exit"
+              type="button"
+              aria-label="Exit duplicate tabs view"
+              onClick={() => setDuplicatePreviewMode(false)}
+            >
+              Show all tabs
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {status === 'loading' ? (
         <div className="window-grid window-grid-loading" aria-hidden="true">
           {[0, 1, 2].map((item) => (
@@ -1398,8 +1602,8 @@ export function ActiveWindowsPage({
         />
       ) : null}
 
-      {status === 'ready' && filtered && snapshot && snapshot.windows.length > 0 ? (
-        filtered.windows.length > 0 ? (
+      {status === 'ready' && displayed && snapshot && snapshot.windows.length > 0 ? (
+        displayed.windows.length > 0 ? (
           <div
             className="window-grid window-grid-columns"
             ref={setWindowGridElement}
@@ -1443,13 +1647,18 @@ export function ActiveWindowsPage({
                         allWindowTabs={allWindowTabs}
                         collapsed={collapsedWindowIds.has(window.id)}
                         disabled={operationLabel !== null}
+                        {...(duplicatePreviewMode
+                          ? {
+                              duplicatePreviewCloseTabIds: duplicateCloseTabIds,
+                              duplicatePreviewKeepTabIds: duplicateKeeperTabIds,
+                              groupActionTabs: window.tabs,
+                            }
+                          : {})}
                         extensionOrigin={snapshot.extensionOrigin}
                         draggedGroupId={draggedGroupId}
                         draggedTabIds={draggedTabIds}
                         dropTarget={tabDropTarget}
-                        mergeSourceSelected={
-                          mergeDialogOpen && visibleMergeSourceIds.has(window.id)
-                        }
+                        mergeSelected={mergeDialogOpen && visibleMergeWindowIds.has(window.id)}
                         onCloseTab={(tabId) => void closeTab(tabId)}
                         onCloseWindow={(windowId) => void closeWindow(windowId)}
                         onSortCriterionChange={(criterion) =>
@@ -1464,6 +1673,7 @@ export function ActiveWindowsPage({
                         showTabUrls={settings.showTabUrls}
                         sortCriterion={windowSortSelection.criterion}
                         sortDirection={windowSortSelection.direction}
+                        windowActionsAvailable={!duplicatePreviewMode}
                         onSetTabsSelected={setTabsSelected}
                         onToggleTabSelected={toggleTabSelected}
                         onToggleCollapsed={toggleWindowCollapsed}
@@ -1479,7 +1689,7 @@ export function ActiveWindowsPage({
                         onTabDragOver={setTabDropTargetForWindow}
                         onTabDragStart={startTabDrag}
                         onTabDrop={(target) => void dropDraggedTabs(target)}
-                        selectedGroupIds={validSelectedGroupIds}
+                        selectedGroupIds={displayedSelectedGroupIds}
                       />
                       {newWindowDropTarget?.placement === 'after' ? dropZone : null}
                     </Fragment>
@@ -1490,11 +1700,38 @@ export function ActiveWindowsPage({
           </div>
         ) : (
           <div className="filter-empty">
-            <Search aria-hidden="true" size={24} />
-            <h3>No matching tabs</h3>
-            <button type="button" onClick={() => updateQuery('')}>
-              Clear filter
-            </button>
+            {duplicatePreviewMode ? (
+              <>
+                <Eye aria-hidden="true" size={24} />
+                {settingsLoading ? (
+                  <h3>Loading duplicate tabs…</h3>
+                ) : hasFilter &&
+                  duplicatePlan.duplicateGroups.length > 0 &&
+                  visibleDuplicateGroups.length === 0 ? (
+                  <>
+                    <h3>No matching duplicate tabs</h3>
+                    <button type="button" onClick={() => updateQuery('')}>
+                      Clear filter
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h3>No duplicate tabs</h3>
+                    <button type="button" onClick={() => setDuplicatePreviewMode(false)}>
+                      Show all tabs
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Search aria-hidden="true" size={24} />
+                <h3>No matching tabs</h3>
+                <button type="button" onClick={() => updateQuery('')}>
+                  Clear filter
+                </button>
+              </>
+            )}
           </div>
         )
       ) : null}

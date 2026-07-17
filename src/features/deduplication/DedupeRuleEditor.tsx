@@ -23,6 +23,7 @@ import {
   orderBuiltInDedupeRulesFirst,
   validateDedupeRule,
 } from './deduplication';
+import { DedupePreviewGroups } from './DedupePreviewGroups';
 import {
   BUILT_IN_DEDUPE_PRESETS,
   type BuiltInDedupePreset,
@@ -501,16 +502,18 @@ export function DedupeRuleEditor({
                               <small>Rule disabled</small>
                             ) : example ? (
                               <div className="dedupe-comparison-example">
-                                <span>
-                                  <small>Original</small>
-                                  <code title={example.tab.url}>
-                                    {formatDedupeExampleUrl(example.tab.url)}
-                                  </code>
-                                </span>
-                                <span>
-                                  <small>Compared as</small>
-                                  <code title={example.identity}>{example.identity}</code>
-                                </span>
+                                <div className="dedupe-comparison-values">
+                                  <div className="dedupe-comparison-value">
+                                    <small>Open tab URL</small>
+                                    <code title={example.tab.url}>
+                                      {formatDedupeExampleUrl(example.tab.url)}
+                                    </code>
+                                  </div>
+                                  <div className="dedupe-comparison-value">
+                                    <small>Compared as</small>
+                                    <code title={example.identity}>{example.identity}</code>
+                                  </div>
+                                </div>
                                 {shadowingRule ? (
                                   <small className="dedupe-shadow-warning">
                                     Handled first by {getDedupeRuleDisplayName(shadowingRule)}
@@ -595,40 +598,7 @@ export function DedupeRuleEditor({
                     No open tabs would close with the current draft.
                   </p>
                 ) : (
-                  <div className="dedupe-preview-groups">
-                    {previewGroups.map((group, groupIndex) => (
-                      <div
-                        className="dedupe-preview-group"
-                        key={`${group.ruleId ?? 'exact'}-${groupIndex}-${group.identity}`}
-                      >
-                        <header>
-                          <div>
-                            <strong>{group.ruleName}</strong>
-                            <span>{pluralize(group.closeTabs.length, 'tab')} would close</span>
-                          </div>
-                          <code title={group.identity}>{group.identity}</code>
-                        </header>
-                        <ul>
-                          <li>
-                            <span className="dedupe-preview-action is-keep">Keep</span>
-                            <span className="dedupe-preview-tab-copy">
-                              <strong>{group.keepTab.title}</strong>
-                              <small>{group.keepTab.windowLabel}</small>
-                            </span>
-                          </li>
-                          {group.closeTabs.map((tab) => (
-                            <li key={tab.id}>
-                              <span className="dedupe-preview-action is-close">Close</span>
-                              <span className="dedupe-preview-tab-copy">
-                                <strong>{tab.title}</strong>
-                                <small>{tab.windowLabel}</small>
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
+                  <DedupePreviewGroups groups={previewGroups} />
                 )}
               </div>
             ) : null}

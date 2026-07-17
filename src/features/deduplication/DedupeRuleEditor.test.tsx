@@ -228,7 +228,7 @@ describe('DedupeRuleEditor', () => {
     expect(
       screen.getByText(/handled first by app\.example\.com - One tab per site/i),
     ).toBeInTheDocument();
-    expect(screen.getAllByText('Original')).toHaveLength(2);
+    expect(screen.getAllByText('Open tab URL')).toHaveLength(2);
     expect(screen.getAllByText('Compared as')).toHaveLength(4);
     expect(screen.getAllByText('app.example.com/projects/42?view=board')).toHaveLength(2);
 
@@ -236,9 +236,10 @@ describe('DedupeRuleEditor', () => {
     const preview = screen.getByRole('region', { name: 'Duplicate match preview' });
 
     expect(within(preview).getByText('Project 42')).toBeInTheDocument();
-    expect(within(preview).getByText('Project 99')).toBeInTheDocument();
-    expect(within(preview).getByText('Keep')).toBeInTheDocument();
-    expect(within(preview).getByText('Close')).toBeInTheDocument();
+    expect(within(preview).getByText(/Also closes: Project 99/)).toBeInTheDocument();
+    expect(within(preview).getByText('Keep open')).toBeInTheDocument();
+    expect(within(preview).getByText('Close 1')).toBeInTheDocument();
+    expect(within(preview).getByText(/1 match .* 1 tab would close/)).toBeInTheDocument();
   });
 
   it('toggles each built-in preset as one setting', async () => {

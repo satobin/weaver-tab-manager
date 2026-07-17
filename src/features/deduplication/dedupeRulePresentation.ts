@@ -89,13 +89,14 @@ interface DedupeRuleExample {
   tab: DedupePreviewTab;
 }
 
-interface DedupePreviewGroup {
+export interface DedupePreviewGroup {
   closeTabs: DedupePreviewTab[];
   identity: string;
   keepTab: DedupePreviewTab;
   matchType: 'exact' | 'site-rule';
   ruleId: string | null;
   ruleName: string;
+  sectionId: string;
 }
 
 function patternHostname(glob: string): string {
@@ -117,6 +118,15 @@ export function getDedupeRuleDisplayName(rule: DedupeRule): string {
     return builtInPreset.name;
   }
   return `${patternHostname(rule.glob)} - ${STRATEGY_SHORT_NAMES[rule.comparisonMode]}`;
+}
+
+function getDedupePreviewSectionId(ruleId: string | null, rule: DedupeRule | undefined): string {
+  if (ruleId === null) {
+    return 'exact-url';
+  }
+
+  const builtInPreset = rule ? getBuiltInDedupePresetForRule(rule) : null;
+  return builtInPreset ? `preset:${builtInPreset.id}` : `rule:${ruleId}`;
 }
 
 function getCanonicalIdentity(canonical: CanonicalizedTabUrl): string {
@@ -178,6 +188,7 @@ export function buildDedupePreview(
         matchType: group.matchType,
         ruleId: group.ruleId,
         ruleName: rule ? getDedupeRuleDisplayName(rule) : 'Exact URL match',
+        sectionId: getDedupePreviewSectionId(group.ruleId, rule),
       },
     ];
   });

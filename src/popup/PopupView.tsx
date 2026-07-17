@@ -1,7 +1,17 @@
-import { ArrowDownAZ, ArrowUpZA, CirclePause, CopyX, Pause, Play, Search, X } from 'lucide-react';
+import {
+  ArrowDownAZ,
+  ArrowUpZA,
+  CirclePause,
+  CopyX,
+  Eye,
+  Pause,
+  Play,
+  Search,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { APP_ROUTES } from '../app/routes';
+import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../app/routes';
 import {
   createChromeActiveWindowsService,
   type ActiveWindowsService,
@@ -115,8 +125,8 @@ export function Popup({
     };
   }, []);
 
-  const openManager = async () => {
-    const message: OpenAppMessage = { type: OPEN_APP_MESSAGE, route: APP_ROUTES.windows };
+  const openManager = async (route: string = APP_ROUTES.windows) => {
+    const message: OpenAppMessage = { type: OPEN_APP_MESSAGE, route };
     setActionError(null);
     try {
       const response: unknown = await chrome.runtime.sendMessage(message);
@@ -380,20 +390,32 @@ export function Popup({
               Sort
             </button>
           </div>
-          <button
-            className="popup-quick-action"
-            type="button"
-            data-operation-locked={
-              pendingAction !== null && !dedupeUnavailable ? 'true' : undefined
-            }
-            disabled={dedupeUnavailable || pendingAction !== null}
-            aria-busy={pendingAction === 'dedupe'}
-            onClick={() => void removeDuplicateTabs()}
-          >
-            <CopyX aria-hidden="true" size={16} />
-            <span>Close duplicate tabs</span>
-            <small>{duplicatePlan.duplicateTabIds.length}</small>
-          </button>
+          <div className="popup-duplicate-control" role="group" aria-label="Duplicate tab actions">
+            <button
+              className="popup-quick-action popup-duplicate-close-action"
+              type="button"
+              data-operation-locked={
+                pendingAction !== null && !dedupeUnavailable ? 'true' : undefined
+              }
+              disabled={dedupeUnavailable || pendingAction !== null}
+              aria-busy={pendingAction === 'dedupe'}
+              onClick={() => void removeDuplicateTabs()}
+            >
+              <CopyX aria-hidden="true" size={16} />
+              <span>Close duplicate tabs</span>
+              <small>{duplicatePlan.duplicateTabIds.length}</small>
+            </button>
+            <button
+              className="popup-quick-action popup-duplicate-preview-action"
+              type="button"
+              aria-label="Show duplicate tabs across all windows in Window Manager"
+              title="Show duplicate tabs across all windows in Window Manager"
+              disabled={!snapshot || settingsLoading || pendingAction !== null}
+              onClick={() => void openManager(APP_LAUNCH_ROUTES.duplicateTabs)}
+            >
+              <Eye aria-hidden="true" size={16} />
+            </button>
+          </div>
           <div
             className="popup-suspension-actions"
             role="group"
