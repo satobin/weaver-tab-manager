@@ -8,7 +8,9 @@ Weaver gives you a clear view of every browser window, helps you find the tab yo
 
 ## Install
 
-[Install Weaver from the Chrome Web Store](https://chromewebstore.google.com/detail/weaver-window-tab-manager/lchcjicakojjacjpleolmjcjlppaeobn). Weaver works in Chromium-based browsers that support Chrome Web Store extensions.
+[Install Weaver from the Chrome Web Store](https://chromewebstore.google.com/detail/weaver-window-tab-manager/lchcjicakojjacjpleolmjcjlppaeobn). It works with Google Chrome, Brave, and other Chromium-based browsers that support Chrome Web Store extensions.
+
+Weaver is also available for Microsoft Edge from [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/weaver-window-tab-man/fncihblgmobedbbbnbdhabmjnphdoddh).
 
 [View Weaver's source code on GitHub](https://github.com/satobin/weaver-tab-manager).
 
@@ -29,7 +31,7 @@ Weaver has no account, analytics, or advertising. Open-tab details, preferences,
 
 ## Support
 
-If Weaver helps you, please [leave a review in the Chrome Web Store](https://chromewebstore.google.com/detail/weaver-window-tab-manager/lchcjicakojjacjpleolmjcjlppaeobn).
+If Weaver helps you, please leave a review in the [Chrome Web Store](https://chromewebstore.google.com/detail/weaver-window-tab-manager/lchcjicakojjacjpleolmjcjlppaeobn) or [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/weaver-window-tab-man/fncihblgmobedbbbnbdhabmjnphdoddh).
 
 Use [GitHub Issues](https://github.com/satobin/weaver-tab-manager/issues) for bug reports and feature requests. Do not include private tab titles, URLs, saved-window contents, or other browsing data in an issue. See [SUPPORT.md](SUPPORT.md) for details.
 
