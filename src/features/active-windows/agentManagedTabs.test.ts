@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { detectAgentAssociatedTab, isAgentAssociatedTab } from './agentManagedTabs';
+import {
+  detectAgentAssociatedTab,
+  getRestoredAgentSafeGroupTitle,
+  hasClaudeAgentGroupSignal,
+  isAgentAssociatedTab,
+} from './agentManagedTabs';
 
 function createTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -189,6 +194,32 @@ describe('agent-managed tab detection', () => {
       });
     },
   );
+
+  it('exposes the canonical Claude group matcher for restore provenance decisions', () => {
+    expect(hasClaudeAgentGroupSignal(createGroup())).toBe(true);
+    expect(hasClaudeAgentGroupSignal(createGroup({ color: 'yellow', title: 'Claude (MCP)' }))).toBe(
+      true,
+    );
+    expect(
+      hasClaudeAgentGroupSignal(createGroup({ color: 'blue', title: '✅Browser research' })),
+    ).toBe(true);
+    expect(hasClaudeAgentGroupSignal(createGroup({ title: 'Restored · Claude' }))).toBe(false);
+    expect(hasClaudeAgentGroupSignal(createGroup({ title: 'Restored · ✅Browser research' }))).toBe(
+      false,
+    );
+    expect(hasClaudeAgentGroupSignal(createGroup({ title: 'Planning' }))).toBe(false);
+  });
+
+  it('adds durable provenance only when restoring a group with a Claude signal', () => {
+    expect(getRestoredAgentSafeGroupTitle(createGroup())).toBe('Restored · Claude');
+    expect(
+      getRestoredAgentSafeGroupTitle(createGroup({ color: 'blue', title: '✅Browser research' })),
+    ).toBe('Restored · ✅Browser research');
+    expect(getRestoredAgentSafeGroupTitle(createGroup({ title: 'Planning' }))).toBe('Planning');
+    expect(getRestoredAgentSafeGroupTitle(createGroup({ title: 'Restored · Claude' }))).toBe(
+      'Restored · Claude',
+    );
+  });
 
   it('rejects embedded, bare, and lookalike status emoji group titles', () => {
     const tab = createTab({ groupId: 7 });

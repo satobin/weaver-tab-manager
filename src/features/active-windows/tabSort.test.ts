@@ -4,6 +4,7 @@ import { isTabOrderSorted, planTabSort, type SortableTab, type TabSortOptions } 
 
 function createTab(overrides: Partial<SortableTab> = {}): SortableTab {
   return {
+    agentAssociated: false,
     groupId: null,
     id: 1,
     index: 0,
@@ -58,6 +59,22 @@ describe('planTabSort', () => {
     ).toEqual([1, 2, 4, 3]);
   });
 
+  it('keeps agent-associated groups immutable while sorting ordinary tabs around them', () => {
+    const tabs = [
+      createTab({ id: 1, index: 0, title: 'Zulu before' }),
+      createTab({ id: 2, index: 1, title: 'Alpha before' }),
+      createTab({ agentAssociated: true, groupId: 7, id: 3, index: 2, title: 'Zulu agent' }),
+      createTab({ groupId: 7, id: 4, index: 3, title: 'Alpha agent' }),
+      createTab({ id: 5, index: 4, title: 'Zulu after' }),
+      createTab({ id: 6, index: 5, title: 'Alpha after' }),
+    ];
+
+    expect(
+      planTabSort(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false }).map((tab) => tab.id),
+    ).toEqual([2, 1, 3, 4, 6, 5]);
+    expect(planTabSort(tabs, DEFAULT_OPTIONS).map((tab) => tab.id)).toEqual([2, 1, 3, 4, 6, 5]);
+  });
+
   it('supports URL sorting, descending order, and stable ties', () => {
     const tabs = [
       createTab({ id: 1, index: 0, title: 'First', url: 'https://b.test' }),
@@ -110,6 +127,18 @@ describe('isTabOrderSorted', () => {
 
     expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
     expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(false);
+  });
+
+  it('treats an unchanged agent-associated group as sorted even when its members are not', () => {
+    const tabs = [
+      createTab({ id: 1, index: 0, title: 'Alpha before' }),
+      createTab({ agentAssociated: true, groupId: 7, id: 2, index: 1, title: 'Zulu agent' }),
+      createTab({ agentAssociated: true, groupId: 7, id: 3, index: 2, title: 'Alpha agent' }),
+      createTab({ id: 4, index: 3, title: 'Zulu after' }),
+    ];
+
+    expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
+    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(true);
   });
 
   it('uses browser indices rather than input array order and treats an empty window as sorted', () => {

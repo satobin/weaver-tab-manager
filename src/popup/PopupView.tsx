@@ -270,7 +270,11 @@ export function Popup({
     setDuplicateUndoTabs(null);
     setPendingAction('dedupe');
     try {
-      const result = await service.closeDuplicateTabs(duplicatePlan.duplicateTabIds);
+      const result = await service.closeDuplicateTabs({
+        duplicateGroups: duplicatePlan.duplicateGroups,
+        rules: settings.advancedDuplicateMatchingEnabled ? settings.deduplicationRules : [],
+        tabIds: duplicatePlan.duplicateTabIds,
+      });
       if (result.closedTabIds.length > 0) {
         setDuplicateUndoTabs(result.closedTabs.length > 0 ? result.closedTabs : null);
         setActionNotice(
@@ -291,6 +295,11 @@ export function Popup({
       if (result.skippedAgentManagedTabIds.length > 0) {
         issues.push(
           `${result.skippedAgentManagedTabIds.length} duplicate ${result.skippedAgentManagedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
+        );
+      }
+      if (result.skippedChangedTabIds.length > 0) {
+        issues.push(
+          `${result.skippedChangedTabIds.length} duplicate ${result.skippedChangedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedChangedTabIds.length === 1 ? 'it or its keeper changed or is' : 'they or their keepers changed or are'} still loading.`,
         );
       }
       setActionError(issues.length > 0 ? issues.join(' ') : null);
@@ -576,6 +585,12 @@ export function Popup({
                   <button
                     className="popup-result-main"
                     type="button"
+                    aria-label={`Focus ${tab.title}`}
+                    aria-describedby={
+                      tab.agentAssociated
+                        ? `popup-tab-${tab.id}-agent-managed-description`
+                        : undefined
+                    }
                     title={tab.url || tab.title}
                     onClick={() => void focusTab(tab.windowId, tab.id)}
                   >
@@ -590,7 +605,9 @@ export function Popup({
                       </small>
                     </span>
                     {tab.agentAssociated ? (
-                      <AgentManagedTabIndicator detection={tab.agentDetection} />
+                      <AgentManagedTabIndicator
+                        id={`popup-tab-${tab.id}-agent-managed-description`}
+                      />
                     ) : null}
                   </button>
                   <button

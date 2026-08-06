@@ -42,8 +42,10 @@ const OPENAI_HANDOFF_CIRCLE_ATTRIBUTES: Readonly<Record<string, string>> = {
   fill: '#facc15',
   r: '7',
 };
+const RESTORED_AGENT_GROUP_TITLE_PREFIX = 'Restored · ';
 
 type AgentTabCandidate = Pick<chrome.tabs.Tab, 'favIconUrl' | 'groupId' | 'windowId'>;
+type ClaudeAgentGroupCandidate = Pick<chrome.tabGroups.TabGroup, 'color' | 'title'>;
 type AgentTabGroupCandidate = Pick<
   chrome.tabGroups.TabGroup,
   'color' | 'id' | 'title' | 'windowId'
@@ -102,7 +104,7 @@ function detectOpenAiBrowserControlActivity(favIconUrl: string | undefined): Age
   }
 }
 
-function detectClaudeGroup(group: AgentTabGroupCandidate | null): AgentTabDetection | null {
+function detectClaudeGroup(group: ClaudeAgentGroupCandidate | null): AgentTabDetection | null {
   if (!group) {
     return null;
   }
@@ -138,6 +140,21 @@ function detectClaudeGroup(group: AgentTabGroupCandidate | null): AgentTabDetect
     evidence: 'claude-status-group',
     providerHint: 'claude',
   };
+}
+
+export function hasClaudeAgentGroupSignal(
+  group: Pick<chrome.tabGroups.TabGroup, 'color' | 'title'>,
+): boolean {
+  return detectClaudeGroup(group) !== null;
+}
+
+export function getRestoredAgentSafeGroupTitle(
+  group: Pick<chrome.tabGroups.TabGroup, 'color' | 'title'>,
+): string {
+  const title = group.title?.trim() ?? '';
+  return title && hasClaudeAgentGroupSignal(group)
+    ? `${RESTORED_AGENT_GROUP_TITLE_PREFIX}${title}`
+    : title;
 }
 
 export function detectAgentAssociatedTab(

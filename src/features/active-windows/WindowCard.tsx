@@ -685,10 +685,7 @@ export function WindowCard({
                       {tab.agentAssociated || duplicatePreviewOutcome ? (
                         <span className="tab-state-icons">
                           {tab.agentAssociated ? (
-                            <AgentManagedTabIndicator
-                              detection={tab.agentDetection}
-                              id={agentManagedDescriptionId}
-                            />
+                            <AgentManagedTabIndicator id={agentManagedDescriptionId} />
                           ) : null}
                           {duplicatePreviewOutcome ? (
                             <span

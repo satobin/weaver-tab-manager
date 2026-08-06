@@ -16,7 +16,7 @@ import {
 } from '../test/activeWindowsFixtures';
 import { SettingsPage } from './SettingsPage';
 
-function createActiveWindowsDataSource(): ActiveWindowsDataSource {
+function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWindowsDataSource {
   return {
     loadSnapshot: vi.fn(() =>
       Promise.resolve(
@@ -26,6 +26,7 @@ function createActiveWindowsDataSource(): ActiveWindowsDataSource {
               tabs: [
                 createManagedTab({
                   active: true,
+                  agentAssociated: agentAssociatedTabId === 101,
                   id: 101,
                   title: 'Quarterly plan',
                   url: 'https://docs.google.com/document/d/doc-id/edit?tab=t.0',
@@ -40,6 +41,7 @@ function createActiveWindowsDataSource(): ActiveWindowsDataSource {
               tabs: [
                 createManagedTab({
                   active: true,
+                  agentAssociated: agentAssociatedTabId === 201,
                   id: 201,
                   title: 'Quarterly plan copy',
                   url: 'https://docs.google.com/document/d/doc-id/preview#heading=one',
@@ -173,6 +175,11 @@ describe('SettingsPage', () => {
     expect(
       within(behaviorCard).getByText(
         'Choose how tabs appear and how browser tab groups behave when sorting.',
+      ),
+    ).toBeVisible();
+    expect(
+      within(preserveGroupsGroup as HTMLElement).getByText(
+        'Keep each browser tab group together. Turning this off removes ordinary group membership during a sort; agent-associated groups stay together.',
       ),
     ).toBeVisible();
     expect(appearanceCard?.nextElementSibling).toBe(behaviorCard);
@@ -463,5 +470,26 @@ describe('SettingsPage', () => {
     expect(within(preview).getByText('Keep open')).toBeInTheDocument();
     expect(within(preview).getByText('Close 1')).toBeInTheDocument();
     expect(within(preview).getByText(/1 match .* 1 tab would close/)).toBeInTheDocument();
+  });
+
+  it('shows an agent-associated duplicate as the protected keeper', async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource(201)}
+        service={createService()}
+      />,
+    );
+
+    expect(await screen.findByText('Google Docs, Sheets & Slides')).toBeInTheDocument();
+    await user.click(screen.getByRole('switch', { name: 'Google Docs, Sheets & Slides preset' }));
+    const previewButton = screen.getByRole('button', { name: /Preview matches/ });
+
+    expect(previewButton).toHaveTextContent('1 tab would close');
+    await user.click(previewButton);
+    const preview = screen.getByRole('region', { name: 'Duplicate match preview' });
+    expect(within(preview).getByText('Quarterly plan copy')).toBeInTheDocument();
+    expect(within(preview).getByText(/Also closes: Quarterly plan$/)).toBeInTheDocument();
+    expect(within(preview).getByText('Keep protected')).toBeInTheDocument();
   });
 });

@@ -188,6 +188,7 @@ describe('DedupeRuleEditor', () => {
           keeperPreference: { tabId: 1, windowId: 1 },
           tabs: [
             {
+              agentAssociated: false,
               id: 1,
               index: 0,
               pinned: false,
@@ -197,6 +198,7 @@ describe('DedupeRuleEditor', () => {
               windowLabel: 'Current Window',
             },
             {
+              agentAssociated: false,
               id: 2,
               index: 1,
               pinned: false,

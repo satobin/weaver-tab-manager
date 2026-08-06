@@ -46,6 +46,7 @@ function createService(windowCount = 1): ActiveWindowsService {
         closedTabs: [],
         failures: [],
         skippedAgentManagedTabIds: [],
+        skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),
     closeTabs: () => Promise.resolve({ closedTabIds: [], failures: [] }),

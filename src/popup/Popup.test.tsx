@@ -56,6 +56,7 @@ function createService(): ActiveWindowsService {
         closedTabs: [],
         failures: [],
         skippedAgentManagedTabIds: [],
+        skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),
     ),
@@ -353,13 +354,13 @@ describe('Popup', () => {
 
     await user.type(await screen.findByRole('searchbox', { name: 'Search open tabs' }), 'Agent');
 
-    expect(
-      await screen.findByRole('img', {
-        name: 'Agent-associated tab detected locally · likely Codex/ChatGPT',
-      }),
-    ).toHaveAttribute(
+    const focusButton = await screen.findByRole('button', { name: 'Focus Agent task' });
+    expect(focusButton.querySelector('.agent-managed-tab-indicator')).toHaveAttribute(
       'data-tooltip',
-      'Agent-associated tab detected locally · likely Codex/ChatGPT',
+      'Agent-associated tab · kept open during duplicate cleanup',
+    );
+    expect(focusButton).toHaveAccessibleDescription(
+      'Agent-associated tab · kept open during duplicate cleanup',
     );
     const closeButton = screen.getByRole('button', { name: 'Close Agent task' });
     expect(closeButton).toBeEnabled();
@@ -567,13 +568,16 @@ describe('Popup', () => {
       ],
       failures: [],
       skippedAgentManagedTabIds: [],
+      skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
     renderPopup(service);
 
     await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
 
-    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([101]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
+      expect.objectContaining({ tabIds: [101] }),
+    );
     expect(await screen.findByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
     expect(service.loadSnapshot).toHaveBeenCalledTimes(2);
     expect(screen.getByText('1 duplicate tab removed.')).toBeInTheDocument();
@@ -626,13 +630,16 @@ describe('Popup', () => {
       closedTabs: [],
       failures: [],
       skippedAgentManagedTabIds: [],
+      skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
     renderPopup(service);
 
     await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
 
-    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([103]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
+      expect.objectContaining({ tabIds: [103] }),
+    );
   });
 
   it('reports a duplicate candidate that becomes pinned before removal', async () => {
@@ -656,13 +663,16 @@ describe('Popup', () => {
       closedTabs: [],
       failures: [],
       skippedAgentManagedTabIds: [],
+      skippedChangedTabIds: [],
       skippedPinnedTabIds: [102],
     });
     renderPopup(service);
 
     await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
 
-    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([102]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
+      expect.objectContaining({ tabIds: [102] }),
+    );
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '1 duplicate tab was left open because it is now pinned.',
     );

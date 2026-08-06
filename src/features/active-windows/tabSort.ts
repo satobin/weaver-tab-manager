@@ -8,6 +8,7 @@ export interface TabSortOptions {
 }
 
 export interface SortableTab {
+  agentAssociated: boolean;
   groupId: number | null;
   id: number;
   index: number;
@@ -48,12 +49,47 @@ function sortPartition(tabs: readonly SortableTab[], options: TabSortOptions): S
   return sorted;
 }
 
+function sortAroundAgentGroups(
+  tabs: readonly SortableTab[],
+  options: TabSortOptions,
+): SortableTab[] {
+  const sorted: SortableTab[] = [];
+  const agentGroupIds = new Set(
+    tabs.flatMap((tab) => (tab.agentAssociated && tab.groupId !== null ? [tab.groupId] : [])),
+  );
+  let partitionStart = 0;
+  let index = 0;
+
+  while (index < tabs.length) {
+    const tab = tabs[index];
+    if (!tab || tab.groupId === null || !agentGroupIds.has(tab.groupId)) {
+      index += 1;
+      continue;
+    }
+
+    sorted.push(...sortPartition(tabs.slice(partitionStart, index), options));
+
+    const agentGroupId = tab.groupId;
+    let groupEnd = index + 1;
+    while (groupEnd < tabs.length && tabs[groupEnd]?.groupId === agentGroupId) {
+      groupEnd += 1;
+    }
+    sorted.push(...tabs.slice(index, groupEnd));
+
+    index = groupEnd;
+    partitionStart = groupEnd;
+  }
+
+  sorted.push(...sortPartition(tabs.slice(partitionStart), options));
+  return sorted;
+}
+
 export function planTabSort(tabs: readonly SortableTab[], options: TabSortOptions): SortableTab[] {
   const browserOrder = [...tabs].sort((left, right) => left.index - right.index);
   const pinned = browserOrder.filter((tab) => tab.pinned);
   const unpinned = browserOrder.filter((tab) => !tab.pinned);
 
-  return [...pinned, ...sortPartition(unpinned, options)];
+  return [...pinned, ...sortAroundAgentGroups(unpinned, options)];
 }
 
 export function isTabOrderSorted(tabs: readonly SortableTab[], options: TabSortOptions): boolean {

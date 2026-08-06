@@ -7,6 +7,7 @@ import { buildDedupePreview, type DedupePreviewTab } from './dedupeRulePresentat
 
 function createTab(id: number, title: string, url: string): DedupePreviewTab {
   return {
+    agentAssociated: false,
     id,
     index: id - 1,
     pinned: false,

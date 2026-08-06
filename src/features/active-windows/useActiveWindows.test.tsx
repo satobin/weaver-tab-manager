@@ -19,6 +19,7 @@ function createService() {
         closedTabs: [],
         failures: [],
         skippedAgentManagedTabIds: [],
+        skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),
     ),
@@ -115,6 +116,32 @@ describe('useActiveWindows', () => {
 
     await act(async () => {
       vi.advanceTimersByTime(100);
+      await Promise.resolve();
+    });
+    expect(fake.service.loadSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes on schedule even when events continue throughout the coalescing window', async () => {
+    const fake = createService();
+    const { result } = renderHook(() => useActiveWindows(fake.service));
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    vi.useFakeTimers();
+
+    act(() => {
+      fake.emitChange();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(50);
+      fake.emitChange();
+      vi.advanceTimersByTime(49);
+      fake.emitChange();
+      await Promise.resolve();
+    });
+    expect(fake.service.loadSnapshot).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
       await Promise.resolve();
     });
     expect(fake.service.loadSnapshot).toHaveBeenCalledTimes(2);

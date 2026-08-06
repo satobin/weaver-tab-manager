@@ -445,6 +445,11 @@ describe('createChromeSavedWindowsService', () => {
       createProperties: { windowId: 9 },
       tabIds: [101, 102],
     });
+    expect(fake.api.tabGroups.update).toHaveBeenCalledWith(70, {
+      collapsed: true,
+      color: 'purple',
+      title: 'Planning',
+    });
     expect(fake.api.tabs.update).toHaveBeenCalledWith(101, { active: true });
     expect(fake.callOrder.indexOf('activate:101')).toBeLessThan(
       fake.callOrder.indexOf('remove-placeholder'),
@@ -455,6 +460,46 @@ describe('createChromeSavedWindowsService', () => {
       { tabId: 102, title: 'Notes', url: 'https://notes.example.com/' },
     ]);
     await expect(service.load()).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['Claude', 'orange'],
+    ['Claude (MCP)', 'yellow'],
+    ['✅Browser research', 'blue'],
+  ] as const)(
+    'marks a restored %s group as restored instead of recreating live agent evidence',
+    async (title, color) => {
+      const savedWindow = createSavedWindow({
+        groups: [{ collapsed: false, color, key: 'group-1', title }],
+      });
+      const fake = createApi([savedWindow]);
+      const service = createChromeSavedWindowsService(fake.api, environment);
+
+      await service.restoreWindow(savedWindow.id);
+
+      expect(fake.api.tabGroups.update).toHaveBeenCalledWith(70, {
+        collapsed: false,
+        color,
+        title: `Restored · ${title}`,
+      });
+    },
+  );
+
+  it('does not stack restore provenance on an already-restored group title', async () => {
+    const title = 'Restored · Claude';
+    const savedWindow = createSavedWindow({
+      groups: [{ collapsed: false, color: 'orange', key: 'group-1', title }],
+    });
+    const fake = createApi([savedWindow]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    await service.restoreWindow(savedWindow.id);
+
+    expect(fake.api.tabGroups.update).toHaveBeenCalledWith(70, {
+      collapsed: false,
+      color: 'orange',
+      title,
+    });
   });
 
   it('keeps a fully restored snapshot when removing its saved copy fails', async () => {

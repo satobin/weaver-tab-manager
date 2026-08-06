@@ -21,7 +21,7 @@ export interface CanonicalizedTabUrl {
 }
 
 export interface DuplicateTabCandidate {
-  agentAssociated?: boolean;
+  agentAssociated: boolean;
   id: number;
   index: number;
   pinned: boolean;
@@ -29,7 +29,7 @@ export interface DuplicateTabCandidate {
   windowId: number;
 }
 
-interface DuplicateTabGroup {
+export interface DuplicateTabGroup {
   duplicateTabIds: number[];
   keepTabIds: number[];
   key: string;

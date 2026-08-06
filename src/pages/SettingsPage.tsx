@@ -56,6 +56,7 @@ export function SettingsPage({
       tabs:
         snapshot?.windows.flatMap((window) =>
           window.tabs.map((tab) => ({
+            agentAssociated: tab.agentAssociated,
             id: tab.id,
             index: tab.index,
             pinned: tab.pinned,
@@ -120,8 +121,8 @@ export function SettingsPage({
             <div>
               <h4>Preserve groups when sorting</h4>
               <p>
-                Keep each browser tab group together. Turning this off removes group membership
-                during a sort.
+                Keep each browser tab group together. Turning this off removes ordinary group
+                membership during a sort; agent-associated groups stay together.
               </p>
             </div>
             <SettingSwitch

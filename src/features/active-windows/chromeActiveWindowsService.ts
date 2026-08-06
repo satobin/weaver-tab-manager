@@ -6,12 +6,21 @@ import {
 } from '../../platform/chrome/restoredTabMetadata';
 import { mapWithConcurrency } from '../../shared/mapWithConcurrency';
 import {
+  canonicalizeTabUrl,
+  type DedupeRule,
+  type DuplicateTabGroup,
+} from '../deduplication/deduplication';
+import {
   type ActiveWindowsSnapshot,
   type ManagedTab,
   type ManagedTabGroup,
   type ManagedWindow,
 } from './model';
-import { detectAgentAssociatedTab, isAgentAssociatedTab } from './agentManagedTabs';
+import {
+  detectAgentAssociatedTab,
+  getRestoredAgentSafeGroupTitle,
+  type AgentTabDetection,
+} from './agentManagedTabs';
 import { planTabSort, type TabSortOptions } from './tabSort';
 import { formatWindowLabel } from './windowLabel';
 
@@ -81,7 +90,7 @@ export interface ActiveWindowsChromeApi extends RestoredTabMetadataChromeApi {
 }
 
 export interface ActiveWindowsService {
-  closeDuplicateTabs: (tabIds: readonly number[]) => Promise<CloseDuplicateTabsResult>;
+  closeDuplicateTabs: (request: CloseDuplicateTabsRequest) => Promise<CloseDuplicateTabsResult>;
   closeTabs: (tabIds: readonly number[]) => Promise<CloseTabsResult>;
   closeWindow: (windowId: number) => Promise<void>;
   focusTab: (windowId: number, tabId: number) => Promise<void>;
@@ -126,7 +135,14 @@ interface CloseTabsResult {
 export interface CloseDuplicateTabsResult extends CloseTabsResult {
   closedTabs: RestorableTab[];
   skippedAgentManagedTabIds: number[];
+  skippedChangedTabIds: number[];
   skippedPinnedTabIds: number[];
+}
+
+export interface CloseDuplicateTabsRequest {
+  duplicateGroups: readonly DuplicateTabGroup[];
+  rules: readonly DedupeRule[];
+  tabIds: readonly number[];
 }
 
 interface TabSuspensionResult {
@@ -239,9 +255,34 @@ function createRestorableTabFromChromeTab(
   };
 }
 
+function tabMatchesCanonicalKey(
+  tab: chrome.tabs.Tab,
+  expectedKey: string,
+  rules: readonly DedupeRule[],
+): boolean {
+  if (tab.status === 'loading' || (tab.pendingUrl?.trim() ?? '') !== '') {
+    return false;
+  }
+  const url = tab.url ?? '';
+  return url !== '' && canonicalizeTabUrl(url, rules).key === expectedKey;
+}
+
 interface CrossWindowMoveCompletion {
   pinRestored: boolean;
   warnings: string[];
+}
+
+function assertTabReachedWindow(
+  tab: chrome.tabs.Tab | undefined,
+  tabId: number,
+  destinationWindowId: number,
+): asserts tab is chrome.tabs.Tab {
+  if (!tab || tab.id !== tabId) {
+    throw new Error(`The browser did not return tab ${tabId} after moving it.`);
+  }
+  if (tab.windowId !== destinationWindowId) {
+    throw new Error(`Tab ${tabId} did not reach the destination window.`);
+  }
 }
 
 // Work around https://issues.chromium.org/issues/380088806: cross-window
@@ -254,7 +295,18 @@ async function finishCrossWindowTabMove(
   tab: chrome.tabs.Tab & { id: number },
   destinationWindowId: number,
   destinationIndex: number,
+  movedTab?: chrome.tabs.Tab,
 ): Promise<CrossWindowMoveCompletion> {
+  let confirmedMovedTab = movedTab;
+  if (!confirmedMovedTab) {
+    try {
+      confirmedMovedTab = await api.tabs.get(tab.id);
+    } catch {
+      throw new Error(`Tab ${tab.id} could not be verified in the destination window.`);
+    }
+  }
+  assertTabReachedWindow(confirmedMovedTab, tab.id, destinationWindowId);
+
   if (!tab.pinned) {
     return { pinRestored: false, warnings: [] };
   }
@@ -274,70 +326,83 @@ async function finishCrossWindowTabMove(
     return { pinRestored: true, warnings: [] };
   }
 
+  let destinationTabs: chrome.tabs.Tab[];
   try {
-    const destinationTabs = getTabsInBrowserOrder(
+    destinationTabs = getTabsInBrowserOrder(
       await api.tabs.query({ windowId: destinationWindowId }),
     );
-    const movedTab = destinationTabs.find(
-      (candidate) => candidate.id === tab.id && candidate.windowId === destinationWindowId,
-    );
-    if (!movedTab) {
-      return {
-        pinRestored: true,
-        warnings: [
-          `Tab ${tab.id} moved and was re-pinned, but its final position could not be verified.`,
-        ],
-      };
-    }
-    if (!movedTab.pinned) {
-      return {
-        pinRestored: false,
-        warnings: [
-          `Tab ${tab.id} moved, but the browser still reports it as unpinned after restoration.`,
-        ],
-      };
-    }
-    if (movedTab.index !== destinationIndex) {
-      await api.tabs.move(tab.id, { index: destinationIndex, windowId: destinationWindowId });
-
-      const correctedTabs = getTabsInBrowserOrder(
-        await api.tabs.query({ windowId: destinationWindowId }),
-      );
-      const correctedTab = correctedTabs.find(
-        (candidate) => candidate.id === tab.id && candidate.windowId === destinationWindowId,
-      );
-      if (!correctedTab) {
-        return {
-          pinRestored: true,
-          warnings: [
-            `Tab ${tab.id} moved and was re-pinned, but its corrected position could not be verified.`,
-          ],
-        };
-      }
-      if (!correctedTab.pinned) {
-        return {
-          pinRestored: false,
-          warnings: [
-            `Tab ${tab.id} moved, but the browser reports it as unpinned after repositioning.`,
-          ],
-        };
-      }
-      if (correctedTab.index !== destinationIndex) {
-        return {
-          pinRestored: true,
-          warnings: [
-            `Tab ${tab.id} moved and was re-pinned, but the browser placed it at index ${correctedTab.index} instead of ${destinationIndex}.`,
-          ],
-        };
-      }
-    }
   } catch (error) {
     return {
       pinRestored: true,
       warnings: [
-        `Tab ${tab.id} moved and was re-pinned, but its final position could not be restored: ${describeChromeError(error)}`,
+        `Tab ${tab.id} moved and was re-pinned, but its final position could not be verified: ${describeChromeError(error)}`,
       ],
     };
+  }
+  const destinationTab = destinationTabs.find((candidate) => candidate.id === tab.id);
+  if (!destinationTab) {
+    throw new Error(`Tab ${tab.id} could not be verified in the destination window.`);
+  }
+  assertTabReachedWindow(destinationTab, tab.id, destinationWindowId);
+  if (!destinationTab.pinned) {
+    return {
+      pinRestored: false,
+      warnings: [
+        `Tab ${tab.id} moved, but the browser still reports it as unpinned after restoration.`,
+      ],
+    };
+  }
+  if (destinationTab.index !== destinationIndex) {
+    let repositionedTab: chrome.tabs.Tab;
+    try {
+      repositionedTab = await api.tabs.move(tab.id, {
+        index: destinationIndex,
+        windowId: destinationWindowId,
+      });
+    } catch (error) {
+      return {
+        pinRestored: true,
+        warnings: [
+          `Tab ${tab.id} moved and was re-pinned, but its final position could not be restored: ${describeChromeError(error)}`,
+        ],
+      };
+    }
+    assertTabReachedWindow(repositionedTab, tab.id, destinationWindowId);
+
+    let correctedTabs: chrome.tabs.Tab[];
+    try {
+      correctedTabs = getTabsInBrowserOrder(
+        await api.tabs.query({ windowId: destinationWindowId }),
+      );
+    } catch (error) {
+      return {
+        pinRestored: true,
+        warnings: [
+          `Tab ${tab.id} moved and was re-pinned, but its corrected position could not be verified: ${describeChromeError(error)}`,
+        ],
+      };
+    }
+    const correctedTab = correctedTabs.find((candidate) => candidate.id === tab.id);
+    if (!correctedTab) {
+      throw new Error(`Tab ${tab.id} could not be verified in the destination window.`);
+    }
+    assertTabReachedWindow(correctedTab, tab.id, destinationWindowId);
+    if (!correctedTab.pinned) {
+      return {
+        pinRestored: false,
+        warnings: [
+          `Tab ${tab.id} moved, but the browser reports it as unpinned after repositioning.`,
+        ],
+      };
+    }
+    if (correctedTab.index !== destinationIndex) {
+      return {
+        pinRestored: true,
+        warnings: [
+          `Tab ${tab.id} moved and was re-pinned, but the browser placed it at index ${correctedTab.index} instead of ${destinationIndex}.`,
+        ],
+      };
+    }
   }
 
   return { pinRestored: true, warnings: [] };
@@ -350,8 +415,53 @@ async function moveTabAcrossWindows(
   moveIndex: number,
   finalIndex: number = moveIndex,
 ): Promise<CrossWindowMoveCompletion> {
-  await api.tabs.move(tab.id, { index: moveIndex, windowId: destinationWindowId });
-  return finishCrossWindowTabMove(api, tab, destinationWindowId, finalIndex);
+  const movedTab = await api.tabs.move(tab.id, {
+    index: moveIndex,
+    windowId: destinationWindowId,
+  });
+  assertTabReachedWindow(movedTab, tab.id, destinationWindowId);
+  return finishCrossWindowTabMove(api, tab, destinationWindowId, finalIndex, movedTab);
+}
+
+async function moveAgentGroupAcrossWindows(
+  api: ActiveWindowsChromeApi,
+  groupId: number,
+  tabIds: readonly number[],
+  destinationWindowId: number,
+  destinationIndex: number,
+  activeDestinationTabId?: number,
+): Promise<string[]> {
+  const movedGroup = await api.tabGroups.move(groupId, {
+    index: destinationIndex,
+    windowId: destinationWindowId,
+  });
+  if (!movedGroup || movedGroup.id !== groupId || movedGroup.windowId !== destinationWindowId) {
+    throw new Error(`Tab group ${groupId} did not reach the destination window.`);
+  }
+
+  const destinationTabs = await api.tabs.query({ windowId: destinationWindowId });
+  const destinationTabsById = new Map(
+    destinationTabs.flatMap((tab) => (tab.id === undefined ? [] : [[tab.id, tab] as const])),
+  );
+  const missingTabId = tabIds.find((tabId) => {
+    const tab = destinationTabsById.get(tabId);
+    return !tab || tab.windowId !== destinationWindowId || tab.groupId !== groupId;
+  });
+  if (missingTabId !== undefined) {
+    throw new Error(`Tab ${missingTabId} did not move with agent-associated group ${groupId}.`);
+  }
+
+  const warnings: string[] = [];
+  if (activeDestinationTabId !== undefined) {
+    try {
+      await api.tabs.update(activeDestinationTabId, { active: true });
+    } catch (error) {
+      warnings.push(
+        `The previously active tab could not be restored. ${describeChromeError(error)}`,
+      );
+    }
+  }
+  return warnings;
 }
 
 async function restoreTabGroups(
@@ -467,7 +577,7 @@ function resolveTabTitle(tab: chrome.tabs.Tab, url: string): string {
 
 function toManagedTab(
   tab: chrome.tabs.Tab,
-  group: chrome.tabGroups.TabGroup | null,
+  agentDetection: AgentTabDetection | null,
   extensionRootUrl: string,
   extensionIconUrl: string,
 ): ManagedTab | null {
@@ -476,7 +586,6 @@ function toManagedTab(
   }
 
   const url = tab.url ?? tab.pendingUrl ?? '';
-  const agentDetection = detectAgentAssociatedTab(tab, group);
   return {
     active: tab.active,
     agentAssociated: agentDetection !== null,
@@ -527,6 +636,10 @@ function toManagedWindows(
   groups: chrome.tabGroups.TabGroup[],
   currentWindowId: number | undefined,
   api: ActiveWindowsChromeApi,
+  detectAgentAssociation: (
+    tab: chrome.tabs.Tab,
+    group: chrome.tabGroups.TabGroup | null,
+  ) => AgentTabDetection | null,
 ): ManagedWindow[] {
   const extensionRootUrl = api.runtime.getURL('');
   const extensionIconUrl = api.runtime.getURL('icons/default-16.png');
@@ -539,7 +652,10 @@ function toManagedWindows(
       .map((tab) =>
         toManagedTab(
           tab,
-          tab.groupId >= 0 ? (groupsById.get(tab.groupId) ?? null) : null,
+          detectAgentAssociation(
+            tab,
+            tab.groupId >= 0 ? (groupsById.get(tab.groupId) ?? null) : null,
+          ),
           extensionRootUrl,
           extensionIconUrl,
         ),
@@ -563,6 +679,66 @@ export function createChromeActiveWindowsService(
   api: ActiveWindowsChromeApi = chrome,
   restoredTabMetadataService: RestoredTabMetadataService = createRestoredTabMetadataService(api),
 ): ActiveWindowsService {
+  const recentCodexDetectionByTabId = new Map<
+    number,
+    { detection: AgentTabDetection; url: string }
+  >();
+  const detectAgentAssociation = (
+    tab: chrome.tabs.Tab,
+    group: chrome.tabGroups.TabGroup | null,
+  ): AgentTabDetection | null => {
+    const detection = detectAgentAssociatedTab(tab, group);
+    const tabId = tab.id;
+    if (tabId === undefined) {
+      return detection;
+    }
+
+    if (detection?.evidence === 'codex-favicon' || detection?.evidence === 'conflicting-signals') {
+      recentCodexDetectionByTabId.set(tabId, {
+        detection,
+        url: tab.url ?? tab.pendingUrl ?? '',
+      });
+      return detection;
+    }
+    const recentCodexDetection = recentCodexDetectionByTabId.get(tabId);
+    if (detection) {
+      if (
+        recentCodexDetection &&
+        tab.status !== 'loading' &&
+        (tab.pendingUrl?.trim() ?? '') === '' &&
+        ((tab.favIconUrl?.trim() ?? '') !== '' || (tab.url ?? '') !== recentCodexDetection.url)
+      ) {
+        recentCodexDetectionByTabId.delete(tabId);
+      }
+      return detection;
+    }
+    if (
+      recentCodexDetection &&
+      (tab.status === 'loading' ||
+        (tab.pendingUrl?.trim() ?? '') !== '' ||
+        ((tab.favIconUrl?.trim() ?? '') === '' && (tab.url ?? '') === recentCodexDetection.url))
+    ) {
+      return recentCodexDetection.detection;
+    }
+
+    recentCodexDetectionByTabId.delete(tabId);
+    return null;
+  };
+  const getAgentGroupIds = (
+    tabs: readonly chrome.tabs.Tab[],
+    groups: readonly chrome.tabGroups.TabGroup[],
+  ): Set<number> => {
+    const groupsById = new Map(groups.map((group) => [group.id, group]));
+    return new Set(
+      tabs.flatMap((tab) => {
+        if (tab.groupId < 0) {
+          return [];
+        }
+        const group = groupsById.get(tab.groupId) ?? null;
+        return detectAgentAssociation(tab, group) ? [tab.groupId] : [];
+      }),
+    );
+  };
   const resolveWindowTabs = async (
     windows: readonly chrome.windows.Window[],
   ): Promise<chrome.windows.Window[]> => {
@@ -582,13 +758,8 @@ export function createChromeActiveWindowsService(
     requestedWindowIds: readonly number[] | null,
     options: TabSortOptions,
   ): Promise<SortWindowsResult> => {
-    const [windows, groups] = await Promise.all([
-      api.windows.getAll({ populate: true, windowTypes: ['normal'] }),
-      api.tabGroups.query({}),
-    ]);
-    const resolvedWindows = await resolveWindowTabs(windows);
-    const managedWindows = resolvedWindows.filter(isManagedChromeWindow);
-    const windowsById = new Map(managedWindows.map((window) => [window.id, window]));
+    const windows = await api.windows.getAll({ populate: true, windowTypes: ['normal'] });
+    const managedWindows = windows.filter(isManagedChromeWindow);
     const targetWindowIds = requestedWindowIds
       ? [...new Set(requestedWindowIds)]
       : managedWindows.map((window) => window.id);
@@ -599,19 +770,55 @@ export function createChromeActiveWindowsService(
     };
 
     for (const windowId of targetWindowIds) {
-      const window = windowsById.get(windowId);
-      if (!window) {
-        result.failures.push({ message: 'The window no longer exists.', windowId });
+      let window: chrome.windows.Window & { id: number };
+      let groups: chrome.tabGroups.TabGroup[];
+      try {
+        const [latestWindows, latestGroups] = await Promise.all([
+          api.windows.getAll({ populate: true, windowTypes: ['normal'] }),
+          api.tabGroups.query({ windowId }),
+        ]);
+        const latestWindow = latestWindows
+          .filter(isManagedChromeWindow)
+          .find((candidate) => candidate.id === windowId);
+        if (!latestWindow) {
+          result.failures.push({ message: 'The window no longer exists.', windowId });
+          continue;
+        }
+        const [resolvedWindow] = await resolveWindowTabs([latestWindow]);
+        if (!resolvedWindow || !isManagedChromeWindow(resolvedWindow)) {
+          result.failures.push({ message: 'The window no longer exists.', windowId });
+          continue;
+        }
+        window = resolvedWindow;
+        groups = latestGroups;
+      } catch (error) {
+        result.failures.push({ message: describeChromeError(error), windowId });
         continue;
       }
 
       const originalTabs = getTabsInBrowserOrder(window.tabs ?? []).filter(
         (tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined,
       );
+      const groupsById = new Map(
+        groups.filter((group) => group.windowId === windowId).map((group) => [group.id, group]),
+      );
+      if (originalTabs.some((tab) => tab.groupId >= 0 && !groupsById.has(tab.groupId))) {
+        result.failures.push({
+          message: 'The latest tab group state could not be read, so the window was not sorted.',
+          windowId,
+        });
+        continue;
+      }
+      const agentGroupIds = getAgentGroupIds(originalTabs, groups);
       const desiredTabs = planTabSort(
         originalTabs.map((tab) => {
           const url = tab.url ?? tab.pendingUrl ?? '';
           return {
+            agentAssociated:
+              detectAgentAssociation(
+                tab,
+                tab.groupId >= 0 ? (groupsById.get(tab.groupId) ?? null) : null,
+              ) !== null,
             groupId: tab.groupId >= 0 ? tab.groupId : null,
             id: tab.id,
             index: tab.index,
@@ -627,7 +834,9 @@ export function createChromeActiveWindowsService(
 
       try {
         if (!options.preserveGroups) {
-          const groupedTabIds = originalTabs.filter((tab) => tab.groupId >= 0).map((tab) => tab.id);
+          const groupedTabIds = originalTabs
+            .filter((tab) => tab.groupId >= 0 && !agentGroupIds.has(tab.groupId))
+            .map((tab) => tab.id);
           const [firstGroupedTabId, ...remainingGroupedTabIds] = groupedTabIds;
           if (firstGroupedTabId !== undefined) {
             await api.tabs.ungroup([firstGroupedTabId, ...remainingGroupedTabIds]);
@@ -657,7 +866,17 @@ export function createChromeActiveWindowsService(
 
       if (options.preserveGroups && groupSensitiveMoveCompleted) {
         const tabIds = new Set(originalTabs.map((tab) => tab.id));
-        const warnings = await restoreTabGroups(api, originalTabs, groups, windowId, tabIds);
+        const restorableGroupIds = new Set(
+          groups.flatMap((group) => (agentGroupIds.has(group.id) ? [] : [group.id])),
+        );
+        const warnings = await restoreTabGroups(
+          api,
+          originalTabs,
+          groups,
+          windowId,
+          tabIds,
+          restorableGroupIds,
+        );
         result.warnings.push(...warnings.map((warning) => `${windowId}: ${warning}`));
       }
     }
@@ -666,13 +885,26 @@ export function createChromeActiveWindowsService(
   };
 
   return {
-    async closeDuplicateTabs(tabIds) {
-      const requestedTabIds = [...new Set(tabIds)];
+    async closeDuplicateTabs(request) {
+      const requestedTabIds = [...new Set(request.tabIds)];
+      const requestedTabIdSet = new Set(requestedTabIds);
       const closedTabIds: number[] = [];
       const closedTabs: RestorableTab[] = [];
       const failures: TabOperationFailure[] = [];
       const skippedAgentManagedTabIds: number[] = [];
+      const skippedChangedTabIds: number[] = [];
       const skippedPinnedTabIds: number[] = [];
+      const ambiguousPlanTabIds = new Set<number>();
+      const plannedGroupByTabId = new Map<number, DuplicateTabGroup>();
+      request.duplicateGroups.forEach((group) => {
+        group.duplicateTabIds.forEach((tabId) => {
+          if (plannedGroupByTabId.has(tabId)) {
+            ambiguousPlanTabIds.add(tabId);
+          } else {
+            plannedGroupByTabId.set(tabId, group);
+          }
+        });
+      });
       const [snapshotTabs, groups] = await Promise.all([
         api.tabs.query({}),
         api.tabGroups.query({}),
@@ -693,9 +925,13 @@ export function createChromeActiveWindowsService(
         CLOSE_TAB_CONCURRENCY,
         async (tabId) => {
           try {
+            const plannedGroup = plannedGroupByTabId.get(tabId);
+            if (!plannedGroup || ambiguousPlanTabIds.has(tabId)) {
+              return { skippedChanged: true as const, tabId };
+            }
             const snapshotTab = snapshotTabsById.get(tabId);
             if (!snapshotTab) {
-              throw new Error('The tab no longer exists.');
+              return { skippedChanged: true as const, tabId };
             }
             const group =
               snapshotTab.groupId >= 0
@@ -711,30 +947,74 @@ export function createChromeActiveWindowsService(
               );
             }
 
-            // The undo record comes from one pre-removal snapshot so concurrent
-            // closes cannot shift later indices. Re-read only the pin state at
-            // the mutation boundary so a tab pinned after the preview stays open.
-            const liveTab = await api.tabs.get(tabId);
-            if (liveTab.id !== tabId) {
-              throw new Error('The browser returned a different tab than requested.');
-            }
-            if (liveTab.pinned) {
-              return { skippedPinned: true as const, tabId };
+            const readCandidateAtMutationBoundary = async () => {
+              let liveTab: chrome.tabs.Tab;
+              try {
+                liveTab = await api.tabs.get(tabId);
+              } catch {
+                return { state: 'changed' as const };
+              }
+              if (liveTab.id !== tabId) {
+                return { state: 'changed' as const };
+              }
+              if (liveTab.pinned) {
+                return { state: 'pinned' as const };
+              }
+              if (liveTab.status === 'loading') {
+                return { state: 'changed' as const };
+              }
+              if (detectAgentAssociation(liveTab, null)) {
+                return { state: 'agent-managed' as const };
+              }
+
+              const liveGroup =
+                liveTab.groupId >= 0 ? await api.tabGroups.get(liveTab.groupId) : null;
+              if (liveTab.groupId >= 0 && (!liveGroup || liveGroup.windowId !== liveTab.windowId)) {
+                throw new Error(
+                  'The live tab group metadata could not be read, so the tab was left open.',
+                );
+              }
+              if (detectAgentAssociation(liveTab, liveGroup)) {
+                return { state: 'agent-managed' as const };
+              }
+              if (!tabMatchesCanonicalKey(liveTab, plannedGroup.key, request.rules)) {
+                return { state: 'changed' as const };
+              }
+              return { state: 'eligible' as const };
+            };
+
+            const firstCandidateCheck = await readCandidateAtMutationBoundary();
+            if (firstCandidateCheck.state !== 'eligible') {
+              return { state: firstCandidateCheck.state, tabId };
             }
 
-            if (isAgentAssociatedTab(liveTab, null)) {
-              return { skippedAgentManaged: true as const, tabId };
+            let hasLiveKeeper = false;
+            for (const keeperTabId of plannedGroup.keepTabIds) {
+              if (keeperTabId === tabId || requestedTabIdSet.has(keeperTabId)) {
+                continue;
+              }
+              try {
+                const keeper = await api.tabs.get(keeperTabId);
+                if (
+                  keeper.id === keeperTabId &&
+                  tabMatchesCanonicalKey(keeper, plannedGroup.key, request.rules)
+                ) {
+                  hasLiveKeeper = true;
+                  break;
+                }
+              } catch {
+                // Try another planned keeper. A stale plan must never cause a close.
+              }
+            }
+            if (!hasLiveKeeper) {
+              return { state: 'changed' as const, tabId };
             }
 
-            const liveGroup =
-              liveTab.groupId >= 0 ? await api.tabGroups.get(liveTab.groupId) : null;
-            if (liveTab.groupId >= 0 && (!liveGroup || liveGroup.windowId !== liveTab.windowId)) {
-              throw new Error(
-                'The live tab group metadata could not be read, so the tab was left open.',
-              );
-            }
-            if (isAgentAssociatedTab(liveTab, liveGroup)) {
-              return { skippedAgentManaged: true as const, tabId };
+            // Re-read the candidate after its keeper so both sides of the
+            // duplicate relationship are fresh at the removal boundary.
+            const finalCandidateCheck = await readCandidateAtMutationBoundary();
+            if (finalCandidateCheck.state !== 'eligible') {
+              return { state: finalCandidateCheck.state, tabId };
             }
 
             const closedTab = createRestorableTabFromChromeTab(
@@ -749,14 +1029,16 @@ export function createChromeActiveWindowsService(
         },
       );
       results.forEach((result) => {
-        if ('skippedAgentManaged' in result) {
+        if ('skippedChanged' in result || ('state' in result && result.state === 'changed')) {
+          skippedChangedTabIds.push(result.tabId);
+        } else if ('state' in result && result.state === 'agent-managed') {
           skippedAgentManagedTabIds.push(result.tabId);
-        } else if ('skippedPinned' in result) {
+        } else if ('state' in result && result.state === 'pinned') {
           skippedPinnedTabIds.push(result.tabId);
-        } else if (result.closed) {
+        } else if ('closed' in result && result.closed) {
           closedTabIds.push(result.tabId);
           closedTabs.push(result.closedTab);
-        } else {
+        } else if ('closed' in result) {
           failures.push({ message: describeChromeError(result.error), tabId: result.tabId });
         }
       });
@@ -765,6 +1047,7 @@ export function createChromeActiveWindowsService(
         closedTabs,
         failures,
         skippedAgentManagedTabIds,
+        skippedChangedTabIds,
         skippedPinnedTabIds,
       };
     },
@@ -885,7 +1168,23 @@ export function createChromeActiveWindowsService(
         api.tabGroups.query({}),
       ]);
       const resolvedWindows = await resolveWindowTabs(windows);
-      const managedWindows = toManagedWindows(resolvedWindows, groups, currentWindow.id, api);
+      const liveTabIds = new Set(
+        resolvedWindows.flatMap((window) =>
+          (window.tabs ?? []).flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+        ),
+      );
+      recentCodexDetectionByTabId.forEach((_detection, tabId) => {
+        if (!liveTabIds.has(tabId)) {
+          recentCodexDetectionByTabId.delete(tabId);
+        }
+      });
+      const managedWindows = toManagedWindows(
+        resolvedWindows,
+        groups,
+        currentWindow.id,
+        api,
+        detectAgentAssociation,
+      );
 
       return {
         extensionOrigin: api.runtime.getURL(''),
@@ -1042,7 +1341,7 @@ export function createChromeActiveWindowsService(
             await api.tabGroups.update(newGroupId, {
               collapsed: group.collapsed,
               color: group.color,
-              title: group.title,
+              title: getRestoredAgentSafeGroupTitle(group),
             });
           } catch (error) {
             result.warnings.push(
@@ -1061,10 +1360,9 @@ export function createChromeActiveWindowsService(
         throw new Error('Select at least two windows to merge.');
       }
 
-      const [managerWindow, windows, groups] = await Promise.all([
+      const [managerWindow, windows] = await Promise.all([
         api.windows.getCurrent(),
         api.windows.getAll({ populate: true, windowTypes: ['normal'] }),
-        api.tabGroups.query({}),
       ]);
       const managedWindows = windows.filter(isManagedChromeWindow);
       const windowsById = new Map(managedWindows.map((window) => [window.id, window]));
@@ -1080,13 +1378,32 @@ export function createChromeActiveWindowsService(
       const mergedSourceWindowIds: number[] = [];
       const warnings: string[] = [];
       const originalSourceTabs: chrome.tabs.Tab[] = [];
+      const originalSourceGroups: chrome.tabGroups.TabGroup[] = [];
+      const protectedAgentGroupIds = new Set<number>();
       const destinationPinnedTabCount = (destinationWindow.tabs ?? []).filter(
         (tab) => tab.pinned,
       ).length;
+      const activeDestinationTabId = (destinationWindow.tabs ?? []).find((tab) => tab.active)?.id;
       let restoredPinnedTabCount = 0;
 
       for (const sourceWindowId of sourceWindowIds) {
-        const sourceWindow = windowsById.get(sourceWindowId);
+        let sourceWindow: (chrome.windows.Window & { id: number }) | undefined;
+        let sourceGroups: chrome.tabGroups.TabGroup[];
+        try {
+          const [latestWindows, latestGroups] = await Promise.all([
+            api.windows.getAll({ populate: true, windowTypes: ['normal'] }),
+            api.tabGroups.query({ windowId: sourceWindowId }),
+          ]);
+          sourceWindow = latestWindows
+            .filter(isManagedChromeWindow)
+            .find((window) => window.id === sourceWindowId);
+          sourceGroups = latestGroups;
+        } catch (error) {
+          warnings.push(
+            `Window ${sourceWindowId} was skipped because its latest tab state could not be read: ${describeChromeError(error)}`,
+          );
+          continue;
+        }
         if (!sourceWindow) {
           warnings.push(`Window ${sourceWindowId} no longer exists and was skipped.`);
           continue;
@@ -1095,9 +1412,56 @@ export function createChromeActiveWindowsService(
         const sourceTabs = getTabsInBrowserOrder(sourceWindow.tabs ?? []).filter(
           (tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined,
         );
+        const sourceGroupIds = new Set(
+          sourceTabs.flatMap((tab) => (tab.groupId >= 0 ? [tab.groupId] : [])),
+        );
+        const readableSourceGroupIds = new Set(
+          sourceGroups
+            .filter((group) => group.windowId === sourceWindowId)
+            .map((group) => group.id),
+        );
+        if ([...sourceGroupIds].some((groupId) => !readableSourceGroupIds.has(groupId))) {
+          warnings.push(
+            `Window ${sourceWindowId} was skipped because its latest tab group state could not be read.`,
+          );
+          continue;
+        }
+        const agentGroupIds = getAgentGroupIds(sourceTabs, sourceGroups);
+        agentGroupIds.forEach((groupId) => protectedAgentGroupIds.add(groupId));
         originalSourceTabs.push(...sourceTabs);
+        originalSourceGroups.push(...sourceGroups);
         let sourceFailed = false;
+        const movedAgentGroupIds = new Set<number>();
         for (const tab of sourceTabs) {
+          if (tab.groupId >= 0 && agentGroupIds.has(tab.groupId)) {
+            if (movedAgentGroupIds.has(tab.groupId)) {
+              continue;
+            }
+            movedAgentGroupIds.add(tab.groupId);
+            const agentGroupTabs = sourceTabs.filter(
+              (candidate) => candidate.groupId === tab.groupId,
+            );
+            const agentGroupTabIds = agentGroupTabs.map((candidate) => candidate.id);
+            try {
+              warnings.push(
+                ...(await moveAgentGroupAcrossWindows(
+                  api,
+                  tab.groupId,
+                  agentGroupTabIds,
+                  destinationWindowId,
+                  -1,
+                  activeDestinationTabId,
+                )),
+              );
+              movedTabIds.push(...agentGroupTabIds);
+            } catch (error) {
+              sourceFailed = true;
+              const message = describeChromeError(error);
+              failures.push(...agentGroupTabIds.map((tabId) => ({ message, tabId })));
+            }
+            continue;
+          }
+
           try {
             const completion = await moveTabAcrossWindows(
               api,
@@ -1118,18 +1482,55 @@ export function createChromeActiveWindowsService(
         }
 
         if (!sourceFailed) {
-          mergedSourceWindowIds.push(sourceWindowId);
+          let remainingSourceTabs: chrome.tabs.Tab[] | undefined;
           try {
-            await api.windows.remove(sourceWindowId);
+            remainingSourceTabs = await api.tabs.query({ windowId: sourceWindowId });
           } catch {
-            // Chrome may already close a source window after its final tab moves.
+            try {
+              const currentWindows = await api.windows.getAll({
+                populate: true,
+                windowTypes: ['normal'],
+              });
+              const remainingSourceWindow = currentWindows.find(
+                (window) => window.id === sourceWindowId,
+              );
+              if (!remainingSourceWindow) {
+                mergedSourceWindowIds.push(sourceWindowId);
+                continue;
+              }
+              remainingSourceTabs = remainingSourceWindow.tabs;
+            } catch {
+              warnings.push(
+                `Window ${sourceWindowId} was left open because its final state could not be verified.`,
+              );
+              continue;
+            }
           }
+          if (!remainingSourceTabs || remainingSourceTabs.length > 0) {
+            warnings.push(
+              `Window ${sourceWindowId} still has tabs after the merge and was left open.`,
+            );
+            continue;
+          }
+          mergedSourceWindowIds.push(sourceWindowId);
         }
       }
 
       const movedSet = new Set(movedTabIds);
+      const restorableGroupIds = new Set(
+        originalSourceGroups.flatMap((group) =>
+          protectedAgentGroupIds.has(group.id) ? [] : [group.id],
+        ),
+      );
       warnings.push(
-        ...(await restoreTabGroups(api, originalSourceTabs, groups, destinationWindowId, movedSet)),
+        ...(await restoreTabGroups(
+          api,
+          originalSourceTabs,
+          originalSourceGroups,
+          destinationWindowId,
+          movedSet,
+          restorableGroupIds,
+        )),
       );
 
       const managerWindowId = managerWindow.id;
@@ -1349,8 +1750,11 @@ export function createChromeActiveWindowsService(
         index: destinationIndex,
         windowId: destinationWindowId,
       });
-      if (!movedGroup) {
+      if (!movedGroup || movedGroup.id !== groupId) {
         throw new Error('The browser did not return the moved tab group.');
+      }
+      if (movedGroup.windowId !== destinationWindowId) {
+        throw new Error('The tab group did not reach the destination window.');
       }
       const warnings: string[] = [];
       if (activeDestinationTabId !== undefined) {
@@ -1396,11 +1800,52 @@ export function createChromeActiveWindowsService(
           failures.push({ message: 'The tab no longer exists.', tabId });
           return [];
         }
-        return [tab];
+        return [tab as chrome.tabs.Tab & { id: number }];
       });
+      const groupsById = new Map(allGroups.map((group) => [group.id, group]));
+      const readableRequestedTabs = requestedTabs.filter((tab) => {
+        if (tab.groupId < 0) {
+          return true;
+        }
+        const group = groupsById.get(tab.groupId);
+        if (group?.windowId === tab.windowId) {
+          return true;
+        }
+        failures.push({
+          message: 'The latest tab group state could not be read, so the tab was left in place.',
+          tabId: tab.id,
+        });
+        return false;
+      });
+      const requestedTabIdSet = new Set(readableRequestedTabs.map((tab) => tab.id));
+      const agentGroupIds = getAgentGroupIds(allTabs, allGroups);
+      const rejectedAgentTabIds = new Set<number>();
+      const requestedAgentGroupIds = new Set(
+        readableRequestedTabs.flatMap((tab) =>
+          tab.groupId >= 0 && agentGroupIds.has(tab.groupId) ? [tab.groupId] : [],
+        ),
+      );
+      requestedAgentGroupIds.forEach((groupId) => {
+        const groupTabIds = allTabs.flatMap((tab) =>
+          tab.groupId === groupId && tab.id !== undefined ? [tab.id] : [],
+        );
+        if (groupTabIds.length > 0 && groupTabIds.every((tabId) => requestedTabIdSet.has(tabId))) {
+          return;
+        }
+        readableRequestedTabs.forEach((tab) => {
+          if (tab.groupId === groupId) {
+            rejectedAgentTabIds.add(tab.id);
+            failures.push({
+              message: 'Agent-associated tab groups must be moved as a whole.',
+              tabId: tab.id,
+            });
+          }
+        });
+      });
+      const movableTabs = readableRequestedTabs.filter((tab) => !rejectedAgentTabIds.has(tab.id));
       const orderedTabs = [
-        ...requestedTabs.filter((tab) => tab.pinned),
-        ...requestedTabs.filter((tab) => !tab.pinned),
+        ...movableTabs.filter((tab) => tab.pinned),
+        ...movableTabs.filter((tab) => !tab.pinned),
       ];
 
       const firstTab = orderedTabs[0];
@@ -1413,38 +1858,116 @@ export function createChromeActiveWindowsService(
         };
       }
 
-      const preservedGroupIds = new Set(preserveGroupIds);
+      const preservedGroupIds = new Set([...preserveGroupIds, ...requestedAgentGroupIds]);
       const tabIdsToUngroup = orderedTabs.flatMap((tab) =>
         tab.id !== undefined && tab.groupId >= 0 && !preservedGroupIds.has(tab.groupId)
           ? [tab.id]
           : [],
       );
-      if (tabIdsToUngroup.length > 0) {
-        await api.tabs.ungroup(tabIdsToUngroup as [number, ...number[]]);
-      }
 
-      const destination = await api.windows.create({ focused: false, tabId: firstTab.id });
+      const firstTabIsAgentGrouped = firstTab.groupId >= 0 && agentGroupIds.has(firstTab.groupId);
+      const destination = await api.windows.create(
+        firstTabIsAgentGrouped ? { focused: false } : { focused: false, tabId: firstTab.id },
+      );
       if (destination?.id === undefined) {
         throw new Error('The browser did not create the destination window.');
       }
 
-      const movedTabIds = [firstTab.id];
-      const firstCompletion = await finishCrossWindowTabMove(
-        api,
-        firstTab as chrome.tabs.Tab & { id: number },
-        destination.id,
-        0,
+      const movedTabIds: number[] = [];
+      const warnings: string[] = [];
+      let restoredPinnedTabCount = 0;
+      let activeDestinationTabId: number | undefined;
+      let placeholderTabIds: number[] = [];
+      if (firstTabIsAgentGrouped) {
+        if (destination.tabs) {
+          placeholderTabIds = destination.tabs.flatMap((tab) =>
+            tab.id === undefined ? [] : [tab.id],
+          );
+        } else {
+          try {
+            placeholderTabIds = (await api.tabs.query({ windowId: destination.id })).flatMap(
+              (tab) => (tab.id === undefined ? [] : [tab.id]),
+            );
+          } catch (error) {
+            warnings.push(
+              `The new window placeholder tab could not be identified: ${describeChromeError(error)}`,
+            );
+          }
+        }
+      }
+      if (!firstTabIsAgentGrouped) {
+        try {
+          const adoptedTab =
+            destination.tabs?.find((candidate) => candidate.id === firstTab.id) ??
+            (await api.tabs.get(firstTab.id));
+          const firstCompletion = await finishCrossWindowTabMove(
+            api,
+            firstTab,
+            destination.id,
+            0,
+            adoptedTab,
+          );
+          movedTabIds.push(firstTab.id);
+          warnings.push(...firstCompletion.warnings);
+          restoredPinnedTabCount = firstTab.pinned && firstCompletion.pinRestored ? 1 : 0;
+          activeDestinationTabId = firstTab.id;
+        } catch (error) {
+          failures.push({ message: describeChromeError(error), tabId: firstTab.id });
+        }
+      }
+
+      const remainingTabIdsToUngroup = firstTabIsAgentGrouped
+        ? tabIdsToUngroup
+        : tabIdsToUngroup.filter((tabId) => tabId !== firstTab.id);
+      const tabsBlockedByUngroupFailure = new Set<number>();
+      if (remainingTabIdsToUngroup.length > 0) {
+        try {
+          await api.tabs.ungroup(remainingTabIdsToUngroup as [number, ...number[]]);
+        } catch (error) {
+          const message = `The tab could not be ungrouped before moving: ${describeChromeError(error)}`;
+          remainingTabIdsToUngroup.forEach((tabId) => {
+            tabsBlockedByUngroupFailure.add(tabId);
+            failures.push({ message, tabId });
+          });
+        }
+      }
+
+      const movedAgentGroupIds = new Set<number>();
+      const remainingTabs = (firstTabIsAgentGrouped ? orderedTabs : orderedTabs.slice(1)).filter(
+        (tab) => !tabsBlockedByUngroupFailure.has(tab.id),
       );
-      const warnings = [...firstCompletion.warnings];
-      let restoredPinnedTabCount = firstTab.pinned && firstCompletion.pinRestored ? 1 : 0;
-      for (const tab of orderedTabs.slice(1)) {
-        if (tab.id === undefined) {
+      for (const tab of remainingTabs) {
+        if (tab.groupId >= 0 && agentGroupIds.has(tab.groupId)) {
+          if (movedAgentGroupIds.has(tab.groupId)) {
+            continue;
+          }
+          movedAgentGroupIds.add(tab.groupId);
+          const agentGroupTabIds = orderedTabs
+            .filter((candidate) => candidate.groupId === tab.groupId)
+            .map((candidate) => candidate.id);
+          try {
+            warnings.push(
+              ...(await moveAgentGroupAcrossWindows(
+                api,
+                tab.groupId,
+                agentGroupTabIds,
+                destination.id,
+                -1,
+                activeDestinationTabId,
+              )),
+            );
+            movedTabIds.push(...agentGroupTabIds);
+          } catch (error) {
+            const message = describeChromeError(error);
+            failures.push(...agentGroupTabIds.map((tabId) => ({ message, tabId })));
+          }
           continue;
         }
+
         try {
           const completion = await moveTabAcrossWindows(
             api,
-            tab as chrome.tabs.Tab & { id: number },
+            tab,
             destination.id,
             -1,
             tab.pinned ? restoredPinnedTabCount : -1,
@@ -1459,7 +1982,22 @@ export function createChromeActiveWindowsService(
         }
       }
 
+      if (movedTabIds.length > 0) {
+        for (const placeholderTabId of placeholderTabIds) {
+          try {
+            await api.tabs.remove(placeholderTabId);
+          } catch (error) {
+            warnings.push(
+              `The new window placeholder tab could not be closed: ${describeChromeError(error)}`,
+            );
+          }
+        }
+      }
+
       const movedSet = new Set(movedTabIds);
+      const restorableGroupIds = new Set(
+        [...preservedGroupIds].filter((groupId) => !agentGroupIds.has(groupId)),
+      );
       warnings.push(
         ...(await restoreTabGroups(
           api,
@@ -1467,7 +2005,7 @@ export function createChromeActiveWindowsService(
           allGroups,
           destination.id,
           movedSet,
-          preservedGroupIds,
+          restorableGroupIds,
         )),
       );
 

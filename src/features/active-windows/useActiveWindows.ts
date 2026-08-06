@@ -149,7 +149,8 @@ class ActiveWindowsStore {
     }
 
     if (this.refreshTimer !== undefined) {
-      window.clearTimeout(this.refreshTimer);
+      // A sustained favicon or tab-update stream must not postpone the pending refresh.
+      return;
     }
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = undefined;
