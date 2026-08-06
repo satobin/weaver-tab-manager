@@ -300,6 +300,32 @@ describe('planDuplicateTabs', () => {
     });
   });
 
+  it('protects every agent-associated match and closes only ordinary matches', () => {
+    const plan = planDuplicateTabs(
+      [
+        createTab({ agentAssociated: true, id: 1, windowId: 2 }),
+        createTab({ agentAssociated: true, id: 2, index: 1, windowId: 3 }),
+        createTab({ id: 3, index: 2, windowId: 1 }),
+      ],
+      [],
+      { tabId: 3, windowId: 1 },
+    );
+
+    expect(plan).toEqual({
+      duplicateGroups: [
+        {
+          duplicateTabIds: [3],
+          keepTabIds: [1, 2],
+          key: 'exact:https://example.com/path',
+          matchType: 'exact',
+          ruleId: null,
+        },
+      ],
+      duplicateTabIds: [3],
+      keepTabIds: [1, 2],
+    });
+  });
+
   it('groups site-rule matches while keeping exact fallback query-sensitive', () => {
     const rule = createRule({ comparisonMode: 'host' });
     const plan = planDuplicateTabs(

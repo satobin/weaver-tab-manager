@@ -8,6 +8,7 @@ import { formatWindowLabel } from '../features/active-windows/windowLabel';
 export function createManagedTab(overrides: Partial<ManagedTab> = {}): ManagedTab {
   return {
     active: false,
+    agentAssociated: false,
     discarded: false,
     frozen: false,
     groupId: null,

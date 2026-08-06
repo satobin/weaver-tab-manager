@@ -55,6 +55,7 @@ function createService(): ActiveWindowsService {
         closedTabIds: [],
         closedTabs: [],
         failures: [],
+        skippedAgentManagedTabIds: [],
         skippedPinnedTabIds: [],
       }),
     ),
@@ -325,6 +326,38 @@ describe('Popup', () => {
     expect(window.close).toHaveBeenCalled();
   });
 
+  it('labels agent-managed tabs in search results without disabling manual close', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                agentAssociated: true,
+                title: 'Agent task',
+                url: 'https://example.test/agent-task',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    renderPopup(service);
+
+    await user.type(await screen.findByRole('searchbox', { name: 'Search open tabs' }), 'Agent');
+
+    expect(await screen.findByRole('img', { name: 'Agent-managed tab' })).toHaveAttribute(
+      'title',
+      'Agent-managed tab detected locally',
+    );
+    const closeButton = screen.getByRole('button', { name: 'Close Agent task' });
+    expect(closeButton).toBeEnabled();
+    await user.click(closeButton);
+    expect(service.closeTabs).toHaveBeenCalledWith([101]);
+  });
+
   it('closes a search result and refreshes without closing the popup', async () => {
     const user = userEvent.setup();
     const service = createService();
@@ -524,6 +557,7 @@ describe('Popup', () => {
         },
       ],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     renderPopup(service);
@@ -582,6 +616,7 @@ describe('Popup', () => {
       closedTabIds: [103],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     renderPopup(service);
@@ -611,6 +646,7 @@ describe('Popup', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [102],
     });
     renderPopup(service);

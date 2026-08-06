@@ -19,6 +19,7 @@ export interface ManagedTabGroup {
 
 export interface ManagedTab {
   active: boolean;
+  agentAssociated: boolean;
   discarded: boolean;
   frozen: boolean;
   groupId: number | null;

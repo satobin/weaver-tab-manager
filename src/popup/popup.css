@@ -437,7 +437,7 @@ input {
   display: grid;
   min-width: 0;
   min-height: 48px;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
@@ -458,10 +458,16 @@ input {
   object-fit: contain;
 }
 
-.popup-result-main span {
+.popup-result-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
+}
+
+.agent-managed-tab-indicator {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
 }
 
 .popup-result-main strong,

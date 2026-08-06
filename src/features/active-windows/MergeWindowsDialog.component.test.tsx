@@ -16,6 +16,7 @@ function makeWindow(id: number): ManagedWindow {
     tabs: [
       {
         active: true,
+        agentAssociated: false,
         discarded: false,
         frozen: false,
         groupId: null,

@@ -11,6 +11,7 @@ import {
   type ManagedTabGroup,
   type ManagedWindow,
 } from './model';
+import { isAgentAssociatedTab } from './agentManagedTabs';
 import { planTabSort, type TabSortOptions } from './tabSort';
 import { formatWindowLabel } from './windowLabel';
 
@@ -24,6 +25,7 @@ export interface ActiveWindowsChromeApi extends RestoredTabMetadataChromeApi {
     getURL: (path: string) => string;
   };
   tabGroups: {
+    get: (groupId: number) => Promise<chrome.tabGroups.TabGroup>;
     move: (
       groupId: number,
       moveProperties: chrome.tabGroups.MoveProperties,
@@ -123,6 +125,7 @@ interface CloseTabsResult {
 
 export interface CloseDuplicateTabsResult extends CloseTabsResult {
   closedTabs: RestorableTab[];
+  skippedAgentManagedTabIds: number[];
   skippedPinnedTabIds: number[];
 }
 
@@ -464,6 +467,7 @@ function resolveTabTitle(tab: chrome.tabs.Tab, url: string): string {
 
 function toManagedTab(
   tab: chrome.tabs.Tab,
+  group: chrome.tabGroups.TabGroup | null,
   extensionRootUrl: string,
   extensionIconUrl: string,
 ): ManagedTab | null {
@@ -474,6 +478,7 @@ function toManagedTab(
   const url = tab.url ?? tab.pendingUrl ?? '';
   return {
     active: tab.active,
+    agentAssociated: isAgentAssociatedTab(tab, group),
     discarded: tab.discarded,
     frozen: tab.frozen ?? false,
     groupId: tab.groupId >= 0 ? tab.groupId : null,
@@ -523,12 +528,20 @@ function toManagedWindows(
 ): ManagedWindow[] {
   const extensionRootUrl = api.runtime.getURL('');
   const extensionIconUrl = api.runtime.getURL('icons/default-16.png');
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
 
   return orderWindows(windows, currentWindowId).map((window, index) => {
     const windowId = window.id as number;
     const isCurrent = windowId === currentWindowId;
     const tabs = (window.tabs ?? [])
-      .map((tab) => toManagedTab(tab, extensionRootUrl, extensionIconUrl))
+      .map((tab) =>
+        toManagedTab(
+          tab,
+          tab.groupId >= 0 ? (groupsById.get(tab.groupId) ?? null) : null,
+          extensionRootUrl,
+          extensionIconUrl,
+        ),
+      )
       .filter((tab): tab is ManagedTab => tab !== null)
       .sort((left, right) => left.index - right.index);
 
@@ -656,6 +669,7 @@ export function createChromeActiveWindowsService(
       const closedTabIds: number[] = [];
       const closedTabs: RestorableTab[] = [];
       const failures: TabOperationFailure[] = [];
+      const skippedAgentManagedTabIds: number[] = [];
       const skippedPinnedTabIds: number[] = [];
       const [snapshotTabs, groups] = await Promise.all([
         api.tabs.query({}),
@@ -706,6 +720,21 @@ export function createChromeActiveWindowsService(
               return { skippedPinned: true as const, tabId };
             }
 
+            if (isAgentAssociatedTab(liveTab, null)) {
+              return { skippedAgentManaged: true as const, tabId };
+            }
+
+            const liveGroup =
+              liveTab.groupId >= 0 ? await api.tabGroups.get(liveTab.groupId) : null;
+            if (liveTab.groupId >= 0 && (!liveGroup || liveGroup.windowId !== liveTab.windowId)) {
+              throw new Error(
+                'The live tab group metadata could not be read, so the tab was left open.',
+              );
+            }
+            if (isAgentAssociatedTab(liveTab, liveGroup)) {
+              return { skippedAgentManaged: true as const, tabId };
+            }
+
             const closedTab = createRestorableTabFromChromeTab(
               snapshotTab as chrome.tabs.Tab & { id: number },
               group,
@@ -718,7 +747,9 @@ export function createChromeActiveWindowsService(
         },
       );
       results.forEach((result) => {
-        if ('skippedPinned' in result) {
+        if ('skippedAgentManaged' in result) {
+          skippedAgentManagedTabIds.push(result.tabId);
+        } else if ('skippedPinned' in result) {
           skippedPinnedTabIds.push(result.tabId);
         } else if (result.closed) {
           closedTabIds.push(result.tabId);
@@ -727,7 +758,13 @@ export function createChromeActiveWindowsService(
           failures.push({ message: describeChromeError(result.error), tabId: result.tabId });
         }
       });
-      return { closedTabIds, closedTabs, failures, skippedPinnedTabIds };
+      return {
+        closedTabIds,
+        closedTabs,
+        failures,
+        skippedAgentManagedTabIds,
+        skippedPinnedTabIds,
+      };
     },
 
     async closeTabs(tabIds) {

@@ -77,7 +77,13 @@ function createService(): ActiveWindowsService {
 
   return {
     closeDuplicateTabs: vi.fn(() =>
-      Promise.resolve({ closedTabIds: [], closedTabs: [], failures: [], skippedPinnedTabIds: [] }),
+      Promise.resolve({
+        closedTabIds: [],
+        closedTabs: [],
+        failures: [],
+        skippedAgentManagedTabIds: [],
+        skippedPinnedTabIds: [],
+      }),
     ),
     closeTabs: vi.fn(() => Promise.resolve({ closedTabIds: [], failures: [] })),
     closeWindow: vi.fn(() => Promise.resolve()),
@@ -261,6 +267,34 @@ afterEach(() => {
 });
 
 describe('ActiveWindowsPage', () => {
+  it('labels locally detected agent-managed tabs with a robot marker', async () => {
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                agentAssociated: true,
+                title: 'Agent task',
+                url: 'https://example.test/agent-task',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    render(<ActiveWindowsPage service={service} />);
+
+    const marker = await screen.findByRole('img', { name: 'Agent-managed tab' });
+    expect(marker).toHaveAttribute('title', 'Agent-managed tab detected locally');
+    expect(screen.getByRole('button', { name: 'Focus Agent task' })).toHaveAttribute(
+      'aria-describedby',
+      expect.stringContaining('agent-managed-description'),
+    );
+  });
+
   it('opens duplicate tabs view from the popup launch route', async () => {
     const service = createService();
     const duplicateUrl = 'https://example.test/same-page';
@@ -306,7 +340,7 @@ describe('ActiveWindowsPage', () => {
 
     const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
     expect(duplicateBanner).toHaveTextContent(
-      'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.',
+      'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.',
     );
     const bannerButtons = within(duplicateBanner).getAllByRole('button');
     expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
@@ -383,6 +417,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [202],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     render(<ActiveWindowsPage service={service} />);
@@ -468,7 +503,7 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByText('Pinned second copy')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      "Every duplicate shown is pinned and will stay open. Use a tab's pin button to unpin it and make it eligible to close.",
+      'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-managed tabs are never closed automatically.',
     );
     expect(screen.getByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
 
@@ -607,6 +642,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [201, 202],
     });
     render(<ActiveWindowsPage service={service} />);
@@ -788,6 +824,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     render(<ActiveWindowsPage service={service} />);
@@ -2065,6 +2102,7 @@ describe('ActiveWindowsPage', () => {
         },
       ],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     render(<ActiveWindowsPage service={service} />);
@@ -2198,7 +2236,7 @@ describe('ActiveWindowsPage', () => {
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
     expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.',
+      'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.',
     );
     expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
     expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(
@@ -2300,6 +2338,7 @@ describe('ActiveWindowsPage', () => {
         },
       ],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     render(<ActiveWindowsPage service={service} />);
@@ -2513,6 +2552,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     const settingsService = createSettingsService([
@@ -2593,6 +2633,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201, 202],
       closedTabs: [],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     const enabledPresetRules = DEFAULT_SETTINGS.deduplicationRules.map((rule) => ({

@@ -1408,6 +1408,13 @@ a {
   gap: 5px;
 }
 
+.agent-managed-tab-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--accent);
+}
+
 .duplicate-preview-outcome {
   flex: 0 0 auto;
   padding: 1px 4px;

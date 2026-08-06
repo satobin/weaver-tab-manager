@@ -18,6 +18,7 @@ import {
   type ActiveWindowsService,
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
+import { AgentManagedTabIndicator } from '../features/active-windows/AgentManagedTabIndicator';
 import { formatTabLocation, isNewTabUrl, isTabSuspended } from '../features/active-windows/model';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
 import { TabIcon } from '../features/active-windows/TabIcon';
@@ -285,6 +286,11 @@ export function Popup({
       if (result.skippedPinnedTabIds.length > 0) {
         issues.push(
           `${result.skippedPinnedTabIds.length} duplicate ${result.skippedPinnedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
+        );
+      }
+      if (result.skippedAgentManagedTabIds.length > 0) {
+        issues.push(
+          `${result.skippedAgentManagedTabIds.length} duplicate ${result.skippedAgentManagedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-managed.`,
         );
       }
       setActionError(issues.length > 0 ? issues.join(' ') : null);
@@ -577,12 +583,13 @@ export function Popup({
                       fallback={isNewTabUrl(tab.url) ? 'new-tab' : 'page'}
                       iconUrl={tab.iconUrl}
                     />
-                    <span>
+                    <span className="popup-result-copy">
                       <strong>{tab.title}</strong>
                       <small>
                         {windowLabel} · {formatTabLocation(tab.url, snapshot.extensionOrigin)}
                       </small>
                     </span>
+                    {tab.agentAssociated ? <AgentManagedTabIndicator /> : null}
                   </button>
                   <button
                     className="popup-close-tab"

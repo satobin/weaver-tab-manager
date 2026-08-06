@@ -1015,15 +1015,18 @@ export function ActiveWindowsPage({
       const result = await service.closeDuplicateTabs(duplicateActionTabIds);
       setTabsSelected(result.closedTabIds, false);
       setOperationError(
-        summarizeFailures(
-          'closed',
-          result.failures,
-          result.skippedPinnedTabIds.length > 0
+        summarizeFailures('closed', result.failures, [
+          ...(result.skippedPinnedTabIds.length > 0
             ? [
                 `${pluralize(result.skippedPinnedTabIds.length, 'duplicate tab')} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
               ]
-            : [],
-        ),
+            : []),
+          ...(result.skippedAgentManagedTabIds.length > 0
+            ? [
+                `${pluralize(result.skippedAgentManagedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-managed.`,
+              ]
+            : []),
+        ]),
       );
       if (result.closedTabIds.length > 0) {
         setDuplicateUndoTabs(result.closedTabs.length > 0 ? result.closedTabs : null);
@@ -1700,8 +1703,8 @@ export function ActiveWindowsPage({
             <span>
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
-                ? "Every duplicate shown is pinned and will stay open. Use a tab's pin button to unpin it and make it eligible to close."
-                : 'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.'}
+                ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-managed tabs are never closed automatically.'
+                : 'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.'}
             </span>
           </div>
           <div className="duplicate-preview-banner-actions">

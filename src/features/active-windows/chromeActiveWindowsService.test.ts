@@ -70,6 +70,11 @@ function createChromeGroup(
   };
 }
 
+function createOpenAiMarkerUrl() {
+  const svg = '<svg data-codex-favicon-badge="codex-favicon-badge"></svg>';
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 function createApi() {
   const currentWindow = createChromeWindow({ id: 2 });
   const windows = [
@@ -143,6 +148,10 @@ function createApi() {
     },
     tabGroups: {
       ...groupEvents,
+      get: vi.fn((groupId: number) => {
+        const group = groups.find((candidate) => candidate.id === groupId);
+        return group ? Promise.resolve(group) : Promise.reject(new Error('Group no longer exists'));
+      }),
       move: vi.fn((groupId: number) =>
         Promise.resolve(groups.find((group) => group.id === groupId)),
       ),
@@ -264,6 +273,27 @@ describe('createChromeActiveWindowsService', () => {
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.discarded)).toEqual([false, true]);
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.frozen)).toEqual([false, true]);
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.unloaded)).toEqual([true, false]);
+  });
+
+  it('marks tabs associated with local OpenAI and Claude browser-control signals', async () => {
+    const { api, windows } = createApi();
+    const openAiTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
+    const claudeTab = windows[1]?.tabs?.find((tab) => tab.id === 21);
+    if (!openAiTab || !claudeTab) {
+      throw new Error('Missing agent-associated tab fixtures');
+    }
+    openAiTab.favIconUrl = createOpenAiMarkerUrl();
+    claudeTab.groupId = 7;
+    vi.mocked(api.tabGroups.query).mockResolvedValue([
+      createChromeGroup({ color: 'orange', title: 'Claude', windowId: 2 }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
+
+    const snapshot = await service.loadSnapshot();
+
+    expect(snapshot.windows[0]?.tabs.find((tab) => tab.id === 21)?.agentAssociated).toBe(true);
+    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 12)?.agentAssociated).toBe(true);
+    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 11)?.agentAssociated).toBe(false);
   });
 
   it('uses restored metadata in snapshots and sort planning while Chrome metadata is missing', async () => {
@@ -508,6 +538,7 @@ describe('createChromeActiveWindowsService', () => {
         },
       ],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [11],
     });
     expect(api.tabs.get).toHaveBeenCalledTimes(2);
@@ -517,6 +548,51 @@ describe('createChromeActiveWindowsService', () => {
     expect(vi.mocked(api.tabs.get).mock.invocationCallOrder[1]).toBeLessThan(
       vi.mocked(api.tabs.remove).mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it('rechecks agent signals immediately before automatic duplicate removal', async () => {
+    const { api } = createApi();
+    const claudeGroup = createChromeGroup({ color: 'orange', title: 'Claude', windowId: 2 });
+    const openAiTab = createChromeTab({
+      favIconUrl: createOpenAiMarkerUrl(),
+      id: 11,
+      title: 'OpenAI controlled',
+      url: 'https://example.com/same',
+      windowId: 1,
+    });
+    const claudeTab = createChromeTab({
+      groupId: 7,
+      id: 21,
+      index: 1,
+      title: 'Claude controlled',
+      url: 'https://example.com/same',
+      windowId: 2,
+    });
+    const ordinaryTab = createChromeTab({
+      id: 12,
+      index: 2,
+      title: 'Ordinary duplicate',
+      url: 'https://example.com/same',
+      windowId: 1,
+    });
+    vi.mocked(api.tabs.query).mockResolvedValue([openAiTab, claudeTab, ordinaryTab]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      const tab = [openAiTab, claudeTab, ordinaryTab].find((candidate) => candidate.id === tabId);
+      return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
+    });
+    vi.mocked(api.tabGroups.query).mockResolvedValue([claudeGroup]);
+    vi.mocked(api.tabGroups.get).mockResolvedValue(claudeGroup);
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs([11, 21, 12]);
+
+    expect(result.closedTabIds).toEqual([12]);
+    expect(result.skippedAgentManagedTabIds).toEqual([11, 21]);
+    expect(result.skippedPinnedTabIds).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(api.tabGroups.get).toHaveBeenCalledOnce();
+    expect(api.tabs.remove).toHaveBeenCalledOnce();
+    expect(api.tabs.remove).toHaveBeenCalledWith(12);
   });
 
   it('uses restored metadata in duplicate undo records when Chrome metadata is missing', async () => {
@@ -552,6 +628,7 @@ describe('createChromeActiveWindowsService', () => {
         },
       ],
       failures: [],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
     expect(restoredMetadataService.resolve).toHaveBeenCalledWith([restoredTab], {
@@ -635,6 +712,7 @@ describe('createChromeActiveWindowsService', () => {
         { message: 'Tab no longer exists', tabId: 12 },
         { message: 'Tab is locked', tabId: 13 },
       ],
+      skippedAgentManagedTabIds: [],
       skippedPinnedTabIds: [],
     });
   });

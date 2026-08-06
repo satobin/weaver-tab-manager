@@ -58,6 +58,9 @@ function getKeepActionLabel(tabs: readonly DedupePreviewTab[]) {
   if (tabs.every((tab) => tab.pinned)) {
     return tabs.length === 1 ? 'Keep pinned' : `Keep ${tabs.length} pinned`;
   }
+  if (tabs.every((tab) => tab.pinned || tab.agentAssociated)) {
+    return tabs.length === 1 ? 'Keep protected' : `Keep ${tabs.length} protected`;
+  }
   return 'Keep open';
 }
 
