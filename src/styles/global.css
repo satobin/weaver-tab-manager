@@ -1395,6 +1395,27 @@ a {
   gap: 5px;
 }
 
+.duplicate-preview-outcome {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.duplicate-preview-outcome.is-keep {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.duplicate-preview-outcome.is-close {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
 .tab-suspended-button {
   display: grid;
   width: 24px;
@@ -2747,6 +2768,18 @@ a {
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dedupe-preview-match-decisions .dedupe-preview-kept-tabs {
+  display: grid;
+  overflow: visible;
+  gap: 2px;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.dedupe-preview-kept-tabs span {
+  overflow-wrap: anywhere;
 }
 
 .settings-rule-footer {

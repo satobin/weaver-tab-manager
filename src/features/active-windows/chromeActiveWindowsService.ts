@@ -51,6 +51,7 @@ export interface ActiveWindowsChromeApi extends RestoredTabMetadataChromeApi {
     >;
     create: (createProperties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>;
     discard: (tabId?: number) => Promise<chrome.tabs.Tab | undefined>;
+    get: (tabId: number) => Promise<chrome.tabs.Tab>;
     group: (options: chrome.tabs.GroupOptions) => Promise<number>;
     move: (tabId: number, moveProperties: chrome.tabs.MoveProperties) => Promise<chrome.tabs.Tab>;
     query: (queryInfo: chrome.tabs.QueryInfo) => Promise<chrome.tabs.Tab[]>;
@@ -78,6 +79,7 @@ export interface ActiveWindowsChromeApi extends RestoredTabMetadataChromeApi {
 }
 
 export interface ActiveWindowsService {
+  closeDuplicateTabs: (tabIds: readonly number[]) => Promise<CloseDuplicateTabsResult>;
   closeTabs: (tabIds: readonly number[]) => Promise<CloseTabsResult>;
   closeWindow: (windowId: number) => Promise<void>;
   focusTab: (windowId: number, tabId: number) => Promise<void>;
@@ -115,6 +117,11 @@ export interface TabOperationFailure {
 interface CloseTabsResult {
   closedTabIds: number[];
   failures: TabOperationFailure[];
+}
+
+export interface CloseDuplicateTabsResult extends CloseTabsResult {
+  closedTabs: RestorableTab[];
+  skippedPinnedTabIds: number[];
 }
 
 interface TabSuspensionResult {
@@ -184,6 +191,9 @@ interface MergeWindowsResult {
   warnings: string[];
 }
 
+export const PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE =
+  'Pinned tabs cannot be added to tab groups. Unpin the tab in your browser first.';
+
 function describeChromeError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
@@ -200,6 +210,143 @@ function getTabId(tab: chrome.tabs.Tab): number | null {
 
 function getTabsInBrowserOrder(tabs: readonly chrome.tabs.Tab[]): chrome.tabs.Tab[] {
   return [...tabs].sort((left, right) => left.index - right.index);
+}
+
+function createRestorableTabFromChromeTab(
+  tab: chrome.tabs.Tab & { id: number },
+  group: chrome.tabGroups.TabGroup | null,
+): RestorableTab {
+  return {
+    group: group
+      ? {
+          collapsed: group.collapsed,
+          color: group.color,
+          id: group.id,
+          title: group.title ?? '',
+        }
+      : null,
+    index: tab.index,
+    originalTabId: tab.id,
+    pinned: tab.pinned,
+    title: tab.title ?? '',
+    url: tab.url ?? tab.pendingUrl ?? '',
+    windowId: tab.windowId,
+  };
+}
+
+interface CrossWindowMoveCompletion {
+  pinRestored: boolean;
+  warnings: string[];
+}
+
+// Work around https://issues.chromium.org/issues/380088806: cross-window
+// chrome.tabs.move can clear a tab's pinned state. Re-pinning can also change
+// its index, so restore, re-query, and correct the final position. If Chrome
+// reliably preserves pins across supported versions, this repair path can be
+// removed; stable pinned/unpinned ordering remains product behavior.
+async function finishCrossWindowTabMove(
+  api: ActiveWindowsChromeApi,
+  tab: chrome.tabs.Tab & { id: number },
+  destinationWindowId: number,
+  destinationIndex: number,
+): Promise<CrossWindowMoveCompletion> {
+  if (!tab.pinned) {
+    return { pinRestored: false, warnings: [] };
+  }
+
+  try {
+    await api.tabs.update(tab.id, { pinned: true });
+  } catch (error) {
+    return {
+      pinRestored: false,
+      warnings: [
+        `Tab ${tab.id} moved, but its pinned state could not be restored: ${describeChromeError(error)}`,
+      ],
+    };
+  }
+
+  if (destinationIndex < 0) {
+    return { pinRestored: true, warnings: [] };
+  }
+
+  try {
+    const destinationTabs = getTabsInBrowserOrder(
+      await api.tabs.query({ windowId: destinationWindowId }),
+    );
+    const movedTab = destinationTabs.find(
+      (candidate) => candidate.id === tab.id && candidate.windowId === destinationWindowId,
+    );
+    if (!movedTab) {
+      return {
+        pinRestored: true,
+        warnings: [
+          `Tab ${tab.id} moved and was re-pinned, but its final position could not be verified.`,
+        ],
+      };
+    }
+    if (!movedTab.pinned) {
+      return {
+        pinRestored: false,
+        warnings: [
+          `Tab ${tab.id} moved, but the browser still reports it as unpinned after restoration.`,
+        ],
+      };
+    }
+    if (movedTab.index !== destinationIndex) {
+      await api.tabs.move(tab.id, { index: destinationIndex, windowId: destinationWindowId });
+
+      const correctedTabs = getTabsInBrowserOrder(
+        await api.tabs.query({ windowId: destinationWindowId }),
+      );
+      const correctedTab = correctedTabs.find(
+        (candidate) => candidate.id === tab.id && candidate.windowId === destinationWindowId,
+      );
+      if (!correctedTab) {
+        return {
+          pinRestored: true,
+          warnings: [
+            `Tab ${tab.id} moved and was re-pinned, but its corrected position could not be verified.`,
+          ],
+        };
+      }
+      if (!correctedTab.pinned) {
+        return {
+          pinRestored: false,
+          warnings: [
+            `Tab ${tab.id} moved, but the browser reports it as unpinned after repositioning.`,
+          ],
+        };
+      }
+      if (correctedTab.index !== destinationIndex) {
+        return {
+          pinRestored: true,
+          warnings: [
+            `Tab ${tab.id} moved and was re-pinned, but the browser placed it at index ${correctedTab.index} instead of ${destinationIndex}.`,
+          ],
+        };
+      }
+    }
+  } catch (error) {
+    return {
+      pinRestored: true,
+      warnings: [
+        `Tab ${tab.id} moved and was re-pinned, but its final position could not be restored: ${describeChromeError(error)}`,
+      ],
+    };
+  }
+
+  return { pinRestored: true, warnings: [] };
+}
+
+async function moveTabAcrossWindows(
+  api: ActiveWindowsChromeApi,
+  tab: chrome.tabs.Tab & { id: number },
+  destinationWindowId: number,
+  moveIndex: number,
+  finalIndex: number = moveIndex,
+): Promise<CrossWindowMoveCompletion> {
+  await api.tabs.move(tab.id, { index: moveIndex, windowId: destinationWindowId });
+  return finishCrossWindowTabMove(api, tab, destinationWindowId, finalIndex);
 }
 
 async function restoreTabGroups(
@@ -495,6 +642,85 @@ export function createChromeActiveWindowsService(
   };
 
   return {
+    async closeDuplicateTabs(tabIds) {
+      const requestedTabIds = [...new Set(tabIds)];
+      const closedTabIds: number[] = [];
+      const closedTabs: RestorableTab[] = [];
+      const failures: TabOperationFailure[] = [];
+      const skippedPinnedTabIds: number[] = [];
+      const [snapshotTabs, groups] = await Promise.all([
+        api.tabs.query({}),
+        api.tabGroups.query({}),
+      ]);
+      const restoredMetadata = await restoredTabMetadataService.resolve(snapshotTabs, {
+        pruneMissing: false,
+      });
+      const snapshotTabsById = new Map(
+        snapshotTabs.flatMap((tab) => {
+          if (tab.id === undefined) {
+            return [];
+          }
+          return [[tab.id, applyRestoredTabMetadata(tab, restoredMetadata)] as const];
+        }),
+      );
+      const results = await mapWithConcurrency(
+        requestedTabIds,
+        CLOSE_TAB_CONCURRENCY,
+        async (tabId) => {
+          try {
+            const snapshotTab = snapshotTabsById.get(tabId);
+            if (!snapshotTab) {
+              throw new Error('The tab no longer exists.');
+            }
+            const group =
+              snapshotTab.groupId >= 0
+                ? (groups.find(
+                    (candidate) =>
+                      candidate.id === snapshotTab.groupId &&
+                      candidate.windowId === snapshotTab.windowId,
+                  ) ?? null)
+                : null;
+            if (snapshotTab.groupId >= 0 && !group) {
+              throw new Error(
+                'The tab group metadata could not be read, so the tab was left open.',
+              );
+            }
+
+            // The undo record comes from one pre-removal snapshot so concurrent
+            // closes cannot shift later indices. Re-read only the pin state at
+            // the mutation boundary so a tab pinned after the preview stays open.
+            const liveTab = await api.tabs.get(tabId);
+            if (liveTab.id !== tabId) {
+              throw new Error('The browser returned a different tab than requested.');
+            }
+            if (liveTab.pinned) {
+              return { skippedPinned: true as const, tabId };
+            }
+
+            const closedTab = createRestorableTabFromChromeTab(
+              snapshotTab as chrome.tabs.Tab & { id: number },
+              group,
+            );
+            await api.tabs.remove(tabId);
+            return { closed: true as const, closedTab, tabId };
+          } catch (error) {
+            return { closed: false as const, error, tabId };
+          }
+        },
+      );
+      results.forEach((result) => {
+        if ('skippedPinned' in result) {
+          skippedPinnedTabIds.push(result.tabId);
+        } else if (result.closed) {
+          closedTabIds.push(result.tabId);
+          closedTabs.push(result.closedTab);
+        } else {
+          failures.push({ message: describeChromeError(result.error), tabId: result.tabId });
+        }
+      });
+      return { closedTabIds, closedTabs, failures, skippedPinnedTabIds };
+    },
+
     async closeTabs(tabIds) {
       const requestedTabIds = [...new Set(tabIds)];
       const closedTabIds: number[] = [];
@@ -795,7 +1021,8 @@ export function createChromeActiveWindowsService(
       const managedWindows = windows.filter(isManagedChromeWindow);
       const windowsById = new Map(managedWindows.map((window) => [window.id, window]));
       const destinationWindowId = requestedWindowIds[0] as number;
-      if (!windowsById.has(destinationWindowId)) {
+      const destinationWindow = windowsById.get(destinationWindowId);
+      if (!destinationWindow) {
         throw new Error('The destination window no longer exists.');
       }
 
@@ -805,6 +1032,10 @@ export function createChromeActiveWindowsService(
       const mergedSourceWindowIds: number[] = [];
       const warnings: string[] = [];
       const originalSourceTabs: chrome.tabs.Tab[] = [];
+      const destinationPinnedTabCount = (destinationWindow.tabs ?? []).filter(
+        (tab) => tab.pinned,
+      ).length;
+      let restoredPinnedTabCount = 0;
 
       for (const sourceWindowId of sourceWindowIds) {
         const sourceWindow = windowsById.get(sourceWindowId);
@@ -820,8 +1051,18 @@ export function createChromeActiveWindowsService(
         let sourceFailed = false;
         for (const tab of sourceTabs) {
           try {
-            await api.tabs.move(tab.id, { index: -1, windowId: destinationWindowId });
+            const completion = await moveTabAcrossWindows(
+              api,
+              tab,
+              destinationWindowId,
+              -1,
+              tab.pinned ? destinationPinnedTabCount + restoredPinnedTabCount : -1,
+            );
             movedTabIds.push(tab.id);
+            warnings.push(...completion.warnings);
+            if (tab.pinned && completion.pinRestored) {
+              restoredPinnedTabCount += 1;
+            }
           } catch (error) {
             sourceFailed = true;
             failures.push({ message: describeChromeError(error), tabId: tab.id });
@@ -879,6 +1120,9 @@ export function createChromeActiveWindowsService(
       if (destinationGroupId !== null && !destinationGroup) {
         throw new Error('The destination tab group no longer exists.');
       }
+      if (destinationGroupId !== null && tab.pinned) {
+        throw new Error(PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE);
+      }
 
       const destinationTabs = getTabsInBrowserOrder(
         allTabs.filter(
@@ -904,6 +1148,7 @@ export function createChromeActiveWindowsService(
         : Math.max(destinationIndex, pinnedTabs);
 
       if (destinationGroupId !== null) {
+        const warnings: string[] = [];
         const destinationGroupTabs = destinationTabs.filter(
           (candidate) => candidate.groupId === destinationGroupId,
         );
@@ -939,10 +1184,13 @@ export function createChromeActiveWindowsService(
         }
 
         if (tab.windowId !== destinationWindowId) {
-          await api.tabs.move(tabId, { index: -1, windowId: destinationWindowId });
-        }
-        if (tab.pinned) {
-          await api.tabs.update(tabId, { pinned: false });
+          const completion = await moveTabAcrossWindows(
+            api,
+            tab as chrome.tabs.Tab & { id: number },
+            destinationWindowId,
+            -1,
+          );
+          warnings.push(...completion.warnings);
         }
         await api.tabs.group({ groupId: destinationGroupId, tabIds: tabId });
         await api.tabs.move(tabId, { index: destinationIndex, windowId: destinationWindowId });
@@ -951,7 +1199,7 @@ export function createChromeActiveWindowsService(
           destinationIndex,
           destinationWindowId,
           movedTabId: tabId,
-          warnings: [],
+          warnings,
         };
       }
 
@@ -971,7 +1219,16 @@ export function createChromeActiveWindowsService(
       if (tab.groupId >= 0) {
         await api.tabs.ungroup(tabId);
       }
-      if (tab.windowId !== destinationWindowId || tab.index !== destinationIndex) {
+      const warnings: string[] = [];
+      if (tab.windowId !== destinationWindowId) {
+        const completion = await moveTabAcrossWindows(
+          api,
+          tab as chrome.tabs.Tab & { id: number },
+          destinationWindowId,
+          destinationIndex,
+        );
+        warnings.push(...completion.warnings);
+      } else if (tab.index !== destinationIndex) {
         await api.tabs.move(tabId, { index: destinationIndex, windowId: destinationWindowId });
       }
 
@@ -979,7 +1236,7 @@ export function createChromeActiveWindowsService(
         destinationIndex,
         destinationWindowId,
         movedTabId: tabId,
-        warnings: [],
+        warnings,
       };
     },
 
@@ -1085,7 +1342,7 @@ export function createChromeActiveWindowsService(
         allTabs.flatMap((tab) => (tab.id === undefined ? [] : [[tab.id, tab] as const])),
       );
       const failures: TabOperationFailure[] = [];
-      const orderedTabs = requestedTabIds.flatMap((tabId) => {
+      const requestedTabs = requestedTabIds.flatMap((tabId) => {
         const tab = tabsById.get(tabId);
         if (!tab) {
           failures.push({ message: 'The tab no longer exists.', tabId });
@@ -1093,6 +1350,10 @@ export function createChromeActiveWindowsService(
         }
         return [tab];
       });
+      const orderedTabs = [
+        ...requestedTabs.filter((tab) => tab.pinned),
+        ...requestedTabs.filter((tab) => !tab.pinned),
+      ];
 
       const firstTab = orderedTabs[0];
       if (firstTab?.id === undefined) {
@@ -1120,26 +1381,46 @@ export function createChromeActiveWindowsService(
       }
 
       const movedTabIds = [firstTab.id];
+      const firstCompletion = await finishCrossWindowTabMove(
+        api,
+        firstTab as chrome.tabs.Tab & { id: number },
+        destination.id,
+        0,
+      );
+      const warnings = [...firstCompletion.warnings];
+      let restoredPinnedTabCount = firstTab.pinned && firstCompletion.pinRestored ? 1 : 0;
       for (const tab of orderedTabs.slice(1)) {
         if (tab.id === undefined) {
           continue;
         }
         try {
-          await api.tabs.move(tab.id, { index: -1, windowId: destination.id });
+          const completion = await moveTabAcrossWindows(
+            api,
+            tab as chrome.tabs.Tab & { id: number },
+            destination.id,
+            -1,
+            tab.pinned ? restoredPinnedTabCount : -1,
+          );
           movedTabIds.push(tab.id);
+          warnings.push(...completion.warnings);
+          if (tab.pinned && completion.pinRestored) {
+            restoredPinnedTabCount += 1;
+          }
         } catch (error) {
           failures.push({ message: describeChromeError(error), tabId: tab.id });
         }
       }
 
       const movedSet = new Set(movedTabIds);
-      const warnings = await restoreTabGroups(
-        api,
-        orderedTabs,
-        allGroups,
-        destination.id,
-        movedSet,
-        preservedGroupIds,
+      warnings.push(
+        ...(await restoreTabGroups(
+          api,
+          orderedTabs,
+          allGroups,
+          destination.id,
+          movedSet,
+          preservedGroupIds,
+        )),
       );
 
       if (managerWindow.id !== undefined) {

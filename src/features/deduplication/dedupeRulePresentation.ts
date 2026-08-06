@@ -92,7 +92,7 @@ interface DedupeRuleExample {
 export interface DedupePreviewGroup {
   closeTabs: DedupePreviewTab[];
   identity: string;
-  keepTab: DedupePreviewTab;
+  keepTabs: DedupePreviewTab[];
   matchType: 'exact' | 'site-rule';
   ruleId: string | null;
   ruleName: string;
@@ -168,23 +168,27 @@ export function buildDedupePreview(
 ): DedupePreviewGroup[] {
   const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
   return planDuplicateTabs(tabs, rules, keeperPreference).duplicateGroups.flatMap((group) => {
-    const keepTab = tabsById.get(group.keeperTabId);
+    const keepTabs = group.keepTabIds.flatMap((tabId) => {
+      const tab = tabsById.get(tabId);
+      return tab ? [tab] : [];
+    });
     const closeTabs = group.duplicateTabIds.flatMap((tabId) => {
       const tab = tabsById.get(tabId);
       return tab ? [tab] : [];
     });
-    if (!keepTab || closeTabs.length === 0) {
+    const firstKeepTab = keepTabs[0];
+    if (!firstKeepTab || keepTabs.length !== group.keepTabIds.length || closeTabs.length === 0) {
       return [];
     }
     const rule = group.ruleId
       ? rules.find((candidate) => candidate.id === group.ruleId)
       : undefined;
-    const canonical = canonicalizeTabUrl(keepTab.url, rules);
+    const canonical = canonicalizeTabUrl(firstKeepTab.url, rules);
     return [
       {
         closeTabs,
         identity: getCanonicalIdentity(canonical),
-        keepTab,
+        keepTabs,
         matchType: group.matchType,
         ruleId: group.ruleId,
         ruleName: rule ? getDedupeRuleDisplayName(rule) : 'Exact URL match',

@@ -20,6 +20,7 @@ import { formatTabLocation } from '../features/active-windows/model';
 import { type SavedWindow } from '../features/saved-windows/savedWindowModel';
 import {
   createSavedWindowsService,
+  type OpenSavedTabInput,
   type RestoreSavedWindowResult,
   type SavedWindowsService,
 } from '../features/saved-windows/savedWindowsService';
@@ -89,7 +90,7 @@ function SavedWindowPreview({
 }: {
   disabled: boolean;
   onCopyTabUrl: (url: string, title: string) => void;
-  onOpenTab: (url: string) => void;
+  onOpenTab: (tab: OpenSavedTabInput) => void;
   savedWindow: SavedWindow;
 }) {
   const groupsByKey = new Map(savedWindow.groups.map((group) => [group.key, group]));
@@ -117,10 +118,10 @@ function SavedWindowPreview({
                 <button
                   className="saved-tab-open-button"
                   type="button"
-                  aria-label={`Open ${tab.title} in a new tab`}
-                  title="Open in a new tab"
+                  aria-label={`Open ${tab.title} in a new${tab.pinned ? ' pinned' : ''} tab`}
+                  title={`Open in a new${tab.pinned ? ' pinned' : ''} tab`}
                   disabled={disabled}
-                  onClick={() => onOpenTab(tab.url)}
+                  onClick={() => onOpenTab({ pinned: tab.pinned, url: tab.url })}
                 >
                   <span className="saved-tab-copy">
                     <strong>{tab.title}</strong>
@@ -246,11 +247,11 @@ export function SavedWindowsPage({
     }
   };
 
-  const openSavedTab = async (url: string) => {
+  const openSavedTab = async (tab: OpenSavedTabInput) => {
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.openTab(url);
+      await service.openTab(tab);
     } catch (error) {
       setActionError(describeActionError(error));
     }
@@ -560,7 +561,7 @@ export function SavedWindowsPage({
                     <SavedWindowPreview
                       disabled={disabled}
                       onCopyTabUrl={(url, title) => void copySavedTabUrl(url, title)}
-                      onOpenTab={(url) => void openSavedTab(url)}
+                      onOpenTab={(tab) => void openSavedTab(tab)}
                       savedWindow={savedWindow}
                     />
                   </div>

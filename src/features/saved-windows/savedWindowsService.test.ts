@@ -304,26 +304,32 @@ describe('createChromeSavedWindowsService', () => {
     await expect(service.load()).resolves.toHaveLength(1);
   });
 
-  it('opens an individual saved URL as a new active tab', async () => {
-    const fake = createApi([createSavedWindow()]);
-    const service = createChromeSavedWindowsService(fake.api, environment);
+  it.each([true, false])(
+    'opens an individual saved URL as a new active tab with pinned=%s',
+    async (pinned) => {
+      const fake = createApi([createSavedWindow()]);
+      const service = createChromeSavedWindowsService(fake.api, environment);
 
-    await expect(service.openTab('https://docs.example.com/plan')).resolves.toBe(100);
-    expect(fake.api.tabs.create).toHaveBeenCalledWith({
-      active: true,
-      url: 'https://docs.example.com/plan',
-    });
-    await expect(service.load()).resolves.toHaveLength(1);
-  });
+      await expect(service.openTab({ pinned, url: 'https://docs.example.com/plan' })).resolves.toBe(
+        100,
+      );
+      expect(fake.api.tabs.create).toHaveBeenCalledWith({
+        active: true,
+        pinned,
+        url: 'https://docs.example.com/plan',
+      });
+      await expect(service.load()).resolves.toHaveLength(1);
+    },
+  );
 
   it('rejects an individual saved-tab open when Chrome omits the tab ID', async () => {
     const fake = createApi([createSavedWindow()]);
     vi.mocked(fake.api.tabs.create).mockResolvedValue(createChromeTab());
     const service = createChromeSavedWindowsService(fake.api, environment);
 
-    await expect(service.openTab('https://docs.example.com/plan')).rejects.toThrow(
-      'The browser created a tab without an ID.',
-    );
+    await expect(
+      service.openTab({ pinned: false, url: 'https://docs.example.com/plan' }),
+    ).rejects.toThrow('The browser created a tab without an ID.');
   });
 
   it('serializes rename and delete mutations without reviving stale records', async () => {

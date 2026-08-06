@@ -9,6 +9,7 @@ function createTab(id: number, title: string, url: string): DedupePreviewTab {
   return {
     id,
     index: id - 1,
+    pinned: false,
     title,
     url,
     windowId: 1,
@@ -106,5 +107,34 @@ describe('DedupePreviewGroups', () => {
     expect(screen.getByText('alpha.example.com - Same page')).toBeInTheDocument();
     expect(screen.getByText('beta.example.com - Same page')).toBeInTheDocument();
     expect(screen.queryByText('Google Docs, Sheets & Slides')).not.toBeInTheDocument();
+  });
+
+  it('shows every protected pinned tab as kept', () => {
+    const url = 'https://example.com/duplicate';
+    const firstPinned = {
+      ...createTab(1, 'Pinned in current', url),
+      pinned: true,
+    };
+    const secondPinned = {
+      ...createTab(2, 'Pinned elsewhere', url),
+      pinned: true,
+      windowId: 2,
+      windowLabel: 'Window 2',
+    };
+    const closeTab = createTab(3, 'Unpinned copy', url);
+
+    render(
+      <DedupePreviewGroups
+        groups={buildDedupePreview([firstPinned, secondPinned, closeTab], [], {
+          tabId: closeTab.id,
+          windowId: closeTab.windowId,
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Keep 2 pinned')).toBeInTheDocument();
+    expect(screen.getByText('Pinned in current - Current Window')).toBeVisible();
+    expect(screen.getByText('Pinned elsewhere - Window 2')).toBeVisible();
+    expect(screen.getByText('Close 1')).toBeInTheDocument();
   });
 });

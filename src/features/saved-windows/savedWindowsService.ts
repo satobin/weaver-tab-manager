@@ -89,13 +89,18 @@ export interface RestoreSavedWindowResult {
   warnings: string[];
 }
 
+export interface OpenSavedTabInput {
+  pinned: boolean;
+  url: string;
+}
+
 export interface SavedWindowsService {
   deleteWindow: (savedWindowId: string) => Promise<void>;
   dismissCleanupNotice?: (() => Promise<void>) | undefined;
   keepWindow: (savedWindow: SavedWindow) => Promise<SavedWindow>;
   load: () => Promise<SavedWindow[]>;
   loadCleanupNotice?: (() => Promise<string | null>) | undefined;
-  openTab: (url: string) => Promise<number>;
+  openTab: (tab: OpenSavedTabInput) => Promise<number>;
   renameWindow: (savedWindowId: string, name: string) => Promise<SavedWindow>;
   restoreWindow: (savedWindowId: string) => Promise<RestoreSavedWindowResult>;
   saveWindow: (
@@ -306,8 +311,8 @@ export function createChromeSavedWindowsService(
       });
     },
 
-    async openTab(url) {
-      const createdTab = await api.tabs.create({ active: true, url });
+    async openTab({ pinned, url }) {
+      const createdTab = await api.tabs.create({ active: true, pinned, url });
       const tabId = getTabId(createdTab);
       if (tabId === null) {
         throw new Error('The browser created a tab without an ID.');

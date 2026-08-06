@@ -172,9 +172,16 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} />);
 
     await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
-    await user.click(screen.getByRole('button', { name: 'Open Inbox in a new tab' }));
+    const openPinnedTab = screen.getByRole('button', {
+      name: 'Open Inbox in a new pinned tab',
+    });
+    expect(openPinnedTab).toHaveAttribute('title', 'Open in a new pinned tab');
+    await user.click(openPinnedTab);
 
-    expect(service.openTab).toHaveBeenCalledWith('https://mail.example.com/');
+    expect(service.openTab).toHaveBeenCalledWith({
+      pinned: true,
+      url: 'https://mail.example.com/',
+    });
     expect(service.restoreWindow).not.toHaveBeenCalled();
     expect(service.renameWindow).not.toHaveBeenCalled();
     expect(service.deleteWindow).not.toHaveBeenCalled();
@@ -256,7 +263,9 @@ describe('SavedWindowsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Open Plan in a new tab' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('URL blocked');
-    expect(screen.getByRole('button', { name: 'Open Inbox in a new tab' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Open Inbox in a new pinned tab' }),
+    ).toBeInTheDocument();
   });
 
   it('renames inline and requires confirmation before deletion', async () => {

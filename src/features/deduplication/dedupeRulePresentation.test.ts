@@ -25,6 +25,7 @@ function createTab(overrides: Partial<DedupePreviewTab> = {}): DedupePreviewTab 
   return {
     id: 1,
     index: 0,
+    pinned: false,
     title: 'Example',
     url: 'https://app.example.com/projects/42?view=one',
     windowId: 1,
@@ -87,7 +88,34 @@ describe('dedupe rule presentation', () => {
       {
         closeTabs: [tabs[0], tabs[2]],
         identity: 'app.example.com/projects/42',
-        keepTab: tabs[1],
+        keepTabs: [tabs[1]],
+        matchType: 'site-rule',
+        ruleId: 'custom',
+        ruleName: 'app.example.com - Same page',
+        sectionId: 'rule:custom',
+      },
+    ]);
+  });
+
+  it('previews every pinned match as kept and only unpinned matches as closing', () => {
+    const tabs = [
+      createTab({ id: 1, pinned: true, title: 'Pinned one', windowLabel: 'Window 1' }),
+      createTab({
+        id: 2,
+        index: 1,
+        pinned: true,
+        title: 'Pinned two',
+        windowId: 2,
+        windowLabel: 'Window 2',
+      }),
+      createTab({ id: 3, index: 2, title: 'Unpinned copy' }),
+    ];
+
+    expect(buildDedupePreview(tabs, [createRule()], { tabId: 3, windowId: 1 })).toEqual([
+      {
+        closeTabs: [tabs[2]],
+        identity: 'app.example.com/projects/42',
+        keepTabs: [tabs[0], tabs[1]],
         matchType: 'site-rule',
         ruleId: 'custom',
         ruleName: 'app.example.com - Same page',

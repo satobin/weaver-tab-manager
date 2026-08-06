@@ -18,7 +18,6 @@ import {
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
 import { formatTabLocation, isNewTabUrl, isTabSuspended } from '../features/active-windows/model';
-import { createRestorableTabs } from '../features/active-windows/restorableTabs';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
 import { TabIcon } from '../features/active-windows/TabIcon';
 import { type SortCriterion, type SortDirection } from '../features/active-windows/tabSort';
@@ -222,29 +221,31 @@ export function Popup({
       return;
     }
 
-    const undoCandidates = snapshot
-      ? createRestorableTabs(snapshot, duplicatePlan.duplicateTabIds)
-      : [];
     actionInFlight.current = true;
     setActionError(null);
     setActionNotice(null);
     setDuplicateUndoTabs(null);
     setPendingAction('dedupe');
     try {
-      const result = await service.closeTabs(duplicatePlan.duplicateTabIds);
+      const result = await service.closeDuplicateTabs(duplicatePlan.duplicateTabIds);
       if (result.closedTabIds.length > 0) {
-        const closedTabIds = new Set(result.closedTabIds);
-        const closedTabs = undoCandidates.filter((tab) => closedTabIds.has(tab.originalTabId));
-        setDuplicateUndoTabs(closedTabs.length > 0 ? closedTabs : null);
+        setDuplicateUndoTabs(result.closedTabs.length > 0 ? result.closedTabs : null);
         setActionNotice(
           `${result.closedTabIds.length} duplicate ${result.closedTabIds.length === 1 ? 'tab' : 'tabs'} removed.`,
         );
       }
+      const issues: string[] = [];
       if (result.failures.length > 0) {
-        setActionError(
+        issues.push(
           `${result.failures.length} duplicate ${result.failures.length === 1 ? 'tab' : 'tabs'} could not be closed. ${result.failures[0]?.message ?? ''}`.trim(),
         );
       }
+      if (result.skippedPinnedTabIds.length > 0) {
+        issues.push(
+          `${result.skippedPinnedTabIds.length} duplicate ${result.skippedPinnedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
+        );
+      }
+      setActionError(issues.length > 0 ? issues.join(' ') : null);
       await refresh();
     } catch {
       setActionError('The browser could not remove duplicate tabs.');

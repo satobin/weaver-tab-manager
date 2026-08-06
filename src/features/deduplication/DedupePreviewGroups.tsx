@@ -32,14 +32,14 @@ function normalizeTitle(title: string) {
 }
 
 function getAlternateCloseTitles(group: DedupePreviewGroup) {
-  const keepTitle = normalizeTitle(group.keepTab.title);
+  const keepTitles = new Set(group.keepTabs.map((tab) => normalizeTitle(tab.title)));
   const seenTitles = new Set<string>();
   const alternateTitles: string[] = [];
 
   for (const tab of group.closeTabs) {
     const normalizedTitle = normalizeTitle(tab.title);
 
-    if (normalizedTitle === keepTitle || seenTitles.has(normalizedTitle)) {
+    if (keepTitles.has(normalizedTitle) || seenTitles.has(normalizedTitle)) {
       continue;
     }
 
@@ -52,6 +52,13 @@ function getAlternateCloseTitles(group: DedupePreviewGroup) {
 
 function getCloseDetails(tabs: readonly DedupePreviewTab[]) {
   return tabs.map((tab) => `${tab.title} - ${tab.windowLabel}`).join('\n');
+}
+
+function getKeepActionLabel(tabs: readonly DedupePreviewTab[]) {
+  if (tabs.every((tab) => tab.pinned)) {
+    return tabs.length === 1 ? 'Keep pinned' : `Keep ${tabs.length} pinned`;
+  }
+  return 'Keep open';
 }
 
 function groupBySection(groups: readonly DedupePreviewGroup[]) {
@@ -94,6 +101,10 @@ export function DedupePreviewGroups({ groups }: DedupePreviewGroupsProps) {
           </header>
           <ul className="dedupe-preview-match-list">
             {section.groups.map((group, groupIndex) => {
+              const firstKeepTab = group.keepTabs[0];
+              if (!firstKeepTab) {
+                return null;
+              }
               const alternateTitles = getAlternateCloseTitles(group);
               const closeDetails = getCloseDetails(group.closeTabs);
 
@@ -103,7 +114,7 @@ export function DedupePreviewGroups({ groups }: DedupePreviewGroupsProps) {
                   key={`${section.id}-${groupIndex}-${group.identity}`}
                 >
                   <div className="dedupe-preview-match-copy">
-                    <strong title={group.keepTab.title}>{group.keepTab.title}</strong>
+                    <strong title={firstKeepTab.title}>{firstKeepTab.title}</strong>
                     <code title={group.identity}>{group.identity}</code>
                     {alternateTitles.length > 0 ? (
                       <span title={alternateTitles.join('\n')}>
@@ -113,8 +124,18 @@ export function DedupePreviewGroups({ groups }: DedupePreviewGroupsProps) {
                   </div>
                   <dl className="dedupe-preview-match-decisions">
                     <div>
-                      <dt className="dedupe-preview-action is-keep">Keep open</dt>
-                      <dd title={group.keepTab.windowLabel}>{group.keepTab.windowLabel}</dd>
+                      <dt className="dedupe-preview-action is-keep">
+                        {getKeepActionLabel(group.keepTabs)}
+                      </dt>
+                      <dd className="dedupe-preview-kept-tabs">
+                        {group.keepTabs.map((tab) => (
+                          <span key={tab.id} title={`${tab.title} - ${tab.windowLabel}`}>
+                            {group.keepTabs.length === 1
+                              ? tab.windowLabel
+                              : `${tab.title} - ${tab.windowLabel}`}
+                          </span>
+                        ))}
+                      </dd>
                     </div>
                     <div>
                       <dt className="dedupe-preview-action is-close">

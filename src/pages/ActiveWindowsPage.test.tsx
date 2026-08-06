@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../app/routes';
 import {
+  PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE,
   type ActiveWindowsService,
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
@@ -75,6 +76,9 @@ function createService(): ActiveWindowsService {
   });
 
   return {
+    closeDuplicateTabs: vi.fn(() =>
+      Promise.resolve({ closedTabIds: [], closedTabs: [], failures: [], skippedPinnedTabIds: [] }),
+    ),
     closeTabs: vi.fn(() => Promise.resolve({ closedTabIds: [], failures: [] })),
     closeWindow: vi.fn(() => Promise.resolve()),
     focusTab: vi.fn(() => Promise.resolve()),
@@ -297,7 +301,9 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
-    expect(duplicateBanner).toHaveTextContent('Green tabs stay open. Red tabs will close.');
+    expect(duplicateBanner).toHaveTextContent(
+      'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.',
+    );
     const bannerButtons = within(duplicateBanner).getAllByRole('button');
     expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
     expect(within(bannerButtons[0] as HTMLElement).getByText('1')).toHaveClass('toolbar-count');
@@ -306,13 +312,169 @@ describe('ActiveWindowsPage', () => {
       'aria-pressed',
       'true',
     );
-    expect((await screen.findByText('Keep this tab')).closest('li')).toHaveClass(
+    const keptTabRow = (await screen.findByText('Keep this tab')).closest('li');
+    const closingTabRow = screen.getByText('Close this tab').closest('li');
+    expect(keptTabRow).toHaveClass('is-duplicate-preview-keep');
+    expect(closingTabRow).toHaveClass('is-duplicate-preview-close');
+    expect(within(keptTabRow as HTMLElement).getByText('Keep')).toBeInTheDocument();
+    expect(within(closingTabRow as HTMLElement).getByText('Will close')).toBeInTheDocument();
+    expect(
+      within(keptTabRow as HTMLElement).getByRole('button', { name: 'Focus Keep this tab' }),
+    ).toHaveAccessibleDescription('Keep');
+    expect(
+      within(closingTabRow as HTMLElement).getByRole('button', { name: 'Focus Close this tab' }),
+    ).toHaveAccessibleDescription('Will close');
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+  });
+
+  it('keeps every pinned duplicate visible and closes only unpinned matches', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/pinned-duplicate';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                pinned: true,
+                title: 'Pinned current copy',
+                url: duplicateUrl,
+              }),
+            ],
+          }),
+          createManagedWindow({
+            focused: false,
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 201,
+                pinned: true,
+                title: 'Pinned second copy',
+                url: duplicateUrl,
+                windowId: 2,
+              }),
+              createManagedTab({
+                id: 202,
+                index: 1,
+                title: 'Unpinned copy',
+                url: duplicateUrl,
+                windowId: 2,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [202],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+
+    expect(screen.getByText('Pinned current copy').closest('li')).toHaveClass(
       'is-duplicate-preview-keep',
     );
-    expect(screen.getByText('Close this tab').closest('li')).toHaveClass(
+    expect(screen.getByText('Pinned second copy').closest('li')).toHaveClass(
+      'is-duplicate-preview-keep',
+    );
+    expect(screen.getByText('Unpinned copy').closest('li')).toHaveClass(
       'is-duplicate-preview-close',
     );
-    expect(window.location.hash).toBe(APP_ROUTES.windows);
+
+    await user.click(screen.getByRole('button', { name: 'Close duplicate tabs 1' }));
+
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([202]);
+  });
+
+  it('shows all-pinned duplicate groups as protected instead of an empty state', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/all-pinned';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                pinned: true,
+                title: 'Pinned first copy',
+                url: duplicateUrl,
+              }),
+              createManagedTab({
+                id: 102,
+                index: 1,
+                pinned: true,
+                title: 'Pinned second copy',
+                url: duplicateUrl,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', { name: 'Show duplicate tabs only' });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+
+    expect(screen.getByText('Pinned first copy')).toBeInTheDocument();
+    expect(screen.getByText('Pinned second copy')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
+      'Every duplicate shown is pinned and will stay open. Unpin a tab in your browser to make it eligible to close.',
+    );
+    expect(screen.getByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
+  });
+
+  it('reports duplicate candidates that became pinned before the close', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    const duplicateUrl = 'https://example.test/newly-pinned';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({ active: true, id: 101, url: duplicateUrl }),
+              createManagedTab({ id: 201, index: 1, url: duplicateUrl }),
+              createManagedTab({ id: 202, index: 2, url: duplicateUrl }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [201, 202],
+    });
+    render(<ActiveWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 2' }));
+
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([201, 202]);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '2 duplicate tabs left open because they are now pinned.',
+    );
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
   it('clears the query and selected group when the toolbar enters duplicate tabs view', async () => {
@@ -479,7 +641,12 @@ describe('ActiveWindowsPage', () => {
       .mockReset()
       .mockResolvedValueOnce(initialSnapshot)
       .mockResolvedValue(postCloseSnapshot);
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [201],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     render(<ActiveWindowsPage service={service} />);
 
     const previewButton = await screen.findByRole('button', {
@@ -498,7 +665,7 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open in new window 0' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Close 0' })).toBeDisabled();
-    expect(service.closeTabs).toHaveBeenCalledWith([201]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([201]);
 
     await user.click(
       within(emptyHeading.closest('.filter-empty') as HTMLElement).getByRole('button', {
@@ -1335,14 +1502,38 @@ describe('ActiveWindowsPage', () => {
         ],
       }),
     );
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [101, 201], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [101, 201],
+      closedTabs: [
+        {
+          group: null,
+          index: 0,
+          originalTabId: 101,
+          pinned: false,
+          title: 'Example tab',
+          url: duplicateUrl,
+          windowId: 1,
+        },
+        {
+          group: null,
+          index: 0,
+          originalTabId: 201,
+          pinned: false,
+          title: 'Example tab',
+          url: duplicateUrl,
+          windowId: 2,
+        },
+      ],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     render(<ActiveWindowsPage service={service} />);
 
     const removeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 2' });
     await waitFor(() => expect(removeButton).toBeEnabled());
     await user.click(removeButton);
 
-    expect(service.closeTabs).toHaveBeenCalledWith([101, 201]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([101, 201]);
     expect(await screen.findByText('2 duplicate tabs removed.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Undo' }));
 
@@ -1467,7 +1658,7 @@ describe('ActiveWindowsPage', () => {
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
     expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Green tabs stay open. Red tabs will close.',
+      'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.',
     );
     expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
     expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(
@@ -1555,7 +1746,22 @@ describe('ActiveWindowsPage', () => {
     vi.mocked(service.loadSnapshot)
       .mockResolvedValueOnce(createDuplicateSnapshot(true))
       .mockResolvedValue(createDuplicateSnapshot(false));
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [201],
+      closedTabs: [
+        {
+          group: null,
+          index: 0,
+          originalTabId: 201,
+          pinned: false,
+          title: 'First mirrored copy',
+          url: 'https://example.test/first-duplicate',
+          windowId: 2,
+        },
+      ],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     render(<ActiveWindowsPage service={service} />);
 
     const previewButton = await screen.findByRole('button', {
@@ -1588,7 +1794,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(closeButton);
 
-    expect(service.closeTabs).toHaveBeenCalledWith([201]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([201]);
     expect(await screen.findByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
     const noMatches = await screen.findByRole('heading', {
       name: 'No matching duplicate tabs',
@@ -1763,7 +1969,12 @@ describe('ActiveWindowsPage', () => {
         ],
       }),
     );
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [201],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     const settingsService = createSettingsService([
       {
         comparisonMode: 'host',
@@ -1777,7 +1988,7 @@ describe('ActiveWindowsPage', () => {
     const removeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 1' });
     await user.click(removeButton);
 
-    expect(service.closeTabs).toHaveBeenCalledWith([201]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([201]);
   });
 
   it('still finds exact duplicates when advanced duplicate matching is off', async () => {
@@ -1838,7 +2049,12 @@ describe('ActiveWindowsPage', () => {
         ],
       }),
     );
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [201, 202], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [201, 202],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     const enabledPresetRules = DEFAULT_SETTINGS.deduplicationRules.map((rule) => ({
       ...rule,
       enabled: true,
@@ -1852,7 +2068,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 2' }));
 
-    expect(service.closeTabs).toHaveBeenCalledWith([201, 202]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([201, 202]);
   });
 
   it('drags a tab to an exact position in another window without creating a third window', async () => {
@@ -1904,6 +2120,70 @@ describe('ActiveWindowsPage', () => {
     fireEvent.dragEnd(sourceButton, { dataTransfer });
 
     await waitFor(() => expect(service.moveTab).toHaveBeenCalledWith(201, 1, 0, 7));
+    expect(service.moveTabsToNewWindow).not.toHaveBeenCalled();
+  });
+
+  it('tells users to unpin in their browser when a pinned tab is dropped on a group', async () => {
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                active: true,
+                id: 101,
+                pinned: true,
+                title: 'Pinned source',
+              }),
+            ],
+          }),
+          createManagedWindow({
+            groups: [
+              {
+                collapsed: false,
+                color: 'blue',
+                id: 8,
+                title: 'Research',
+                windowId: 2,
+              },
+            ],
+            id: 2,
+            isCurrent: false,
+            label: 'Window 2',
+            tabs: [
+              createManagedTab({
+                active: true,
+                groupId: 8,
+                id: 201,
+                title: 'Grouped destination',
+                windowId: 2,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.moveTab).mockRejectedValue(new Error(PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE));
+    render(<ActiveWindowsPage service={service} />);
+    const sourceButton = await screen.findByRole('button', { name: 'Focus Pinned source' });
+    const destinationRow = screen
+      .getByRole('button', { name: 'Focus Grouped destination' })
+      .closest('li');
+    const destinationList = destinationRow?.closest('ul');
+    const dataTransfer = {
+      dropEffect: 'none',
+      effectAllowed: 'none',
+      setData: vi.fn(),
+    } as unknown as DataTransfer;
+
+    fireEvent.dragStart(sourceButton, { dataTransfer });
+    fireEvent.dragOver(destinationRow as HTMLElement, { clientY: -1, dataTransfer });
+    fireEvent.drop(destinationList as HTMLElement, { dataTransfer });
+    fireEvent.dragEnd(sourceButton, { dataTransfer });
+
+    await waitFor(() => expect(service.moveTab).toHaveBeenCalledWith(101, 2, 0, 8));
+    expect(await screen.findByRole('alert')).toHaveTextContent(PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE);
     expect(service.moveTabsToNewWindow).not.toHaveBeenCalled();
   });
 

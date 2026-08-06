@@ -13,6 +13,9 @@ function createService() {
   const listeners = new Set<() => void>();
   const snapshot = createActiveWindowsSnapshot();
   const service: ActiveWindowsService = {
+    closeDuplicateTabs: vi.fn(() =>
+      Promise.resolve({ closedTabIds: [], closedTabs: [], failures: [], skippedPinnedTabIds: [] }),
+    ),
     closeTabs: vi.fn(() => Promise.resolve({ closedTabIds: [], failures: [] })),
     closeWindow: vi.fn(() => Promise.resolve()),
     focusTab: vi.fn(() => Promise.resolve()),

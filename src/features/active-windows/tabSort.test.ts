@@ -45,16 +45,17 @@ describe('planTabSort', () => {
     ).toEqual([2, 3, 1]);
   });
 
-  it('keeps pinned and unpinned tabs in separate leading and trailing partitions', () => {
+  it('keeps the pinned prefix untouched while sorting only unpinned tabs', () => {
     const tabs = [
       createTab({ id: 1, index: 0, pinned: true, title: 'Zulu' }),
       createTab({ id: 2, index: 1, pinned: true, title: 'Alpha' }),
-      createTab({ id: 3, index: 2, title: 'Aardvark' }),
+      createTab({ id: 3, index: 2, title: 'Zulu unpinned' }),
+      createTab({ id: 4, index: 3, title: 'Alpha unpinned' }),
     ];
 
     expect(
       planTabSort(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false }).map((tab) => tab.id),
-    ).toEqual([2, 1, 3]);
+    ).toEqual([1, 2, 4, 3]);
   });
 
   it('supports URL sorting, descending order, and stable ties', () => {

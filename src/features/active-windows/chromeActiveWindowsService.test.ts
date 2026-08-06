@@ -4,6 +4,7 @@ import { type RestoredTabMetadataService } from '../../platform/chrome/restoredT
 import {
   type ActiveWindowsChromeApi,
   createChromeActiveWindowsService,
+  PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE,
 } from './chromeActiveWindowsService';
 
 interface FakeChromeEvent<TArgs extends unknown[]> {
@@ -165,6 +166,12 @@ function createApi() {
       discard: vi.fn((tabId?: number) =>
         Promise.resolve(createChromeTab({ discarded: true, id: tabId })),
       ),
+      get: vi.fn((tabId: number) => {
+        const tab = windows
+          .flatMap((window) => window.tabs ?? [])
+          .find((item) => item.id === tabId);
+        return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
+      }),
       group: vi.fn(() => Promise.resolve(70)),
       move: vi.fn((tabId: number) => Promise.resolve(createChromeTab({ id: tabId }))),
       query: vi.fn(() => Promise.resolve(windows.flatMap((window) => window.tabs ?? []))),
@@ -395,6 +402,201 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.remove).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps explicit close semantics for a pinned tab', async () => {
+    const { api } = createApi();
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.closeTabs([21])).resolves.toEqual({
+      closedTabIds: [21],
+      failures: [],
+    });
+    expect(api.tabs.remove).toHaveBeenCalledWith(21);
+    expect(api.tabs.get).not.toHaveBeenCalled();
+  });
+
+  it('rechecks duplicate candidates, skips newly pinned tabs, and returns snapshot undo metadata', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query).mockResolvedValue([
+      createChromeTab({
+        id: 11,
+        index: 0,
+        title: 'Candidate that becomes pinned',
+        url: 'https://example.com/pinned-later',
+        windowId: 1,
+      }),
+      createChromeTab({
+        groupId: 7,
+        id: 21,
+        index: 4,
+        title: 'Snapshot title',
+        url: 'https://example.com/snapshot',
+        windowId: 2,
+      }),
+    ]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      if (tabId === 11) {
+        return Promise.resolve(
+          createChromeTab({ id: 11, index: 0, pinned: true, title: 'Pinned now', windowId: 1 }),
+        );
+      }
+      return Promise.resolve(
+        createChromeTab({
+          groupId: 7,
+          id: 21,
+          index: 3,
+          title: 'Live title',
+          url: 'https://example.com/live',
+          windowId: 2,
+        }),
+      );
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.closeDuplicateTabs([11, 21, 11])).resolves.toEqual({
+      closedTabIds: [21],
+      closedTabs: [
+        {
+          group: { collapsed: true, color: 'blue', id: 7, title: 'Planning' },
+          index: 4,
+          originalTabId: 21,
+          pinned: false,
+          title: 'Snapshot title',
+          url: 'https://example.com/snapshot',
+          windowId: 2,
+        },
+      ],
+      failures: [],
+      skippedPinnedTabIds: [11],
+    });
+    expect(api.tabs.get).toHaveBeenCalledTimes(2);
+    expect(api.tabGroups.query).toHaveBeenCalledTimes(1);
+    expect(api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(api.tabs.remove).toHaveBeenCalledWith(21);
+    expect(vi.mocked(api.tabs.get).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(api.tabs.remove).mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('uses restored metadata in duplicate undo records when Chrome metadata is missing', async () => {
+    const { api } = createApi();
+    const restoredTab = createChromeTab({ id: 12, index: 2, windowId: 1 });
+    delete restoredTab.title;
+    delete restoredTab.url;
+    vi.mocked(api.tabs.query).mockResolvedValue([restoredTab]);
+    vi.mocked(api.tabs.get).mockResolvedValue(restoredTab);
+    const restoredMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() =>
+        Promise.resolve(
+          new Map([[12, { title: 'Recovered title', url: 'https://example.com/recovered' }]]),
+        ),
+      ),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const service = createChromeActiveWindowsService(api, restoredMetadataService);
+
+    await expect(service.closeDuplicateTabs([12])).resolves.toEqual({
+      closedTabIds: [12],
+      closedTabs: [
+        {
+          group: null,
+          index: 2,
+          originalTabId: 12,
+          pinned: false,
+          title: 'Recovered title',
+          url: 'https://example.com/recovered',
+          windowId: 1,
+        },
+      ],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
+    expect(restoredMetadataService.resolve).toHaveBeenCalledWith([restoredTab], {
+      pruneMissing: false,
+    });
+  });
+
+  it('captures every duplicate undo index before concurrent removals can shift later tabs', async () => {
+    const { api } = createApi();
+    const firstTab = createChromeTab({
+      id: 11,
+      index: 1,
+      title: 'First duplicate',
+      url: 'https://example.com/duplicate',
+      windowId: 1,
+    });
+    const secondTab = createChromeTab({
+      id: 12,
+      index: 2,
+      title: 'Second duplicate',
+      url: 'https://example.com/duplicate',
+      windowId: 1,
+    });
+    vi.mocked(api.tabs.query).mockResolvedValue([firstTab, secondTab]);
+    let resolveSecondGet: ((tab: chrome.tabs.Tab) => void) | undefined;
+    const secondGet = new Promise<chrome.tabs.Tab>((resolve) => {
+      resolveSecondGet = resolve;
+    });
+    vi.mocked(api.tabs.get).mockImplementation((tabId) =>
+      tabId === 11 ? Promise.resolve(firstTab) : secondGet,
+    );
+    vi.mocked(api.tabs.remove).mockImplementation((tabId) => {
+      if (tabId === 11) {
+        resolveSecondGet?.(createChromeTab({ ...secondTab, index: 1 }));
+      }
+      return Promise.resolve();
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs([11, 12]);
+
+    expect(result.closedTabIds).toEqual([11, 12]);
+    expect(result.closedTabs.map((tab) => tab.index)).toEqual([1, 2]);
+    expect(api.tabs.remove).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports duplicate lookup and removal failures in request order with undo for closures only', async () => {
+    const { api } = createApi();
+    const snapshotTabs = [
+      createChromeTab({ id: 11, index: 0, title: 'Closes', url: 'https://example.com/same' }),
+      createChromeTab({ id: 12, index: 1, title: 'Missing', url: 'https://example.com/same' }),
+      createChromeTab({ id: 13, index: 2, title: 'Locked', url: 'https://example.com/same' }),
+    ];
+    vi.mocked(api.tabs.query).mockResolvedValue(snapshotTabs);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      if (tabId === 12) {
+        return Promise.reject(new Error('Tab no longer exists'));
+      }
+      const tab = snapshotTabs.find((candidate) => candidate.id === tabId);
+      return tab ? Promise.resolve(tab) : Promise.reject(new Error('Unexpected tab'));
+    });
+    vi.mocked(api.tabs.remove).mockImplementation((tabId) =>
+      tabId === 13 ? Promise.reject(new Error('Tab is locked')) : Promise.resolve(),
+    );
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.closeDuplicateTabs([11, 12, 13])).resolves.toEqual({
+      closedTabIds: [11],
+      closedTabs: [
+        {
+          group: null,
+          index: 0,
+          originalTabId: 11,
+          pinned: false,
+          title: 'Closes',
+          url: 'https://example.com/same',
+          windowId: 1,
+        },
+      ],
+      failures: [
+        { message: 'Tab no longer exists', tabId: 12 },
+        { message: 'Tab is locked', tabId: 13 },
+      ],
+      skippedPinnedTabIds: [],
+    });
+  });
+
   it('restores closed tabs into original or replacement windows without stealing focus', async () => {
     const { api } = createApi();
     const service = createChromeActiveWindowsService(api);
@@ -535,6 +737,102 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabGroups.update).not.toHaveBeenCalled();
   });
 
+  it('stable-partitions pinned tabs into a new window and restores their pin state', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 21, index: 0, windowId: 2 }),
+        createChromeTab({ id: 22, index: 1, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 23, index: 2, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 24, index: 3, windowId: 2 }),
+      ])
+      .mockResolvedValueOnce([createChromeTab({ id: 22, index: 0, pinned: true, windowId: 9 })])
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 22, index: 0, pinned: true, windowId: 9 }),
+        createChromeTab({ id: 23, index: 1, pinned: true, windowId: 9 }),
+      ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTabsToNewWindow([21, 22, 23, 24])).resolves.toEqual({
+      destinationWindowId: 9,
+      failures: [],
+      movedTabIds: [22, 23, 21, 24],
+      warnings: [],
+    });
+
+    expect(api.windows.create).toHaveBeenCalledWith({ focused: false, tabId: 22 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(1, 23, { index: -1, windowId: 9 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 21, { index: -1, windowId: 9 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(3, 24, { index: -1, windowId: 9 });
+    expect(api.tabs.update).toHaveBeenCalledWith(22, { pinned: true });
+    expect(api.tabs.update).toHaveBeenCalledWith(23, { pinned: true });
+  });
+
+  it('reports re-pin failures as warnings without hiding successful cross-window moves', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 21, index: 0, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 22, index: 1, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 23, index: 2, windowId: 2 }),
+      ])
+      .mockResolvedValueOnce([createChromeTab({ id: 21, index: 0, pinned: true, windowId: 9 })]);
+    vi.mocked(api.tabs.update).mockImplementation((tabId, properties) =>
+      tabId === 22 && properties.pinned
+        ? Promise.reject(new Error('Pinning is temporarily unavailable'))
+        : Promise.resolve(undefined),
+    );
+    vi.mocked(api.tabs.move).mockImplementation((tabId) =>
+      tabId === 23
+        ? Promise.reject(new Error('Tab is locked'))
+        : Promise.resolve(createChromeTab({ id: tabId })),
+    );
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTabsToNewWindow([21, 22, 23])).resolves.toEqual({
+      destinationWindowId: 9,
+      failures: [{ message: 'Tab is locked', tabId: 23 }],
+      movedTabIds: [21, 22],
+      warnings: [
+        'Tab 22 moved, but its pinned state could not be restored: Pinning is temporarily unavailable',
+      ],
+    });
+
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: true });
+    expect(api.tabs.update).toHaveBeenCalledWith(22, { pinned: true });
+    expect(api.tabs.move).toHaveBeenCalledWith(22, { index: -1, windowId: 9 });
+  });
+
+  it('positions later pinned tabs after only the pins that were successfully restored', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 21, index: 0, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 22, index: 1, pinned: true, windowId: 2 }),
+        createChromeTab({ id: 23, index: 2, windowId: 2 }),
+      ])
+      .mockResolvedValueOnce([createChromeTab({ id: 22, index: 0, pinned: true, windowId: 9 })]);
+    vi.mocked(api.tabs.update).mockImplementation((tabId, properties) =>
+      tabId === 21 && properties.pinned
+        ? Promise.reject(new Error('First pin could not be restored'))
+        : Promise.resolve(undefined),
+    );
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTabsToNewWindow([21, 22, 23])).resolves.toEqual({
+      destinationWindowId: 9,
+      failures: [],
+      movedTabIds: [21, 22, 23],
+      warnings: [
+        'Tab 21 moved, but its pinned state could not be restored: First pin could not be restored',
+      ],
+    });
+
+    expect(api.tabs.move).toHaveBeenNthCalledWith(1, 22, { index: -1, windowId: 9 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 23, { index: -1, windowId: 9 });
+    expect(api.tabs.move).not.toHaveBeenCalledWith(22, { index: 1, windowId: 9 });
+  });
+
   it('closes a browser window through the same service boundary', async () => {
     const { api } = createApi();
     const service = createChromeActiveWindowsService(api);
@@ -630,6 +928,35 @@ describe('createChromeActiveWindowsService', () => {
     });
   });
 
+  it('sorts only the unpinned suffix without moving the pinned prefix', async () => {
+    const { api } = createApi();
+    vi.mocked(api.windows.getAll).mockResolvedValue([
+      createChromeWindow({
+        id: 5,
+        tabs: [
+          createChromeTab({ id: 51, index: 0, pinned: true, title: 'Zulu', windowId: 5 }),
+          createChromeTab({ id: 52, index: 1, pinned: true, title: 'Alpha', windowId: 5 }),
+          createChromeTab({ id: 53, index: 2, title: 'Zulu unpinned', windowId: 5 }),
+          createChromeTab({ id: 54, index: 3, title: 'Alpha unpinned', windowId: 5 }),
+        ],
+      }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(
+      service.sortWindow(5, {
+        criterion: 'title',
+        direction: 'asc',
+        preserveGroups: false,
+      }),
+    ).resolves.toEqual({ failures: [], sortedWindowIds: [5], warnings: [] });
+
+    expect(api.tabs.move).toHaveBeenCalledTimes(1);
+    expect(api.tabs.move).toHaveBeenCalledWith(54, { index: 2, windowId: 5 });
+    expect(api.tabs.move).not.toHaveBeenCalledWith(51, expect.anything());
+    expect(api.tabs.move).not.toHaveBeenCalledWith(52, expect.anything());
+  });
+
   it('ungroups tabs before a global sort when preservation is disabled', async () => {
     const { api } = createApi();
     vi.mocked(api.windows.getAll).mockResolvedValue([
@@ -687,6 +1014,62 @@ describe('createChromeActiveWindowsService', () => {
       tabIds: [21, 22],
     });
     expect(api.windows.update).toHaveBeenCalledWith(1, { focused: true });
+  });
+
+  it('preserves pinned and unpinned relative order while merging multiple windows', async () => {
+    const { api } = createApi();
+    vi.mocked(api.windows.getAll).mockResolvedValue([
+      createChromeWindow({
+        id: 1,
+        tabs: [
+          createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+          createChromeTab({ id: 11, index: 1, windowId: 1 }),
+        ],
+      }),
+      createChromeWindow({
+        id: 2,
+        tabs: [
+          createChromeTab({ id: 20, index: 0, pinned: true, windowId: 2 }),
+          createChromeTab({ id: 21, index: 1, windowId: 2 }),
+        ],
+      }),
+      createChromeWindow({
+        id: 3,
+        tabs: [
+          createChromeTab({ id: 30, index: 0, pinned: true, windowId: 3 }),
+          createChromeTab({ id: 31, index: 1, windowId: 3 }),
+        ],
+      }),
+    ]);
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 20, index: 1, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 11, index: 2, windowId: 1 }),
+      ])
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 20, index: 1, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 30, index: 2, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 11, index: 3, windowId: 1 }),
+        createChromeTab({ id: 21, index: 4, windowId: 1 }),
+      ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.mergeWindows([1, 2, 3])).resolves.toEqual({
+      destinationWindowId: 1,
+      failures: [],
+      mergedSourceWindowIds: [2, 3],
+      movedTabIds: [20, 21, 30, 31],
+      warnings: [],
+    });
+
+    expect(api.tabs.move).toHaveBeenNthCalledWith(1, 20, { index: -1, windowId: 1 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 21, { index: -1, windowId: 1 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(3, 30, { index: -1, windowId: 1 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(4, 31, { index: -1, windowId: 1 });
+    expect(api.tabs.update).toHaveBeenCalledWith(20, { pinned: true });
+    expect(api.tabs.update).toHaveBeenCalledWith(30, { pinned: true });
   });
 
   it('keeps a partially merged source window open and reports the failed tab', async () => {
@@ -761,6 +1144,85 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.move).toHaveBeenCalledWith(21, { index: 1, windowId: 1 });
     expect(api.tabs.group).not.toHaveBeenCalled();
     expect(api.tabGroups.update).not.toHaveBeenCalled();
+  });
+
+  it('re-pins and finally repositions a pinned tab dragged across windows', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 11, index: 1, windowId: 1 }),
+        createChromeTab({ id: 21, index: 0, pinned: true, windowId: 2 }),
+      ])
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 21, index: 1, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 11, index: 2, windowId: 1 }),
+      ])
+      .mockResolvedValueOnce([createChromeTab({ id: 21, index: 0, pinned: true, windowId: 1 })]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTab(21, 1, 0)).resolves.toEqual({
+      destinationIndex: 0,
+      destinationWindowId: 1,
+      movedTabId: 21,
+      warnings: [],
+    });
+
+    expect(api.tabs.move).toHaveBeenNthCalledWith(1, 21, { index: 0, windowId: 1 });
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: true });
+    expect(api.tabs.query).toHaveBeenLastCalledWith({ windowId: 1 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 21, { index: 0, windowId: 1 });
+    expect(api.tabs.query).toHaveBeenCalledTimes(3);
+  });
+
+  it('warns when the browser does not honor a corrective pinned-tab reposition', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query)
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 11, index: 1, windowId: 1 }),
+        createChromeTab({ id: 21, index: 0, pinned: true, windowId: 2 }),
+      ])
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 21, index: 1, pinned: true, windowId: 1 }),
+      ])
+      .mockResolvedValueOnce([
+        createChromeTab({ id: 10, index: 0, pinned: true, windowId: 1 }),
+        createChromeTab({ id: 21, index: 1, pinned: true, windowId: 1 }),
+      ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTab(21, 1, 0)).resolves.toEqual({
+      destinationIndex: 0,
+      destinationWindowId: 1,
+      movedTabId: 21,
+      warnings: [
+        'Tab 21 moved and was re-pinned, but the browser placed it at index 1 instead of 0.',
+      ],
+    });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 21, { index: 0, windowId: 1 });
+    expect(api.tabs.query).toHaveBeenCalledTimes(3);
+  });
+
+  it('blocks a pinned tab from entering a group before any Chrome mutation', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.query).mockResolvedValue([
+      createChromeTab({ id: 11, index: 0, pinned: true, windowId: 1 }),
+      createChromeTab({ groupId: 7, id: 12, index: 1, windowId: 1 }),
+    ]);
+    vi.mocked(api.tabGroups.query).mockResolvedValue([
+      createChromeGroup({ id: 7, title: 'Planning', windowId: 1 }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.moveTab(11, 1, 1, 7)).rejects.toThrow(PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE);
+
+    expect(api.tabs.move).not.toHaveBeenCalled();
+    expect(api.tabs.update).not.toHaveBeenCalled();
+    expect(api.tabs.group).not.toHaveBeenCalled();
+    expect(api.tabs.ungroup).not.toHaveBeenCalled();
   });
 
   it('moves a cross-window tab safely before adding it to the destination group', async () => {

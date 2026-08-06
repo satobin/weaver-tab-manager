@@ -190,6 +190,7 @@ describe('DedupeRuleEditor', () => {
             {
               id: 1,
               index: 0,
+              pinned: false,
               title: 'Project 42',
               url: 'https://app.example.com/projects/42?view=board',
               windowId: 1,
@@ -198,6 +199,7 @@ describe('DedupeRuleEditor', () => {
             {
               id: 2,
               index: 1,
+              pinned: false,
               title: 'Project 99',
               url: 'https://app.example.com/projects/99',
               windowId: 1,

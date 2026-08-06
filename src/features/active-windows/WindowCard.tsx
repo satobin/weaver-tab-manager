@@ -453,7 +453,20 @@ export function WindowCard({
               : duplicatePreviewKeepTabIds?.has(tab.id)
                 ? 'keep'
                 : null;
+            const duplicatePreviewOutcome =
+              duplicatePreviewState === 'close'
+                ? 'Will close'
+                : duplicatePreviewState === 'keep'
+                  ? 'Keep'
+                  : null;
+            const duplicatePreviewDescriptionId = `tab-${tab.id}-duplicate-preview-description`;
             const suspendedDescriptionId = `tab-${tab.id}-suspended-description`;
+            const tabDescriptionIds = [
+              suspended ? suspendedDescriptionId : null,
+              duplicatePreviewOutcome ? duplicatePreviewDescriptionId : null,
+            ]
+              .filter(Boolean)
+              .join(' ');
             const suspendedBehavior =
               tab.discarded || tab.unloaded ? 'Reloads when opened.' : 'Resumes when opened.';
 
@@ -611,7 +624,7 @@ export function WindowCard({
                       type="button"
                       draggable={!disabled}
                       aria-label={`Focus ${tab.title}`}
-                      aria-describedby={suspended ? suspendedDescriptionId : undefined}
+                      aria-describedby={tabDescriptionIds || undefined}
                       aria-current={tab.active ? 'page' : undefined}
                       title={tab.url || tab.title}
                       onDragStart={(event) => {
@@ -636,9 +649,19 @@ export function WindowCard({
                           </span>
                         ) : null}
                       </span>
-                      {tab.pinned ? (
+                      {tab.pinned || duplicatePreviewOutcome ? (
                         <span className="tab-state-icons">
-                          <Pin className="tab-pin" aria-label="Pinned" size={13} />
+                          {tab.pinned ? (
+                            <Pin className="tab-pin" aria-label="Pinned" size={13} />
+                          ) : null}
+                          {duplicatePreviewOutcome ? (
+                            <span
+                              id={duplicatePreviewDescriptionId}
+                              className={`duplicate-preview-outcome is-${duplicatePreviewState}`}
+                            >
+                              {duplicatePreviewOutcome}
+                            </span>
+                          ) : null}
                         </span>
                       ) : null}
                       {tab.active ? <span className="sr-only">Active tab</span> : null}

@@ -19,6 +19,7 @@ import { createPortal } from 'react-dom';
 import { APP_ROUTES, isDuplicateTabsLaunchRoute } from '../app/routes';
 import {
   createChromeActiveWindowsService,
+  PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE,
   type ActiveWindowsService,
   type RestorableTab,
   type RestoreTabFailure,
@@ -32,7 +33,6 @@ import {
   isTabSuspended,
   type ManagedWindow,
 } from '../features/active-windows/model';
-import { createRestorableTabs } from '../features/active-windows/restorableTabs';
 import { type ToggleTabSelection } from '../features/active-windows/selection';
 import {
   type SortCriterion,
@@ -396,7 +396,7 @@ export function ActiveWindowsPage({
     () =>
       hasFilter
         ? duplicatePlan.duplicateGroups.filter((group) =>
-            [group.keeperTabId, ...group.duplicateTabIds].some((tabId) =>
+            [...group.keepTabIds, ...group.duplicateTabIds].some((tabId) =>
               filteredTabIds.has(tabId),
             ),
           )
@@ -404,7 +404,7 @@ export function ActiveWindowsPage({
     [duplicatePlan.duplicateGroups, filteredTabIds, hasFilter],
   );
   const duplicateKeeperTabIds = useMemo(
-    () => new Set(visibleDuplicateGroups.map((group) => group.keeperTabId)),
+    () => new Set(visibleDuplicateGroups.flatMap((group) => group.keepTabIds)),
     [visibleDuplicateGroups],
   );
   const duplicateCloseTabIds = useMemo(
@@ -908,7 +908,6 @@ export function ActiveWindowsPage({
   };
 
   const removeDuplicateTabs = async () => {
-    const undoCandidates = snapshot ? createRestorableTabs(snapshot, duplicateActionTabIds) : [];
     if (
       duplicateActionTabIds.length === 0 ||
       settingsLoading ||
@@ -917,13 +916,21 @@ export function ActiveWindowsPage({
       return;
     }
     try {
-      const result = await service.closeTabs(duplicateActionTabIds);
+      const result = await service.closeDuplicateTabs(duplicateActionTabIds);
       setTabsSelected(result.closedTabIds, false);
-      setOperationError(summarizeFailures('closed', result.failures));
+      setOperationError(
+        summarizeFailures(
+          'closed',
+          result.failures,
+          result.skippedPinnedTabIds.length > 0
+            ? [
+                `${pluralize(result.skippedPinnedTabIds.length, 'duplicate tab')} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
+              ]
+            : [],
+        ),
+      );
       if (result.closedTabIds.length > 0) {
-        const closedTabIds = new Set(result.closedTabIds);
-        const closedTabs = undoCandidates.filter((tab) => closedTabIds.has(tab.originalTabId));
-        setDuplicateUndoTabs(closedTabs.length > 0 ? closedTabs : null);
+        setDuplicateUndoTabs(result.closedTabs.length > 0 ? result.closedTabs : null);
         setOperationNotice(`${pluralize(result.closedTabIds.length, 'duplicate tab')} removed.`);
       }
       await refresh();
@@ -1210,7 +1217,11 @@ export function ActiveWindowsPage({
         setOperationError(summarizeFailures('moved', result.failures, result.warnings));
       }
       await refresh();
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE) {
+        setOperationError(PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE);
+        return;
+      }
       setOperationError(
         session.groupId === null
           ? target.groupId === null
@@ -1268,7 +1279,7 @@ export function ActiveWindowsPage({
   const duplicatePreviewDisabled =
     settingsLoading ||
     operationLabel !== null ||
-    (!duplicatePreviewMode && duplicatePlan.duplicateTabIds.length === 0);
+    (!duplicatePreviewMode && duplicatePlan.duplicateGroups.length === 0);
   const removeDuplicatesControl = (
     <div className="duplicate-preview-control">
       <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
@@ -1546,7 +1557,12 @@ export function ActiveWindowsPage({
           <Eye aria-hidden="true" size={17} />
           <div className="duplicate-preview-banner-copy">
             <strong>Duplicate tabs view</strong>
-            <span>Green tabs stay open. Red tabs will close.</span>
+            <span>
+              {duplicatePlan.duplicateGroups.length > 0 &&
+              duplicatePlan.duplicateTabIds.length === 0
+                ? 'Every duplicate shown is pinned and will stay open. Unpin a tab in your browser to make it eligible to close.'
+                : 'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.'}
+            </span>
           </div>
           <div className="duplicate-preview-banner-actions">
             <button

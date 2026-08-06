@@ -23,13 +23,14 @@ export interface CanonicalizedTabUrl {
 export interface DuplicateTabCandidate {
   id: number;
   index: number;
+  pinned: boolean;
   url: string;
   windowId: number;
 }
 
 interface DuplicateTabGroup {
   duplicateTabIds: number[];
-  keeperTabId: number;
+  keepTabIds: number[];
   key: string;
   matchType: 'exact' | 'site-rule';
   ruleId: string | null;
@@ -38,7 +39,7 @@ interface DuplicateTabGroup {
 export interface DuplicateTabPlan {
   duplicateGroups: DuplicateTabGroup[];
   duplicateTabIds: number[];
-  keeperTabIds: number[];
+  keepTabIds: number[];
 }
 
 export interface DuplicateKeeperPreference {
@@ -383,24 +384,32 @@ export function planDuplicateTabs(
 
   const duplicateGroups: DuplicateTabGroup[] = [];
   const duplicateIds = new Set<number>();
-  const keeperTabIds: number[] = [];
+  const keepTabIds: number[] = [];
   buckets.forEach(({ canonical, tabs: matchingTabs }) => {
     if (matchingTabs.length < 2) {
       return;
     }
-    const keeper =
-      matchingTabs.find((tab) => tab.id === keeperPreference.tabId) ??
-      matchingTabs.find((tab) => tab.windowId === keeperPreference.windowId) ??
-      matchingTabs[0];
-    if (!keeper) {
+
+    const pinnedTabs = matchingTabs.filter((tab) => tab.pinned);
+    const keptTabs =
+      pinnedTabs.length > 0
+        ? pinnedTabs
+        : [
+            matchingTabs.find((tab) => tab.id === keeperPreference.tabId) ??
+              matchingTabs.find((tab) => tab.windowId === keeperPreference.windowId) ??
+              matchingTabs[0],
+          ];
+    const keptIds = new Set(keptTabs.flatMap((tab) => (tab ? [tab.id] : [])));
+    const duplicateTabIds = matchingTabs.filter((tab) => !keptIds.has(tab.id)).map((tab) => tab.id);
+    if (keptIds.size === 0) {
       return;
     }
-    const duplicateTabIds = matchingTabs.filter((tab) => tab.id !== keeper.id).map((tab) => tab.id);
+
     duplicateTabIds.forEach((tabId) => duplicateIds.add(tabId));
-    keeperTabIds.push(keeper.id);
+    keepTabIds.push(...keptIds);
     duplicateGroups.push({
       duplicateTabIds,
-      keeperTabId: keeper.id,
+      keepTabIds: [...keptIds],
       key: canonical.key,
       matchType: canonical.matchType,
       ruleId: canonical.ruleId,
@@ -410,6 +419,6 @@ export function planDuplicateTabs(
   return {
     duplicateGroups,
     duplicateTabIds: tabs.flatMap((tab) => (duplicateIds.has(tab.id) ? [tab.id] : [])),
-    keeperTabIds,
+    keepTabIds,
   };
 }

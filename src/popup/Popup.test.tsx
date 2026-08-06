@@ -50,6 +50,14 @@ function createService(): ActiveWindowsService {
     ],
   });
   return {
+    closeDuplicateTabs: vi.fn(() =>
+      Promise.resolve({
+        closedTabIds: [],
+        closedTabs: [],
+        failures: [],
+        skippedPinnedTabIds: [],
+      }),
+    ),
     closeTabs: vi.fn(() => Promise.resolve({ closedTabIds: [102], failures: [] })),
     closeWindow: vi.fn(() => Promise.resolve()),
     focusTab: vi.fn(() => Promise.resolve()),
@@ -446,12 +454,27 @@ describe('Popup', () => {
           ],
         }),
       );
-    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [101], failures: [] });
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [101],
+      closedTabs: [
+        {
+          group: null,
+          index: 0,
+          originalTabId: 101,
+          pinned: false,
+          title: 'Example tab',
+          url: duplicateUrl,
+          windowId: 1,
+        },
+      ],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
     renderPopup(service);
 
     await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
 
-    expect(service.closeTabs).toHaveBeenCalledWith([101]);
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([101]);
     expect(await screen.findByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
     expect(service.loadSnapshot).toHaveBeenCalledTimes(2);
     expect(screen.getByText('1 duplicate tab removed.')).toBeInTheDocument();
@@ -475,6 +498,74 @@ describe('Popup', () => {
     expect(screen.queryByText('1 duplicate tab removed.')).not.toBeInTheDocument();
     expect(screen.queryByText(/duplicate tab restored\./i)).not.toBeInTheDocument();
     expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('protects every pinned duplicate and closes only unpinned matches', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/pinned-duplicate';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({ id: 101, pinned: true, url: duplicateUrl }),
+              createManagedTab({ id: 102, index: 1, pinned: true, url: duplicateUrl }),
+              createManagedTab({
+                active: true,
+                id: 103,
+                index: 2,
+                url: duplicateUrl,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [103],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [],
+    });
+    renderPopup(service);
+
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([103]);
+  });
+
+  it('reports a duplicate candidate that becomes pinned before removal', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/newly-pinned';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({ active: true, id: 101, url: duplicateUrl }),
+              createManagedTab({ id: 102, index: 1, url: duplicateUrl }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [],
+      closedTabs: [],
+      failures: [],
+      skippedPinnedTabIds: [102],
+    });
+    renderPopup(service);
+
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+
+    expect(service.closeDuplicateTabs).toHaveBeenCalledWith([102]);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '1 duplicate tab was left open because it is now pinned.',
+    );
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
   it('keeps exact duplicate removal available when advanced matching is off', async () => {

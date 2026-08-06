@@ -40,6 +40,8 @@ function createService(windowCount = 1): ActiveWindowsService {
           ),
         });
   return {
+    closeDuplicateTabs: () =>
+      Promise.resolve({ closedTabIds: [], closedTabs: [], failures: [], skippedPinnedTabIds: [] }),
     closeTabs: () => Promise.resolve({ closedTabIds: [], failures: [] }),
     closeWindow: () => Promise.resolve(),
     focusTab: () => Promise.resolve(),

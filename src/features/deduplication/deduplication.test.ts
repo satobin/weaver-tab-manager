@@ -31,6 +31,7 @@ function createTab(overrides: Partial<DuplicateTabCandidate> = {}): DuplicateTab
   return {
     id: 1,
     index: 0,
+    pinned: false,
     url: 'https://example.com/path',
     windowId: 1,
     ...overrides,
@@ -225,14 +226,14 @@ describe('planDuplicateTabs', () => {
       duplicateGroups: [
         {
           duplicateTabIds: [1, 2],
-          keeperTabId: 3,
+          keepTabIds: [3],
           key: 'exact:https://example.com/path',
           matchType: 'exact',
           ruleId: null,
         },
       ],
       duplicateTabIds: [1, 2],
-      keeperTabIds: [3],
+      keepTabIds: [3],
     });
   });
 
@@ -246,8 +247,57 @@ describe('planDuplicateTabs', () => {
       [],
       { windowId: 99 },
     );
-    expect(plan.keeperTabIds).toEqual([8]);
+    expect(plan.keepTabIds).toEqual([8]);
     expect(plan.duplicateTabIds).toEqual([9]);
+  });
+
+  it('protects every pinned match and closes only unpinned matches', () => {
+    const plan = planDuplicateTabs(
+      [
+        createTab({ id: 1, pinned: true, windowId: 2 }),
+        createTab({ id: 2, index: 1, pinned: true, windowId: 3 }),
+        createTab({ id: 3, index: 2, windowId: 1 }),
+        createTab({ id: 4, index: 3, windowId: 4 }),
+      ],
+      [],
+      { tabId: 3, windowId: 1 },
+    );
+
+    expect(plan).toEqual({
+      duplicateGroups: [
+        {
+          duplicateTabIds: [3, 4],
+          keepTabIds: [1, 2],
+          key: 'exact:https://example.com/path',
+          matchType: 'exact',
+          ruleId: null,
+        },
+      ],
+      duplicateTabIds: [3, 4],
+      keepTabIds: [1, 2],
+    });
+  });
+
+  it('keeps all-pinned duplicate buckets visible without making them eligible to close', () => {
+    expect(
+      planDuplicateTabs(
+        [createTab({ id: 1, pinned: true }), createTab({ id: 2, index: 1, pinned: true })],
+        [],
+        { tabId: 2, windowId: 1 },
+      ),
+    ).toEqual({
+      duplicateGroups: [
+        {
+          duplicateTabIds: [],
+          keepTabIds: [1, 2],
+          key: 'exact:https://example.com/path',
+          matchType: 'exact',
+          ruleId: null,
+        },
+      ],
+      duplicateTabIds: [],
+      keepTabIds: [1, 2],
+    });
   });
 
   it('groups site-rule matches while keeping exact fallback query-sensitive', () => {

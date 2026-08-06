@@ -58,6 +58,7 @@ export function SettingsPage({
           window.tabs.map((tab) => ({
             id: tab.id,
             index: tab.index,
+            pinned: tab.pinned,
             title: tab.title,
             url: tab.url,
             windowId: tab.windowId,

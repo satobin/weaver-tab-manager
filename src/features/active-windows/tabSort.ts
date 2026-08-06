@@ -53,5 +53,5 @@ export function planTabSort(tabs: readonly SortableTab[], options: TabSortOption
   const pinned = browserOrder.filter((tab) => tab.pinned);
   const unpinned = browserOrder.filter((tab) => !tab.pinned);
 
-  return [...sortPartition(pinned, options), ...sortPartition(unpinned, options)];
+  return [...pinned, ...sortPartition(unpinned, options)];
 }
