@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { planTabSort, type SortableTab, type TabSortOptions } from './tabSort';
+import { isTabOrderSorted, planTabSort, type SortableTab, type TabSortOptions } from './tabSort';
 
 function createTab(overrides: Partial<SortableTab> = {}): SortableTab {
   return {
@@ -76,5 +76,50 @@ describe('planTabSort', () => {
 
   it('handles an empty window', () => {
     expect(planTabSort([], DEFAULT_OPTIONS)).toEqual([]);
+  });
+});
+
+describe('isTabOrderSorted', () => {
+  it('recognizes a sorted unpinned suffix without requiring pinned tabs to be alphabetical', () => {
+    const tabs = [
+      createTab({ id: 1, index: 0, pinned: true, title: 'Zulu pinned' }),
+      createTab({ id: 2, index: 1, pinned: true, title: 'Alpha pinned' }),
+      createTab({ id: 3, index: 2, title: 'Alpha' }),
+      createTab({ id: 4, index: 3, title: 'Zulu' }),
+    ];
+
+    expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
+  });
+
+  it('detects when sortable tabs no longer match the requested direction', () => {
+    const tabs = [
+      createTab({ id: 1, index: 0, title: 'Zulu' }),
+      createTab({ id: 2, index: 1, title: 'Alpha' }),
+    ];
+
+    expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(false);
+    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, direction: 'desc' })).toBe(true);
+  });
+
+  it('checks order within preserved group segments instead of moving those segments', () => {
+    const tabs = [
+      createTab({ groupId: 7, id: 1, index: 0, title: 'Alpha' }),
+      createTab({ groupId: 7, id: 2, index: 1, title: 'Zulu' }),
+      createTab({ id: 3, index: 2, title: 'Alpha' }),
+    ];
+
+    expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
+    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(false);
+  });
+
+  it('uses browser indices rather than input array order and treats an empty window as sorted', () => {
+    const tabs = [
+      createTab({ id: 2, index: 1, title: 'Alpha' }),
+      createTab({ id: 1, index: 0, title: 'Zulu' }),
+    ];
+
+    expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(false);
+    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, direction: 'desc' })).toBe(true);
+    expect(isTabOrderSorted([], DEFAULT_OPTIONS)).toBe(true);
   });
 });

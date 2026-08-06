@@ -1,8 +1,9 @@
 import {
   AlertTriangle,
   AppWindow,
-  ArrowDownAZ,
-  ArrowUpZA,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CopyX,
   Eye,
   ListChecks,
@@ -35,6 +36,7 @@ import {
 } from '../features/active-windows/model';
 import { type ToggleTabSelection } from '../features/active-windows/selection';
 import {
+  isTabOrderSorted,
   type SortCriterion,
   type SortDirection,
   type TabSortOptions,
@@ -103,6 +105,17 @@ const DEFAULT_WINDOW_SORT_SELECTION: WindowSortSelection = {
   direction: 'asc',
 };
 const NEW_WINDOW_TARGET_SWITCH_DISTANCE = 12;
+
+function sortSelectionsMatch(
+  first: TabSortOptions | null | undefined,
+  second: TabSortOptions,
+): boolean {
+  return (
+    first?.criterion === second.criterion &&
+    first.direction === second.direction &&
+    first.preserveGroups === second.preserveGroups
+  );
+}
 
 function newWindowTargetsMatch(
   first: NewWindowDropTarget | null,
@@ -217,8 +230,13 @@ export function ActiveWindowsPage({
   const [query, setQuery] = useState('');
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
+    useState<TabSortOptions | null>(null);
   const [windowSortSelections, setWindowSortSelections] = useState<
     ReadonlyMap<number, WindowSortSelection>
+  >(() => new Map());
+  const [appliedWindowSortSelections, setAppliedWindowSortSelections] = useState<
+    ReadonlyMap<number, TabSortOptions>
   >(() => new Map());
   const [duplicatePreviewMode, setDuplicatePreviewMode] = useState(false);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
@@ -256,6 +274,33 @@ export function ActiveWindowsPage({
     () => (snapshot ? filterActiveWindows(snapshot, query) : null),
     [query, snapshot],
   );
+  const globalSortSelection = useMemo<TabSortOptions>(
+    () => ({
+      criterion: sortCriterion,
+      direction: sortDirection,
+      preserveGroups: settings.preserveGroupsDuringSort,
+    }),
+    [settings.preserveGroupsDuringSort, sortCriterion, sortDirection],
+  );
+  const globalSortMatchesCurrentOrder = useMemo(
+    () =>
+      Boolean(
+        snapshot &&
+        snapshot.windows.length > 0 &&
+        sortSelectionsMatch(appliedGlobalSortSelection, globalSortSelection) &&
+        snapshot.windows.every((activeWindow) =>
+          isTabOrderSorted(activeWindow.tabs, globalSortSelection),
+        ),
+      ),
+    [appliedGlobalSortSelection, globalSortSelection, snapshot],
+  );
+  const globalSortActionDirection: SortDirection = globalSortMatchesCurrentOrder
+    ? sortDirection === 'asc'
+      ? 'desc'
+      : 'asc'
+    : sortDirection;
+  const globalSortActionDirectionLabel = globalSortActionDirection === 'asc' ? 'A to Z' : 'Z to A';
+  const currentGlobalSortDirectionLabel = sortDirection === 'asc' ? 'A to Z' : 'Z to A';
 
   const updateNewWindowDropTarget = (target: NewWindowDropTarget | null) => {
     if (newWindowTargetsMatch(newWindowDropTargetRef.current, target)) {
@@ -574,6 +619,19 @@ export function ActiveWindowsPage({
     setOperationLabel(null);
   };
 
+  const restoreTabActionFocus = (tabId: number, action: 'pin' | 'suspend') => {
+    const className = action === 'pin' ? 'tab-pin-button' : 'tab-suspended-button';
+    queueMicrotask(() => {
+      const actionButton = document.querySelector<HTMLButtonElement>(
+        `.${className}[data-tab-action-id="${tabId}"]`,
+      );
+      const tabFocusButton = document.querySelector<HTMLButtonElement>(
+        `.tab-focus-button[data-tab-focus-id="${tabId}"]`,
+      );
+      (actionButton ?? tabFocusButton)?.focus();
+    });
+  };
+
   const updateWindowSortSelection = (windowId: number, update: Partial<WindowSortSelection>) => {
     setWindowSortSelections((current) => {
       const next = new Map(current);
@@ -801,6 +859,27 @@ export function ActiveWindowsPage({
     }
   };
 
+  const suspendTab = async (tabId: number) => {
+    const tabIsStillSuspendable =
+      snapshot?.windows.some((window) =>
+        window.tabs.some((tab) => tab.id === tabId && !tab.active && !isTabSuspended(tab)),
+      ) ?? false;
+    if (!tabIsStillSuspendable || !beginOperation('Suspending 1 tab')) {
+      return;
+    }
+
+    try {
+      const result = await service.suspendTabs([tabId]);
+      setOperationError(summarizeFailures('suspended', result.failures));
+      await refresh();
+      restoreTabActionFocus(tabId, 'suspend');
+    } catch {
+      setOperationError('The browser could not suspend that tab.');
+    } finally {
+      finishOperation();
+    }
+  };
+
   const unsuspendTab = async (tabId: number) => {
     const tabIsStillSuspended =
       snapshot?.windows.some((window) =>
@@ -817,8 +896,25 @@ export function ActiveWindowsPage({
       const result = await service.unsuspendTabs([tabId]);
       setOperationError(summarizeFailures('unsuspended', result.failures));
       await refresh();
+      restoreTabActionFocus(tabId, 'suspend');
     } catch {
       setOperationError('The browser could not unsuspend that tab.');
+    } finally {
+      finishOperation();
+    }
+  };
+
+  const setTabPinned = async (tabId: number, pinned: boolean) => {
+    if (!beginOperation(pinned ? 'Pinning tab' : 'Unpinning tab')) {
+      return;
+    }
+
+    try {
+      await (pinned ? service.pinTab(tabId) : service.unpinTab(tabId));
+      await refresh();
+      restoreTabActionFocus(tabId, 'pin');
+    } catch {
+      setOperationError(`The browser could not ${pinned ? 'pin' : 'unpin'} that tab.`);
     } finally {
       finishOperation();
     }
@@ -966,18 +1062,11 @@ export function ActiveWindowsPage({
     setDuplicateUndoTabs(null);
   };
 
-  const sortTabs = async (
-    windowId: number | undefined,
-    sortOptions: Pick<TabSortOptions, 'criterion' | 'direction'>,
-  ) => {
+  const sortTabs = async (windowId: number | undefined, options: TabSortOptions) => {
     if (!snapshot || settingsLoading || !beginOperation(null, false)) {
-      return;
+      return null;
     }
 
-    const options = {
-      ...sortOptions,
-      preserveGroups: settings.preserveGroupsDuringSort,
-    };
     try {
       const result =
         windowId === undefined
@@ -985,11 +1074,54 @@ export function ActiveWindowsPage({
           : await service.sortWindow(windowId, options);
       setOperationError(summarizeWindowFailures(result.failures, result.warnings));
       await refresh();
+      return result;
     } catch {
       setOperationError('The browser could not sort the requested tabs.');
+      return null;
     } finally {
       finishOperation();
     }
+  };
+
+  const applyGlobalSort = async () => {
+    const selection: TabSortOptions = {
+      criterion: sortCriterion,
+      direction: globalSortActionDirection,
+      preserveGroups: settings.preserveGroupsDuringSort,
+    };
+    setSortDirection(globalSortActionDirection);
+    const result = await sortTabs(undefined, selection);
+    if (!result || result.sortedWindowIds.length === 0) {
+      return;
+    }
+
+    setAppliedGlobalSortSelection(selection);
+    setAppliedWindowSortSelections((current) => {
+      const next = new Map(current);
+      result.sortedWindowIds.forEach((windowId) => next.set(windowId, selection));
+      return next;
+    });
+  };
+
+  const applyWindowSort = async (
+    windowId: number,
+    selection: Pick<TabSortOptions, 'criterion' | 'direction'>,
+  ) => {
+    const appliedSelection: TabSortOptions = {
+      ...selection,
+      preserveGroups: settings.preserveGroupsDuringSort,
+    };
+    updateWindowSortSelection(windowId, { direction: selection.direction });
+    const result = await sortTabs(windowId, appliedSelection);
+    if (!result?.sortedWindowIds.includes(windowId)) {
+      return;
+    }
+
+    setAppliedWindowSortSelections((current) => {
+      const next = new Map(current);
+      next.set(windowId, appliedSelection);
+      return next;
+    });
   };
 
   const openMergeDialog = () => {
@@ -1427,22 +1559,19 @@ export function ActiveWindowsPage({
               onChange={setSortCriterion}
             />
             <button
-              className="icon-button"
+              className="toolbar-button sort-action-button"
               type="button"
-              aria-label={`Sort direction ${sortDirection === 'asc' ? 'A to Z' : 'Z to A'}`}
-              title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-              disabled={duplicatePreviewMode || !snapshot || operationLabel !== null}
-              onClick={() => setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))}
-            >
-              {sortDirection === 'asc' ? (
-                <ArrowDownAZ aria-hidden="true" size={17} />
-              ) : (
-                <ArrowUpZA aria-hidden="true" size={17} />
-              )}
-            </button>
-            <button
-              className="toolbar-button"
-              type="button"
+              aria-label={`Sort all windows by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${
+                globalSortActionDirectionLabel
+              }`}
+              aria-describedby={
+                globalSortMatchesCurrentOrder ? 'global-sort-state-description' : undefined
+              }
+              title={
+                globalSortMatchesCurrentOrder
+                  ? `Sorted ${currentGlobalSortDirectionLabel}. Click to sort ${globalSortActionDirectionLabel}.`
+                  : `Sort all ${globalSortActionDirectionLabel}`
+              }
               disabled={
                 !snapshot ||
                 duplicatePreviewMode ||
@@ -1450,11 +1579,22 @@ export function ActiveWindowsPage({
                 settingsLoading ||
                 operationLabel !== null
               }
-              onClick={() =>
-                void sortTabs(undefined, { criterion: sortCriterion, direction: sortDirection })
-              }
+              onClick={() => void applyGlobalSort()}
             >
+              {!globalSortMatchesCurrentOrder ? (
+                <ArrowUpDown aria-hidden="true" size={17} />
+              ) : sortDirection === 'asc' ? (
+                <ArrowUp aria-hidden="true" size={17} />
+              ) : (
+                <ArrowDown aria-hidden="true" size={17} />
+              )}
               <span>Sort all</span>
+              {globalSortMatchesCurrentOrder ? (
+                <span id="global-sort-state-description" className="sr-only">
+                  Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
+                  {currentGlobalSortDirectionLabel}.
+                </span>
+              ) : null}
             </button>
           </div>
 
@@ -1560,7 +1700,7 @@ export function ActiveWindowsPage({
             <span>
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
-                ? 'Every duplicate shown is pinned and will stay open. Unpin a tab in your browser to make it eligible to close.'
+                ? "Every duplicate shown is pinned and will stay open. Use a tab's pin button to unpin it and make it eligible to close."
                 : 'Tabs labeled Keep stay open, including every pinned match. Tabs labeled Will close are removed.'}
             </span>
           </div>
@@ -1633,6 +1773,15 @@ export function ActiveWindowsPage({
                     window.tabs;
                   const windowSortSelection =
                     windowSortSelections.get(window.id) ?? DEFAULT_WINDOW_SORT_SELECTION;
+                  const windowSortOptions: TabSortOptions = {
+                    ...windowSortSelection,
+                    preserveGroups: settings.preserveGroupsDuringSort,
+                  };
+                  const windowSortMatchesCurrentOrder =
+                    sortSelectionsMatch(
+                      appliedWindowSortSelections.get(window.id),
+                      windowSortOptions,
+                    ) && isTabOrderSorted(allWindowTabs, windowSortOptions);
                   const dropZone =
                     newWindowDropTarget?.anchorWindowId === window.id ? (
                       <div
@@ -1680,23 +1829,26 @@ export function ActiveWindowsPage({
                         onSortCriterionChange={(criterion) =>
                           updateWindowSortSelection(window.id, { criterion })
                         }
-                        onSortDirectionChange={(direction) =>
-                          updateWindowSortSelection(window.id, { direction })
+                        onSortWindow={(windowId, options) =>
+                          void applyWindowSort(windowId, options)
                         }
-                        onSortWindow={(windowId, options) => void sortTabs(windowId, options)}
                         window={window}
                         selectedTabIds={selection.selectedIds}
                         showTabUrls={settings.showTabUrls}
                         sortCriterion={windowSortSelection.criterion}
                         sortDirection={windowSortSelection.direction}
+                        sortMatchesCurrentOrder={windowSortMatchesCurrentOrder}
                         windowActionsAvailable={!duplicatePreviewMode}
                         onSetTabsSelected={setTabsSelected}
                         onToggleTabSelected={toggleTabSelected}
                         onToggleCollapsed={toggleWindowCollapsed}
                         onFocusWindow={(windowId) => void focusWindow(windowId)}
                         onFocusTab={(windowId, tabId) => void focusTab(windowId, tabId)}
+                        onPinTab={(tabId) => void setTabPinned(tabId, true)}
                         onSaveWindow={openSaveWindowDialog}
+                        onSuspendTab={(tabId) => void suspendTab(tabId)}
                         onSuspendWindow={(windowId) => void suspendWindowTabs(windowId)}
+                        onUnpinTab={(tabId) => void setTabPinned(tabId, false)}
                         onUnsuspendTab={(tabId) => void unsuspendTab(tabId)}
                         onUnsuspendWindow={(windowId) => void unsuspendWindowTabs(windowId)}
                         onSetGroupSelected={setGroupSelected}

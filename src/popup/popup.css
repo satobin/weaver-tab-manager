@@ -157,13 +157,13 @@ input {
   display: grid;
   width: 100%;
   height: 34px;
-  grid-template-columns: minmax(0, 1fr) 36px 58px;
+  grid-template-columns: minmax(0, 1fr) 76px;
   align-items: stretch;
 }
 
 .popup-sort-controls .sort-criterion-trigger,
-.popup-sort-direction,
 .popup-sort-apply {
+  position: relative;
   height: 34px;
   padding: 0 9px;
   border: 1px solid var(--border-strong);
@@ -179,24 +179,26 @@ input {
   border-radius: 6px 0 0 6px;
 }
 
-.popup-sort-direction,
 .popup-sort-apply {
-  display: grid;
-  place-items: center;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.popup-sort-apply {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-left: -1px;
+  border-left: 1px solid var(--border-strong);
   border-radius: 0 6px 6px 0;
 }
 
 .popup-sort-controls .sort-criterion-trigger:hover:not(:disabled),
-.popup-sort-direction:hover:not(:disabled),
 .popup-sort-apply:hover:not(:disabled) {
+  z-index: 1;
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-hover);
+}
+
+.popup-sort-controls :is(.sort-criterion-trigger, .popup-sort-apply):focus-visible {
+  z-index: 1;
 }
 
 .popup-sort-controls button:disabled {

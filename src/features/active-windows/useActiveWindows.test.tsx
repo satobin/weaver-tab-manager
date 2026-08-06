@@ -54,6 +54,7 @@ function createService() {
         warnings: [],
       }),
     ),
+    pinTab: vi.fn(() => Promise.resolve()),
     restoreTabs: vi.fn((tabs: readonly RestorableTab[]) =>
       Promise.resolve({
         failures: [],
@@ -73,6 +74,7 @@ function createService() {
       };
     }),
     suspendTabs: vi.fn(() => Promise.resolve({ affectedTabIds: [], failures: [] })),
+    unpinTab: vi.fn(() => Promise.resolve()),
     unsuspendTabs: vi.fn(() => Promise.resolve({ affectedTabIds: [], failures: [] })),
   };
 

@@ -280,6 +280,7 @@ a {
 }
 
 .sort-controls .sort-criterion-trigger {
+  position: relative;
   width: 76px;
   padding: 0 7px 0 9px;
   border: 1px solid var(--border-strong);
@@ -291,20 +292,29 @@ a {
   font-weight: 600;
 }
 
-.sort-controls .icon-button,
 .sort-controls .toolbar-button {
+  position: relative;
   height: 34px;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.sort-controls .toolbar-button {
+  margin-left: -1px;
+  border-left: 1px solid var(--border-strong);
   border-radius: 0 6px 6px 0;
 }
 
 .sort-controls .sort-criterion-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+.sort-controls .sort-criterion-trigger:hover:not(:disabled) {
+  z-index: 1;
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.sort-controls :is(.sort-criterion-trigger, .sort-action-button):focus-visible,
+.sort-controls .sort-action-button:hover:not(:disabled) {
+  z-index: 1;
 }
 
 .active-toolbar-main,
@@ -850,6 +860,7 @@ a {
 }
 
 .window-sort-controls .sort-criterion-trigger {
+  position: relative;
   width: 68px;
   padding: 0 4px 0 8px;
   border: 1px solid var(--border-strong);
@@ -861,26 +872,32 @@ a {
   font-weight: 600;
 }
 
-.window-sort-controls .icon-button,
 .window-sort-controls .toolbar-button {
+  position: relative;
   height: 30px;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.window-sort-controls .icon-button {
-  width: 30px;
-  flex-basis: 30px;
-}
-
-.window-sort-controls .toolbar-button {
+  margin-left: -1px;
+  border-left: 1px solid var(--border-strong);
   border-radius: 0 5px 5px 0;
+  gap: 5px;
+  padding-inline: 7px;
   font-size: 11px;
 }
 
 .window-sort-controls .sort-criterion-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+.window-sort-controls .sort-criterion-trigger:hover:not(:disabled) {
+  z-index: 1;
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.window-sort-controls :is(.sort-criterion-trigger, .sort-action-button):focus-visible,
+.window-sort-controls .sort-action-button:hover:not(:disabled) {
+  z-index: 1;
 }
 
 .merge-control {
@@ -1385,10 +1402,6 @@ a {
   font-size: 10px;
 }
 
-.tab-pin {
-  color: var(--icon-muted);
-}
-
 .tab-state-icons {
   display: flex;
   align-items: center;
@@ -1416,14 +1429,41 @@ a {
   color: var(--danger-text);
 }
 
+.tab-inline-actions {
+  display: flex;
+  width: 54px;
+  grid-column: 4;
+  align-items: center;
+  align-self: center;
+  justify-self: end;
+  gap: 2px;
+  padding-left: 4px;
+}
+
+.tab-inline-actions .is-reveal-action {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab-row:hover .tab-inline-actions .is-reveal-action,
+.tab-row:focus-within .tab-inline-actions .is-reveal-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .tab-inline-actions .is-reveal-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.tab-pin-button,
 .tab-suspended-button {
   display: grid;
   width: 24px;
   height: 24px;
   align-items: center;
-  align-self: center;
-  justify-self: end;
-  margin-left: 4px;
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
@@ -1433,37 +1473,88 @@ a {
   cursor: pointer;
 }
 
+.tab-pin-button:hover:not(:disabled),
 .tab-suspended-button:hover:not(:disabled) {
   background: var(--surface-subtle);
   color: var(--control-text);
 }
 
+.tab-pin-icon,
 .tab-suspended-icon {
   grid-area: 1 / 1;
 }
 
+.tab-suspended-button.is-unavailable-action {
+  cursor: not-allowed;
+  color: var(--icon-muted);
+}
+
+.tab-suspended-button.is-unavailable-action:hover {
+  background: transparent;
+  color: var(--icon-muted);
+}
+
+.tab-suspended-unavailable-slash {
+  width: 14px;
+  height: 1.5px;
+  grid-area: 1 / 1;
+  border-radius: 999px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+
+.tab-row:hover .tab-inline-actions .is-unavailable-action,
+.tab-row:focus-within .tab-inline-actions .is-unavailable-action {
+  opacity: 0.55;
+}
+
+@media (hover: none) {
+  .tab-inline-actions .is-unavailable-action {
+    opacity: 0.55;
+  }
+}
+
+.tab-pin-icon-unpin,
 .tab-suspended-icon-play {
   opacity: 0;
 }
 
-.tab-suspended-button:hover:not(:disabled) .tab-suspended-icon-pause,
-.tab-suspended-button:focus-visible .tab-suspended-icon-pause {
+.tab-pin-button.is-state-action:hover:not(:disabled) .tab-pin-icon-pinned,
+.tab-pin-button.is-state-action:focus-visible .tab-pin-icon-pinned,
+.tab-suspended-button.is-state-action:hover:not(:disabled) .tab-suspended-icon-pause,
+.tab-suspended-button.is-state-action:focus-visible .tab-suspended-icon-pause {
   opacity: 0;
 }
 
-.tab-suspended-button:hover:not(:disabled) .tab-suspended-icon-play,
-.tab-suspended-button:focus-visible .tab-suspended-icon-play {
+.tab-pin-button.is-state-action:hover:not(:disabled) .tab-pin-icon-unpin,
+.tab-pin-button.is-state-action:focus-visible .tab-pin-icon-unpin,
+.tab-suspended-button.is-state-action:hover:not(:disabled) .tab-suspended-icon-play,
+.tab-suspended-button.is-state-action:focus-visible .tab-suspended-icon-play {
   opacity: 1;
 }
 
+.tab-pin-button:focus-visible,
 .tab-suspended-button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 
+.tab-pin-button:disabled,
 .tab-suspended-button:disabled {
   cursor: not-allowed;
+}
+
+.tab-pin-button.is-state-action:disabled,
+.tab-suspended-button.is-state-action:disabled,
+.tab-row:hover .tab-inline-actions .is-reveal-action:disabled,
+.tab-row:focus-within .tab-inline-actions .is-reveal-action:disabled {
   opacity: 0.55;
+}
+
+@media (hover: none) {
+  .tab-inline-actions .is-reveal-action:disabled {
+    opacity: 0.55;
+  }
 }
 
 .window-empty {
@@ -3576,6 +3667,17 @@ a {
   .window-card-actions {
     justify-content: flex-end;
     gap: 5px;
+  }
+
+  .window-sort-controls .sort-action-button {
+    width: 30px;
+    flex-basis: 30px;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .window-sort-controls .sort-action-label {
+    display: none;
   }
 
   .settings-rule-heading {

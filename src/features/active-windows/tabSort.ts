@@ -55,3 +55,10 @@ export function planTabSort(tabs: readonly SortableTab[], options: TabSortOption
 
   return [...pinned, ...sortPartition(unpinned, options)];
 }
+
+export function isTabOrderSorted(tabs: readonly SortableTab[], options: TabSortOptions): boolean {
+  const browserOrder = [...tabs].sort((left, right) => left.index - right.index);
+  const plannedOrder = planTabSort(browserOrder, options);
+
+  return browserOrder.every((tab, index) => tab.id === plannedOrder[index]?.id);
+}

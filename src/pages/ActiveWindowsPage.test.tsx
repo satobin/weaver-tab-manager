@@ -117,6 +117,7 @@ function createService(): ActiveWindowsService {
         warnings: [],
       }),
     ),
+    pinTab: vi.fn(() => Promise.resolve()),
     restoreTabs: vi.fn((tabs: readonly RestorableTab[]) =>
       Promise.resolve({
         failures: [],
@@ -126,11 +127,14 @@ function createService(): ActiveWindowsService {
       }),
     ),
     sortAllWindows: vi.fn(() =>
-      Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] }),
+      Promise.resolve({ failures: [], sortedWindowIds: [1, 2], warnings: [] }),
     ),
-    sortWindow: vi.fn(() => Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] })),
+    sortWindow: vi.fn((windowId: number) =>
+      Promise.resolve({ failures: [], sortedWindowIds: [windowId], warnings: [] }),
+    ),
     subscribe: vi.fn(() => () => undefined),
     suspendTabs: vi.fn(() => Promise.resolve({ affectedTabIds: [], failures: [] })),
+    unpinTab: vi.fn(() => Promise.resolve()),
     unsuspendTabs: vi.fn(() => Promise.resolve({ affectedTabIds: [], failures: [] })),
   };
 }
@@ -320,10 +324,14 @@ describe('ActiveWindowsPage', () => {
     expect(within(closingTabRow as HTMLElement).getByText('Will close')).toBeInTheDocument();
     expect(
       within(keptTabRow as HTMLElement).getByRole('button', { name: 'Focus Keep this tab' }),
-    ).toHaveAccessibleDescription('Keep');
+    ).toHaveAccessibleDescription(
+      'Active tabs cannot be suspended. Select another tab in this window first. Keep',
+    );
     expect(
       within(closingTabRow as HTMLElement).getByRole('button', { name: 'Focus Close this tab' }),
-    ).toHaveAccessibleDescription('Will close');
+    ).toHaveAccessibleDescription(
+      'Active tabs cannot be suspended. Select another tab in this window first. Will close',
+    );
     expect(window.location.hash).toBe(APP_ROUTES.windows);
   });
 
@@ -404,30 +412,52 @@ describe('ActiveWindowsPage', () => {
     const user = userEvent.setup();
     const service = createService();
     const duplicateUrl = 'https://example.test/all-pinned';
-    vi.mocked(service.loadSnapshot).mockResolvedValue(
-      createActiveWindowsSnapshot({
-        windows: [
-          createManagedWindow({
-            tabs: [
-              createManagedTab({
-                active: true,
-                id: 101,
-                pinned: true,
-                title: 'Pinned first copy',
-                url: duplicateUrl,
-              }),
-              createManagedTab({
-                id: 102,
-                index: 1,
-                pinned: true,
-                title: 'Pinned second copy',
-                url: duplicateUrl,
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
+    const allPinnedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({
+              active: true,
+              id: 101,
+              pinned: true,
+              title: 'Pinned first copy',
+              url: duplicateUrl,
+            }),
+            createManagedTab({
+              id: 102,
+              index: 1,
+              pinned: true,
+              title: 'Pinned second copy',
+              url: duplicateUrl,
+            }),
+          ],
+        }),
+      ],
+    });
+    const oneUnpinnedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({
+              active: true,
+              id: 101,
+              pinned: true,
+              title: 'Pinned first copy',
+              url: duplicateUrl,
+            }),
+            createManagedTab({
+              id: 102,
+              index: 1,
+              title: 'Pinned second copy',
+              url: duplicateUrl,
+            }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(allPinnedSnapshot)
+      .mockResolvedValue(oneUnpinnedSnapshot);
     render(<ActiveWindowsPage service={service} />);
 
     const previewButton = await screen.findByRole('button', { name: 'Show duplicate tabs only' });
@@ -438,9 +468,122 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByText('Pinned second copy')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Every duplicate shown is pinned and will stay open. Unpin a tab in your browser to make it eligible to close.',
+      "Every duplicate shown is pinned and will stay open. Use a tab's pin button to unpin it and make it eligible to close.",
     );
     expect(screen.getByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Pin Pinned second copy', pressed: true }));
+
+    expect(service.unpinTab).toHaveBeenCalledWith(102);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled(),
+    );
+    expect(screen.getByText('Pinned second copy').closest('li')).toHaveClass(
+      'is-duplicate-preview-close',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Pin Pinned second copy', pressed: false }),
+    ).toHaveFocus();
+  });
+
+  it('keeps a duplicate after it is pinned from the preview', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/pin-duplicate';
+    const unpinnedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({
+              active: true,
+              id: 101,
+              title: 'Current copy',
+              url: duplicateUrl,
+            }),
+          ],
+        }),
+        createManagedWindow({
+          focused: false,
+          id: 2,
+          isCurrent: false,
+          label: 'Window 2',
+          tabs: [
+            createManagedTab({
+              active: true,
+              id: 201,
+              title: 'Copy to pin',
+              url: duplicateUrl,
+              windowId: 2,
+            }),
+          ],
+        }),
+      ],
+    });
+    const pinnedSnapshot = createActiveWindowsSnapshot({
+      windows: unpinnedSnapshot.windows.map((window) => ({
+        ...window,
+        tabs: window.tabs.map((tab) => (tab.id === 201 ? { ...tab, pinned: true } : { ...tab })),
+      })),
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(unpinnedSnapshot)
+      .mockResolvedValue(pinnedSnapshot);
+    render(<ActiveWindowsPage service={service} />);
+
+    const previewButton = await screen.findByRole('button', { name: 'Show duplicate tabs only' });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(previewButton);
+    expect(screen.getByText('Copy to pin').closest('li')).toHaveClass('is-duplicate-preview-close');
+
+    await user.click(screen.getByRole('button', { name: 'Pin Copy to pin', pressed: false }));
+
+    expect(service.pinTab).toHaveBeenCalledWith(201);
+    await waitFor(() =>
+      expect(screen.getByText('Copy to pin').closest('li')).toHaveClass(
+        'is-duplicate-preview-keep',
+      ),
+    );
+    expect(screen.getByText('Current copy').closest('li')).toHaveClass(
+      'is-duplicate-preview-close',
+    );
+    expect(screen.getByRole('button', { name: 'Pin Copy to pin', pressed: true })).toHaveFocus();
+  });
+
+  it('keeps pin and suspend controls together without nesting either action', async () => {
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({
+                id: 101,
+                pinned: true,
+                title: 'Pinned suspended tab',
+                unloaded: true,
+              }),
+              createManagedTab({
+                active: true,
+                id: 102,
+                index: 1,
+                title: 'Active tab',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+    render(<ActiveWindowsPage service={service} />);
+
+    const row = (await screen.findByText('Pinned suspended tab')).closest('li');
+    const actions = row?.querySelector('.tab-inline-actions');
+    expect(actions).not.toBeNull();
+    const [pinButton, suspendButton] = within(actions as HTMLElement).getAllByRole('button');
+    expect(pinButton).toHaveAccessibleName('Pin Pinned suspended tab');
+    expect(pinButton).toHaveAttribute('aria-pressed', 'true');
+    expect(suspendButton).toHaveAccessibleName('Suspend Pinned suspended tab');
+    expect(suspendButton).toHaveAttribute('aria-pressed', 'true');
+    expect(actions?.closest('.tab-focus-button')).toBeNull();
   });
 
   it('reports duplicate candidates that became pinned before the close', async () => {
@@ -686,11 +829,14 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus first tab in Planning' })).toBeInTheDocument();
     expect(screen.getByText('Collapsed')).toBeInTheDocument();
-    expect(screen.getByLabelText('Pinned')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Pin Quarterly plan', pressed: true }),
+    ).toBeInTheDocument();
     const suspendedButton = screen.getByRole('button', {
-      name: 'Unsuspend Issue tracker without opening it',
+      name: 'Suspend Issue tracker',
+      pressed: true,
     });
-    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend');
+    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend tab');
     expect(suspendedButton.querySelector('.tab-suspended-icon-pause')).toBeInTheDocument();
     expect(suspendedButton.querySelector('.tab-suspended-icon-play')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toHaveAttribute(
@@ -839,14 +985,15 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sort Window 1 by: Title' }));
     await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(screen.getByRole('button', { name: 'Sort Window 1 direction A to Z' }));
+    await user.click(screen.getByRole('button', { name: 'Sort Window 1 by URL, A to Z' }));
+    await screen.findByRole('button', { name: 'Sort Window 1 by URL, Z to A' });
     expect(notifyResize).toBeDefined();
     act(() => notifyResize?.(459));
 
     await waitFor(() => expect(container.querySelectorAll('.window-grid-column')).toHaveLength(1));
     expect(screen.getByRole('button', { name: 'Sort Window 1 by: URL' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Sort Window 1 direction Z to A' }),
+      screen.getByRole('button', { name: 'Sort Window 1 by URL, Z to A' }),
     ).toBeInTheDocument();
   });
 
@@ -898,14 +1045,333 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusTab).toHaveBeenLastCalledWith(1, 102);
   });
 
+  it('pins from the reveal control, leaves a group, and retains action focus', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const unpinnedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          groups: [
+            {
+              collapsed: false,
+              color: 'blue',
+              id: 7,
+              title: 'Research',
+              windowId: 1,
+            },
+          ],
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+            createManagedTab({
+              groupId: 7,
+              id: 102,
+              index: 1,
+              title: 'Grouped background tab',
+            }),
+          ],
+        }),
+      ],
+    });
+    const pinnedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({
+              id: 102,
+              pinned: true,
+              title: 'Grouped background tab',
+            }),
+            createManagedTab({ active: true, id: 101, index: 1, title: 'Active tab' }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(unpinnedSnapshot)
+      .mockResolvedValue(pinnedSnapshot);
+    render(<ActiveWindowsPage service={service} />);
+
+    const groupedRow = (await screen.findByText('Grouped background tab')).closest('li');
+    const actions = groupedRow?.querySelector('.tab-inline-actions');
+    const [pinButton, suspendButton] = within(actions as HTMLElement).getAllByRole('button');
+    expect(pinButton).toHaveAccessibleName('Pin Grouped background tab');
+    expect(pinButton).toHaveAttribute('aria-pressed', 'false');
+    expect(pinButton).toHaveClass('is-reveal-action');
+    expect(pinButton).toHaveAttribute('title', 'Pin tab (removes it from its group)');
+    expect(pinButton).toHaveAccessibleDescription('Pinning removes this tab from its group.');
+    expect(suspendButton).toHaveAccessibleName('Suspend Grouped background tab');
+    expect(suspendButton).toHaveAttribute('aria-pressed', 'false');
+    expect(suspendButton).toHaveClass('is-reveal-action');
+    expect(screen.getByRole('button', { name: 'Pin Active tab', pressed: false })).toHaveClass(
+      'is-reveal-action',
+    );
+    expect(screen.queryByRole('button', { name: 'Suspend Active tab' })).not.toBeInTheDocument();
+
+    const setDragData = vi.fn();
+    fireEvent.dragStart(pinButton as HTMLElement, {
+      dataTransfer: { effectAllowed: 'none', setData: setDragData },
+    });
+    expect(setDragData).not.toHaveBeenCalled();
+
+    await user.click(pinButton as HTMLElement);
+
+    expect(service.pinTab).toHaveBeenCalledWith(102);
+    expect(service.focusTab).not.toHaveBeenCalled();
+    expect(service.focusWindow).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole('button', { name: 'Pin Grouped background tab', pressed: true }),
+    ).toHaveFocus();
+    expect(
+      screen.getByRole('button', { name: 'Suspend Grouped background tab', pressed: false }),
+    ).toHaveClass('is-reveal-action');
+    expect(screen.queryByText('Research')).not.toBeInTheDocument();
+  });
+
+  it('unpins from the pin control without focusing or starting a drag', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const unpinButton = await screen.findByRole('button', {
+      name: 'Pin Quarterly plan',
+      pressed: true,
+    });
+    expect(unpinButton).toHaveAttribute('title', 'Unpin tab');
+    expect(unpinButton.closest('.tab-focus-button')).toBeNull();
+    expect(unpinButton.querySelector('.tab-pin-icon-pinned')).toBeInTheDocument();
+    expect(unpinButton.querySelector('.tab-pin-icon-unpin')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pin Reference', pressed: false })).toHaveClass(
+      'is-reveal-action',
+    );
+
+    const setDragData = vi.fn();
+    fireEvent.dragStart(unpinButton, {
+      dataTransfer: { effectAllowed: 'none', setData: setDragData },
+    });
+    expect(setDragData).not.toHaveBeenCalled();
+
+    await user.click(unpinButton);
+
+    expect(service.unpinTab).toHaveBeenCalledTimes(1);
+    expect(service.unpinTab).toHaveBeenCalledWith(101);
+    expect(service.focusTab).not.toHaveBeenCalled();
+    expect(service.focusWindow).not.toHaveBeenCalled();
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
+  });
+
+  it('reports an unpin failure and leaves the control available', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.unpinTab).mockRejectedValue(new Error('Tab no longer exists'));
+    render(<ActiveWindowsPage service={service} />);
+
+    const unpinButton = await screen.findByRole('button', {
+      name: 'Pin Quarterly plan',
+      pressed: true,
+    });
+    await user.click(unpinButton);
+
+    expect(service.unpinTab).toHaveBeenCalledWith(101);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The browser could not unpin that tab.',
+    );
+    expect(unpinButton).toBeEnabled();
+    expect(service.loadSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a pin failure and leaves the reveal control available', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.pinTab).mockRejectedValue(new Error('Tab no longer exists'));
+    render(<ActiveWindowsPage service={service} />);
+
+    const pinButton = await screen.findByRole('button', {
+      name: 'Pin Reference',
+      pressed: false,
+    });
+    await user.click(pinButton);
+
+    expect(service.pinTab).toHaveBeenCalledWith(201);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The browser could not pin that tab.',
+    );
+    expect(pinButton).toBeEnabled();
+    expect(pinButton).toHaveClass('is-reveal-action');
+    expect(service.loadSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a struck-through suspend affordance for the active tab without making it actionable', async () => {
+    const service = createService();
+    render(<ActiveWindowsPage service={service} />);
+
+    const focusButton = await screen.findByRole('button', { name: 'Focus Quarterly plan' });
+    expect(focusButton).toHaveAccessibleDescription(
+      'Active tabs cannot be suspended. Select another tab in this window first.',
+    );
+    const activeRow = focusButton.closest('li');
+    const unavailableSuspend = activeRow?.querySelector(
+      '.tab-suspended-button.is-unavailable-action',
+    );
+    expect(unavailableSuspend).not.toBeNull();
+    expect(unavailableSuspend).toHaveClass('is-reveal-action');
+    expect(unavailableSuspend).toHaveAttribute(
+      'title',
+      "Active tabs can't be suspended. Select another tab in this window first.",
+    );
+    expect(unavailableSuspend?.querySelector('.tab-suspended-icon-pause')).toBeInTheDocument();
+    expect(
+      unavailableSuspend?.querySelector('.tab-suspended-unavailable-slash'),
+    ).toBeInTheDocument();
+    expect(
+      within(activeRow as HTMLElement).queryByRole('button', { name: 'Suspend Quarterly plan' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(unavailableSuspend as Element);
+
+    const backgroundWindowFocusButton = screen.getByRole('button', { name: 'Focus Reference' });
+    expect(backgroundWindowFocusButton).toHaveAccessibleDescription(
+      'Active tabs cannot be suspended. Select another tab in this window first.',
+    );
+    const backgroundWindowActiveRow = backgroundWindowFocusButton.closest('li');
+    const backgroundWindowUnavailableSuspend = backgroundWindowActiveRow?.querySelector(
+      '.tab-suspended-button.is-unavailable-action',
+    );
+    expect(backgroundWindowUnavailableSuspend).not.toBeNull();
+    expect(
+      within(backgroundWindowActiveRow as HTMLElement).queryByRole('button', {
+        name: 'Suspend Reference',
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(backgroundWindowUnavailableSuspend as Element);
+
+    expect(service.suspendTabs).not.toHaveBeenCalled();
+    expect(service.focusTab).not.toHaveBeenCalled();
+  });
+
+  it('suspends from the reveal control without focusing or dragging the tab', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const loadedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+            createManagedTab({ id: 102, index: 1, title: 'Background tab' }),
+          ],
+        }),
+      ],
+    });
+    const suspendedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+            createManagedTab({ discarded: true, id: 102, index: 1, title: 'Background tab' }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(loadedSnapshot)
+      .mockResolvedValue(suspendedSnapshot);
+    vi.mocked(service.suspendTabs).mockResolvedValue({ affectedTabIds: [102], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    const suspendButton = await screen.findByRole('button', {
+      name: 'Suspend Background tab',
+      pressed: false,
+    });
+    expect(suspendButton).toHaveClass('is-reveal-action');
+    expect(suspendButton).toHaveAttribute('title', 'Suspend tab');
+    expect(screen.queryByRole('button', { name: 'Suspend Active tab' })).not.toBeInTheDocument();
+
+    const setDragData = vi.fn();
+    fireEvent.dragStart(suspendButton, {
+      dataTransfer: { effectAllowed: 'none', setData: setDragData },
+    });
+    expect(setDragData).not.toHaveBeenCalled();
+
+    await user.click(suspendButton);
+
+    expect(service.suspendTabs).toHaveBeenCalledWith([102]);
+    expect(service.focusTab).not.toHaveBeenCalled();
+    expect(service.focusWindow).not.toHaveBeenCalled();
+    const unsuspendButton = await screen.findByRole('button', {
+      name: 'Suspend Background tab',
+      pressed: true,
+    });
+    expect(unsuspendButton).toHaveClass('is-state-action');
+    expect(unsuspendButton).toHaveAttribute('title', 'Unsuspend tab');
+    expect(unsuspendButton).toHaveFocus();
+  });
+
+  it('reports a row-level suspend failure and leaves the action retryable', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+              createManagedTab({ id: 102, index: 1, title: 'Background tab' }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.suspendTabs).mockResolvedValue({
+      affectedTabIds: [],
+      failures: [{ message: 'Tab is locked', tabId: 102 }],
+    });
+    render(<ActiveWindowsPage service={service} />);
+
+    const suspendButton = await screen.findByRole('button', {
+      name: 'Suspend Background tab',
+      pressed: false,
+    });
+    await user.click(suspendButton);
+
+    expect(service.suspendTabs).toHaveBeenCalledWith([102]);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '1 tab could not be suspended. Tab is locked',
+    );
+    expect(suspendButton).toBeEnabled();
+    expect(suspendButton).toHaveClass('is-reveal-action');
+  });
+
   it('unsuspends from the suspended control without focusing the tab', async () => {
     const user = userEvent.setup();
     const service = createService();
+    const suspendedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+            createManagedTab({ id: 102, index: 1, title: 'Issue tracker', unloaded: true }),
+          ],
+        }),
+      ],
+    });
+    const loadedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Active tab' }),
+            createManagedTab({ id: 102, index: 1, title: 'Issue tracker' }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(suspendedSnapshot)
+      .mockResolvedValue(loadedSnapshot);
     vi.mocked(service.unsuspendTabs).mockResolvedValue({ affectedTabIds: [102], failures: [] });
     render(<ActiveWindowsPage service={service} />);
 
     const suspendedButton = await screen.findByRole('button', {
-      name: 'Unsuspend Issue tracker without opening it',
+      name: 'Suspend Issue tracker',
+      pressed: true,
     });
     expect(suspendedButton.closest('.tab-focus-button')).toBeNull();
     const setDragData = vi.fn();
@@ -921,10 +1387,58 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusTab).not.toHaveBeenCalled();
     expect(service.focusWindow).not.toHaveBeenCalled();
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
+    const suspendButton = screen.getByRole('button', {
+      name: 'Suspend Issue tracker',
+      pressed: false,
+    });
+    expect(suspendButton).toHaveClass('is-reveal-action');
+    expect(suspendButton).toHaveAttribute('title', 'Suspend tab');
+    expect(suspendButton).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: 'Focus Issue tracker' }));
     expect(service.focusTab).toHaveBeenCalledWith(1, 102);
     expect(service.unsuspendTabs).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the tab focus control when a suspension action becomes unavailable', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const suspendedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Previously active tab' }),
+            createManagedTab({ id: 102, index: 1, title: 'Issue tracker', unloaded: true }),
+          ],
+        }),
+      ],
+    });
+    const newlyActiveSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ id: 101, title: 'Previously active tab' }),
+            createManagedTab({ active: true, id: 102, index: 1, title: 'Issue tracker' }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(suspendedSnapshot)
+      .mockResolvedValue(newlyActiveSnapshot);
+    vi.mocked(service.unsuspendTabs).mockResolvedValue({ affectedTabIds: [102], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Suspend Issue tracker', pressed: true }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Suspend Issue tracker' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toHaveFocus();
   });
 
   it('collapses from header whitespace without hijacking identity or action controls', async () => {
@@ -942,8 +1456,8 @@ describe('ActiveWindowsPage', () => {
       name: 'Collapse Window 1',
     });
     const titleButton = within(header as HTMLElement).getByRole('button', { name: 'Window 1' });
-    const sortDirectionButton = within(header as HTMLElement).getByRole('button', {
-      name: 'Sort Window 1 direction A to Z',
+    const sortButton = within(header as HTMLElement).getByRole('button', {
+      name: 'Sort Window 1 by Title, A to Z',
     });
     const selectAllCheckbox = within(header as HTMLElement).getByRole('checkbox', {
       name: 'Select all visible tabs in Window 1',
@@ -952,7 +1466,7 @@ describe('ActiveWindowsPage', () => {
     expect(collapseButton).not.toBe(titleButton);
     expect(collapseButton).not.toContainElement(selectAllCheckbox);
     expect(collapseButton).not.toContainElement(titleButton);
-    expect(collapseButton).not.toContainElement(sortDirectionButton);
+    expect(collapseButton).not.toContainElement(sortButton);
     expect(collapseButton).toHaveAttribute('aria-controls', 'window-1-tabs');
     expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
     expect(
@@ -963,7 +1477,7 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusWindow).toHaveBeenCalledWith(1);
     expect(card).not.toHaveClass('is-collapsed');
 
-    await user.click(sortDirectionButton);
+    await user.click(sortButton);
     expect(card).not.toHaveClass('is-collapsed');
 
     await user.click(collapseButton);
@@ -1292,29 +1806,53 @@ describe('ActiveWindowsPage', () => {
       }),
     );
     await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(
-      within(currentWindow as HTMLElement).getByRole('button', {
-        name: 'Sort Window 1 direction A to Z',
-      }),
+    const currentWindowSort = within(currentWindow as HTMLElement).getByRole('button', {
+      name: 'Sort Window 1 by URL, A to Z',
+    });
+    expect(currentWindowSort).toHaveTextContent('Sort');
+    expect(currentWindowSort.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
+    await user.click(currentWindowSort);
+    const reverseCurrentWindowSort = await within(currentWindow as HTMLElement).findByRole(
+      'button',
+      {
+        name: 'Sort Window 1 by URL, Z to A',
+      },
     );
-    await user.click(within(currentWindow as HTMLElement).getByRole('button', { name: 'Sort' }));
+    expect(reverseCurrentWindowSort.querySelector('.lucide-arrow-up')).toBeInTheDocument();
+    expect(reverseCurrentWindowSort).toHaveFocus();
+    await user.click(reverseCurrentWindowSort);
     expect(service.sortWindow).toHaveBeenCalledWith(1, {
       criterion: 'url',
       direction: 'desc',
       preserveGroups: true,
     });
 
-    await user.click(within(otherWindow as HTMLElement).getByRole('button', { name: 'Sort' }));
+    await user.click(
+      within(otherWindow as HTMLElement).getByRole('button', {
+        name: 'Sort Window 2 by Title, A to Z',
+      }),
+    );
     expect(service.sortWindow).toHaveBeenLastCalledWith(2, {
       criterion: 'title',
       direction: 'asc',
       preserveGroups: true,
     });
+    expect(
+      within(otherWindow as HTMLElement).getByRole('button', {
+        name: 'Sort Window 2 by Title, Z to A',
+      }),
+    ).toHaveAccessibleDescription('Currently sorted by Title, A to Z.');
 
     await user.click(screen.getByRole('button', { name: 'Sort all windows by: Title' }));
     await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(screen.getByRole('button', { name: 'Sort direction A to Z' }));
-    await user.click(screen.getByRole('button', { name: 'Sort all' }));
+    const globalSort = screen.getByRole('button', {
+      name: 'Sort all windows by URL, A to Z',
+    });
+    expect(globalSort.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
+    await user.click(globalSort);
+    await user.click(
+      await screen.findByRole('button', { name: 'Sort all windows by URL, Z to A' }),
+    );
     expect(service.sortAllWindows).toHaveBeenCalledWith({
       criterion: 'url',
       direction: 'desc',
@@ -1336,7 +1874,9 @@ describe('ActiveWindowsPage', () => {
     );
     render(<ActiveWindowsPage service={service} />);
 
-    const sortButton = await screen.findByRole('button', { name: 'Sort all' });
+    const sortButton = await screen.findByRole('button', {
+      name: 'Sort all windows by Title, A to Z',
+    });
     await user.click(sortButton);
 
     expect(screen.queryByText('Sorting all windows')).not.toBeInTheDocument();
@@ -2123,7 +2663,7 @@ describe('ActiveWindowsPage', () => {
     expect(service.moveTabsToNewWindow).not.toHaveBeenCalled();
   });
 
-  it('tells users to unpin in their browser when a pinned tab is dropped on a group', async () => {
+  it('tells users to unpin first when a pinned tab is dropped on a group', async () => {
     const service = createService();
     vi.mocked(service.loadSnapshot).mockResolvedValue(
       createActiveWindowsSnapshot({

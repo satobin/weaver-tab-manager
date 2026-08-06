@@ -76,6 +76,7 @@ function createService(windowCount = 1): ActiveWindowsService {
         movedTabIds: [],
         warnings: [],
       }),
+    pinTab: () => Promise.resolve(),
     restoreTabs: (tabs) =>
       Promise.resolve({
         failures: [],
@@ -87,6 +88,7 @@ function createService(windowCount = 1): ActiveWindowsService {
     sortWindow: () => Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] }),
     subscribe: () => () => undefined,
     suspendTabs: () => Promise.resolve({ affectedTabIds: [], failures: [] }),
+    unpinTab: () => Promise.resolve(),
     unsuspendTabs: () => Promise.resolve({ affectedTabIds: [], failures: [] }),
   };
 }

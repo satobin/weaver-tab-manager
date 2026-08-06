@@ -96,6 +96,7 @@ function createService(): ActiveWindowsService {
         warnings: [],
       }),
     ),
+    pinTab: vi.fn(() => Promise.resolve()),
     restoreTabs: vi.fn((tabs: readonly RestorableTab[]) =>
       Promise.resolve({
         failures: [],
@@ -107,11 +108,12 @@ function createService(): ActiveWindowsService {
     sortAllWindows: vi.fn(() =>
       Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] }),
     ),
-    sortWindow: vi.fn(() => Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] })),
+    sortWindow: vi.fn(() => Promise.resolve({ failures: [], sortedWindowIds: [1], warnings: [] })),
     subscribe: vi.fn(() => () => undefined),
     suspendTabs: vi.fn((tabIds: readonly number[]) =>
       Promise.resolve({ affectedTabIds: [...tabIds], failures: [] }),
     ),
+    unpinTab: vi.fn(() => Promise.resolve()),
     unsuspendTabs: vi.fn((tabIds: readonly number[]) =>
       Promise.resolve({ affectedTabIds: [...tabIds], failures: [] }),
     ),
@@ -341,7 +343,10 @@ describe('Popup', () => {
     const service = createService();
     renderPopup(service);
 
-    const sortButton = await screen.findByRole('button', { name: 'Sort current window' });
+    const sortButton = await screen.findByRole('button', {
+      name: 'Sort current window by Title, A to Z',
+    });
+    expect(sortButton.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
     await user.click(sortButton);
 
     await waitFor(() => {
@@ -355,18 +360,70 @@ describe('Popup', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sort current window by: Title' }));
     await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(screen.getByRole('button', { name: 'Sort current window direction A to Z' }));
-    await user.click(sortButton);
+    const reverseSortButton = screen.getByRole('button', {
+      name: 'Sort current window by URL, A to Z',
+    });
+    expect(reverseSortButton.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
+    await user.click(reverseSortButton);
 
     await waitFor(() => {
       expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
         criterion: 'url',
-        direction: 'desc',
+        direction: 'asc',
         preserveGroups: true,
       });
     });
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
     expect(window.close).not.toHaveBeenCalled();
+  });
+
+  it('reverses a sort after the refreshed tab order verifies the applied direction', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const initialSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ active: true, id: 101, title: 'Zulu' }),
+            createManagedTab({ id: 102, index: 1, title: 'Alpha' }),
+          ],
+        }),
+      ],
+    });
+    const sortedSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ id: 102, title: 'Alpha' }),
+            createManagedTab({ active: true, id: 101, index: 1, title: 'Zulu' }),
+          ],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot)
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockResolvedValue(sortedSnapshot);
+    renderPopup(service);
+
+    const sortAscending = await screen.findByRole('button', {
+      name: 'Sort current window by Title, A to Z',
+    });
+    await user.click(sortAscending);
+
+    const sortDescending = await screen.findByRole('button', {
+      name: 'Sort current window by Title, Z to A',
+    });
+    expect(sortDescending.querySelector('.lucide-arrow-up')).toBeInTheDocument();
+    expect(sortDescending).toHaveFocus();
+    await user.click(sortDescending);
+
+    await waitFor(() =>
+      expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
+        criterion: 'title',
+        direction: 'desc',
+        preserveGroups: true,
+      }),
+    );
   });
 
   it('keeps both quick-action buttons visually stable while an operation is pending', async () => {
@@ -397,7 +454,9 @@ describe('Popup', () => {
     renderPopup(service);
 
     const sortControls = await screen.findByRole('group', { name: 'Sort current window' });
-    const sortButton = screen.getByRole('button', { name: 'Sort current window' });
+    const sortButton = screen.getByRole('button', {
+      name: 'Sort current window by Title, A to Z',
+    });
     const dedupeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 1' });
     await user.click(sortButton);
 
@@ -405,9 +464,6 @@ describe('Popup', () => {
     expect(dedupeButton).toHaveTextContent('Close duplicate tabs');
     expect(sortControls).toHaveAttribute('data-operation-locked', 'true');
     expect(screen.getByRole('button', { name: 'Sort current window by: Title' })).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: 'Sort current window direction A to Z' }),
-    ).toBeDisabled();
     expect(dedupeButton).toHaveAttribute('data-operation-locked', 'true');
     expect(sortButton).toBeDisabled();
     expect(dedupeButton).toBeDisabled();

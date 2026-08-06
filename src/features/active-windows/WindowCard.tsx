@@ -1,11 +1,13 @@
 import {
-  ArrowDownAZ,
-  ArrowUpZA,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronRight,
   GripVertical,
   Pause,
   Pin,
+  PinOff,
   Play,
   Save,
   X,
@@ -40,13 +42,15 @@ interface WindowCardProps {
   onCloseWindow: (windowId: number) => void;
   onFocusTab: (windowId: number, tabId: number) => void;
   onFocusWindow: (windowId: number) => void;
+  onPinTab: (tabId: number) => void;
   onSaveWindow: (windowId: number, trigger: HTMLButtonElement) => void;
+  onSuspendTab: (tabId: number) => void;
   onSuspendWindow: (windowId: number) => void;
+  onUnpinTab: (tabId: number) => void;
   onUnsuspendTab: (tabId: number) => void;
   onUnsuspendWindow: (windowId: number) => void;
   onSetGroupSelected: (groupId: number, tabIds: readonly number[], checked: boolean) => void;
   onSortCriterionChange: (criterion: SortCriterion) => void;
-  onSortDirectionChange: (direction: SortDirection) => void;
   onTabDragEnd: () => void;
   onTabDragLeave: (windowId: number) => void;
   onTabDragOver: (target: TabDropTarget, pointer: { x: number; y: number }) => void;
@@ -64,6 +68,7 @@ interface WindowCardProps {
   showTabUrls: boolean;
   sortCriterion: SortCriterion;
   sortDirection: SortDirection;
+  sortMatchesCurrentOrder: boolean;
   window: ManagedWindow;
   windowActionsAvailable?: boolean;
 }
@@ -136,13 +141,15 @@ export function WindowCard({
   onCloseWindow,
   onFocusTab,
   onFocusWindow,
+  onPinTab,
   onSaveWindow,
+  onSuspendTab,
   onSuspendWindow,
+  onUnpinTab,
   onUnsuspendTab,
   onUnsuspendWindow,
   onSetGroupSelected,
   onSortCriterionChange,
-  onSortDirectionChange,
   onTabDragEnd,
   onTabDragLeave,
   onTabDragOver,
@@ -157,6 +164,7 @@ export function WindowCard({
   showTabUrls,
   sortCriterion,
   sortDirection,
+  sortMatchesCurrentOrder,
   window,
   windowActionsAvailable = true,
 }: WindowCardProps) {
@@ -199,6 +207,14 @@ export function WindowCard({
     (tab) => !tab.active && !isTabSuspended(tab),
   ).length;
   const suspendedTabCount = allWindowTabs.filter(isTabSuspended).length;
+  const sortActionDirection = sortMatchesCurrentOrder
+    ? sortDirection === 'asc'
+      ? 'desc'
+      : 'asc'
+    : sortDirection;
+  const sortActionDirectionLabel = sortActionDirection === 'asc' ? 'A to Z' : 'Z to A';
+  const currentSortDirectionLabel = sortDirection === 'asc' ? 'A to Z' : 'Z to A';
+  const sortStateDescriptionId = `window-${window.id}-sort-state-description`;
   const suspendButtonTitle =
     suspendableTabCount > 0
       ? 'Suspend loaded background tabs'
@@ -335,30 +351,39 @@ export function WindowCard({
                 onChange={onSortCriterionChange}
               />
               <button
-                className="icon-button"
+                className="toolbar-button sort-action-button"
                 type="button"
-                aria-label={`Sort ${window.label} direction ${
-                  sortDirection === 'asc' ? 'A to Z' : 'Z to A'
+                aria-label={`Sort ${window.label} by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${
+                  sortActionDirectionLabel
                 }`}
-                title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-                disabled={disabled}
-                onClick={() => onSortDirectionChange(sortDirection === 'asc' ? 'desc' : 'asc')}
-              >
-                {sortDirection === 'asc' ? (
-                  <ArrowDownAZ aria-hidden="true" size={17} />
-                ) : (
-                  <ArrowUpZA aria-hidden="true" size={17} />
-                )}
-              </button>
-              <button
-                className="toolbar-button"
-                type="button"
-                disabled={disabled}
-                onClick={() =>
-                  onSortWindow(window.id, { criterion: sortCriterion, direction: sortDirection })
+                aria-describedby={sortMatchesCurrentOrder ? sortStateDescriptionId : undefined}
+                title={
+                  sortMatchesCurrentOrder
+                    ? `Sorted ${currentSortDirectionLabel}. Click to sort ${sortActionDirectionLabel}.`
+                    : `Sort ${sortActionDirectionLabel}`
                 }
+                disabled={disabled}
+                onClick={() => {
+                  onSortWindow(window.id, {
+                    criterion: sortCriterion,
+                    direction: sortActionDirection,
+                  });
+                }}
               >
-                Sort
+                {!sortMatchesCurrentOrder ? (
+                  <ArrowUpDown aria-hidden="true" size={17} />
+                ) : sortDirection === 'asc' ? (
+                  <ArrowUp aria-hidden="true" size={17} />
+                ) : (
+                  <ArrowDown aria-hidden="true" size={17} />
+                )}
+                <span className="sort-action-label">Sort</span>
+                {sortMatchesCurrentOrder ? (
+                  <span id={sortStateDescriptionId} className="sr-only">
+                    Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
+                    {currentSortDirectionLabel}.
+                  </span>
+                ) : null}
               </button>
             </div>
             <button
@@ -460,9 +485,13 @@ export function WindowCard({
                   ? 'Keep'
                   : null;
             const duplicatePreviewDescriptionId = `tab-${tab.id}-duplicate-preview-description`;
+            const pinGroupDescriptionId = `tab-${tab.id}-pin-group-description`;
             const suspendedDescriptionId = `tab-${tab.id}-suspended-description`;
+            const suspendUnavailable = tab.active && !suspended;
+            const suspendUnavailableDescriptionId = `tab-${tab.id}-suspend-unavailable-description`;
             const tabDescriptionIds = [
               suspended ? suspendedDescriptionId : null,
+              suspendUnavailable ? suspendUnavailableDescriptionId : null,
               duplicatePreviewOutcome ? duplicatePreviewDescriptionId : null,
             ]
               .filter(Boolean)
@@ -497,7 +526,7 @@ export function WindowCard({
                   onDragStart={(event) => {
                     if (
                       (event.target as Element).closest(
-                        '.tab-close-button, .tab-suspended-button, .selection-checkbox',
+                        '.tab-close-button, .tab-pin-button, .tab-suspended-button, .selection-checkbox',
                       )
                     ) {
                       event.preventDefault();
@@ -622,6 +651,7 @@ export function WindowCard({
                     <button
                       className="tab-focus-button"
                       type="button"
+                      data-tab-focus-id={tab.id}
                       draggable={!disabled}
                       aria-label={`Focus ${tab.title}`}
                       aria-describedby={tabDescriptionIds || undefined}
@@ -649,30 +679,36 @@ export function WindowCard({
                           </span>
                         ) : null}
                       </span>
-                      {tab.pinned || duplicatePreviewOutcome ? (
+                      {duplicatePreviewOutcome ? (
                         <span className="tab-state-icons">
-                          {tab.pinned ? (
-                            <Pin className="tab-pin" aria-label="Pinned" size={13} />
-                          ) : null}
-                          {duplicatePreviewOutcome ? (
-                            <span
-                              id={duplicatePreviewDescriptionId}
-                              className={`duplicate-preview-outcome is-${duplicatePreviewState}`}
-                            >
-                              {duplicatePreviewOutcome}
-                            </span>
-                          ) : null}
+                          <span
+                            id={duplicatePreviewDescriptionId}
+                            className={`duplicate-preview-outcome is-${duplicatePreviewState}`}
+                          >
+                            {duplicatePreviewOutcome}
+                          </span>
                         </span>
                       ) : null}
                       {tab.active ? <span className="sr-only">Active tab</span> : null}
                     </button>
-                    {suspended ? (
+                    <div className="tab-inline-actions">
                       <button
-                        className="tab-suspended-button"
+                        className={`tab-pin-button ${tab.pinned ? 'is-state-action' : 'is-reveal-action'}`}
                         type="button"
+                        data-tab-action-id={tab.id}
                         draggable={false}
-                        aria-label={`Unsuspend ${tab.title} without opening it`}
-                        title="Unsuspend"
+                        aria-describedby={
+                          !tab.pinned && tab.groupId !== null ? pinGroupDescriptionId : undefined
+                        }
+                        aria-label={`Pin ${tab.title}`}
+                        aria-pressed={tab.pinned}
+                        title={
+                          tab.pinned
+                            ? 'Unpin tab'
+                            : tab.groupId !== null
+                              ? 'Pin tab (removes it from its group)'
+                              : 'Pin tab'
+                        }
                         disabled={disabled}
                         onDragStart={(event) => {
                           event.preventDefault();
@@ -680,24 +716,95 @@ export function WindowCard({
                         }}
                         onClick={(event) => {
                           event.stopPropagation();
-                          onUnsuspendTab(tab.id);
+                          if (tab.pinned) {
+                            onUnpinTab(tab.id);
+                          } else {
+                            onPinTab(tab.id);
+                          }
                         }}
                       >
-                        <Pause
-                          className="tab-suspended-icon tab-suspended-icon-pause"
+                        <Pin
+                          className="tab-pin-icon tab-pin-icon-pinned"
                           aria-hidden="true"
                           size={13}
                         />
-                        <Play
-                          className="tab-suspended-icon tab-suspended-icon-play"
-                          aria-hidden="true"
-                          size={13}
-                        />
-                        <span id={suspendedDescriptionId} className="sr-only">
-                          Suspended. {suspendedBehavior}
-                        </span>
+                        {tab.pinned ? (
+                          <PinOff
+                            className="tab-pin-icon tab-pin-icon-unpin"
+                            aria-hidden="true"
+                            size={13}
+                          />
+                        ) : null}
+                        {!tab.pinned && tab.groupId !== null ? (
+                          <span id={pinGroupDescriptionId} className="sr-only">
+                            Pinning removes this tab from its group.
+                          </span>
+                        ) : null}
                       </button>
-                    ) : null}
+                      {!suspendUnavailable ? (
+                        <button
+                          className={`tab-suspended-button ${suspended ? 'is-state-action' : 'is-reveal-action'}`}
+                          type="button"
+                          data-tab-action-id={tab.id}
+                          draggable={false}
+                          aria-describedby={suspended ? suspendedDescriptionId : undefined}
+                          aria-label={`Suspend ${tab.title}`}
+                          aria-pressed={suspended}
+                          title={suspended ? 'Unsuspend tab' : 'Suspend tab'}
+                          disabled={disabled}
+                          onDragStart={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (suspended) {
+                              onUnsuspendTab(tab.id);
+                            } else {
+                              onSuspendTab(tab.id);
+                            }
+                          }}
+                        >
+                          <Pause
+                            className="tab-suspended-icon tab-suspended-icon-pause"
+                            aria-hidden="true"
+                            size={13}
+                          />
+                          {suspended ? (
+                            <Play
+                              className="tab-suspended-icon tab-suspended-icon-play"
+                              aria-hidden="true"
+                              size={13}
+                            />
+                          ) : null}
+                          {suspended ? (
+                            <span id={suspendedDescriptionId} className="sr-only">
+                              Suspended. {suspendedBehavior}
+                            </span>
+                          ) : null}
+                        </button>
+                      ) : (
+                        <>
+                          <span
+                            className="tab-suspended-button is-reveal-action is-unavailable-action"
+                            draggable={false}
+                            aria-hidden="true"
+                            title="Active tabs can't be suspended. Select another tab in this window first."
+                          >
+                            <Pause
+                              className="tab-suspended-icon tab-suspended-icon-pause"
+                              aria-hidden="true"
+                              size={13}
+                            />
+                            <span className="tab-suspended-unavailable-slash" aria-hidden="true" />
+                          </span>
+                          <span id={suspendUnavailableDescriptionId} className="sr-only">
+                            Active tabs cannot be suspended. Select another tab in this window
+                            first.
+                          </span>
+                        </>
+                      )}
+                    </div>
                     <button
                       className="tab-close-button"
                       type="button"

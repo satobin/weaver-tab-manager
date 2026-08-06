@@ -101,11 +101,13 @@ export interface ActiveWindowsService {
     preserveGroupIds?: readonly number[],
   ) => Promise<MoveTabsResult>;
   mergeWindows: (windowIds: readonly number[]) => Promise<MergeWindowsResult>;
+  pinTab: (tabId: number) => Promise<void>;
   restoreTabs: (tabs: readonly RestorableTab[]) => Promise<RestoreTabsResult>;
   sortAllWindows: (options: TabSortOptions) => Promise<SortWindowsResult>;
   sortWindow: (windowId: number, options: TabSortOptions) => Promise<SortWindowsResult>;
   subscribe: (listener: () => void) => () => void;
   suspendTabs: (tabIds: readonly number[]) => Promise<TabSuspensionResult>;
+  unpinTab: (tabId: number) => Promise<void>;
   unsuspendTabs: (tabIds: readonly number[]) => Promise<TabSuspensionResult>;
 }
 
@@ -192,7 +194,7 @@ interface MergeWindowsResult {
 }
 
 export const PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE =
-  'Pinned tabs cannot be added to tab groups. Unpin the tab in your browser first.';
+  'Pinned tabs cannot be added to tab groups. Unpin the tab first.';
 
 function describeChromeError(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -456,6 +458,10 @@ function resolveTabIconUrl(
   return url.startsWith(extensionRootUrl) ? extensionIconUrl : null;
 }
 
+function resolveTabTitle(tab: chrome.tabs.Tab, url: string): string {
+  return tab.title?.trim() || url || 'Untitled tab';
+}
+
 function toManagedTab(
   tab: chrome.tabs.Tab,
   extensionRootUrl: string,
@@ -475,7 +481,7 @@ function toManagedTab(
     id: tab.id,
     index: tab.index,
     pinned: tab.pinned,
-    title: tab.title?.trim() || url || 'Untitled tab',
+    title: resolveTabTitle(tab, url),
     unloaded: tab.status === 'unloaded',
     url,
     windowId: tab.windowId,
@@ -588,14 +594,17 @@ export function createChromeActiveWindowsService(
         (tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined,
       );
       const desiredTabs = planTabSort(
-        originalTabs.map((tab) => ({
-          groupId: tab.groupId >= 0 ? tab.groupId : null,
-          id: tab.id,
-          index: tab.index,
-          pinned: tab.pinned,
-          title: tab.title ?? '',
-          url: tab.url ?? tab.pendingUrl ?? '',
-        })),
+        originalTabs.map((tab) => {
+          const url = tab.url ?? tab.pendingUrl ?? '';
+          return {
+            groupId: tab.groupId >= 0 ? tab.groupId : null,
+            id: tab.id,
+            index: tab.index,
+            pinned: tab.pinned,
+            title: resolveTabTitle(tab, url),
+            url,
+          };
+        }),
         options,
       );
       const currentOrder = originalTabs.map((tab) => tab.id);
@@ -1481,6 +1490,14 @@ export function createChromeActiveWindowsService(
       // Focusing another window dismisses a toolbar popup and can terminate its caller.
       await api.tabs.update(tabId, { active: true });
       await api.windows.update(windowId, { focused: true });
+    },
+
+    async pinTab(tabId) {
+      await api.tabs.update(tabId, { pinned: true });
+    },
+
+    async unpinTab(tabId) {
+      await api.tabs.update(tabId, { pinned: false });
     },
   };
 }

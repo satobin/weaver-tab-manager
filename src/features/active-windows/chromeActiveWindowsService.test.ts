@@ -388,6 +388,48 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.windows.update).not.toHaveBeenCalled();
   });
 
+  it('pins a tab through the browser API', async () => {
+    const { api } = createApi();
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.pinTab(21)).resolves.toBeUndefined();
+
+    expect(api.tabs.update).toHaveBeenCalledOnce();
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: true });
+  });
+
+  it('propagates a browser failure when pinning a tab', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.update).mockRejectedValue(new Error('Tab no longer exists'));
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.pinTab(21)).rejects.toThrow('Tab no longer exists');
+
+    expect(api.tabs.update).toHaveBeenCalledOnce();
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: true });
+  });
+
+  it('unpins a tab through the browser API', async () => {
+    const { api } = createApi();
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.unpinTab(21)).resolves.toBeUndefined();
+
+    expect(api.tabs.update).toHaveBeenCalledOnce();
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: false });
+  });
+
+  it('propagates a browser failure when unpinning a tab', async () => {
+    const { api } = createApi();
+    vi.mocked(api.tabs.update).mockRejectedValue(new Error('Tab no longer exists'));
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(service.unpinTab(21)).rejects.toThrow('Tab no longer exists');
+
+    expect(api.tabs.update).toHaveBeenCalledOnce();
+    expect(api.tabs.update).toHaveBeenCalledWith(21, { pinned: false });
+  });
+
   it('attempts each unique tab close and reports partial failures in request order', async () => {
     const { api } = createApi();
     vi.mocked(api.tabs.remove).mockImplementation((tabId) =>
@@ -955,6 +997,43 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.move).toHaveBeenCalledWith(54, { index: 2, windowId: 5 });
     expect(api.tabs.move).not.toHaveBeenCalledWith(51, expect.anything());
     expect(api.tabs.move).not.toHaveBeenCalledWith(52, expect.anything());
+  });
+
+  it('uses the displayed fallback title when Chrome reports a blank title', async () => {
+    const { api } = createApi();
+    vi.mocked(api.windows.getAll).mockResolvedValue([
+      createChromeWindow({
+        id: 5,
+        tabs: [
+          createChromeTab({
+            id: 51,
+            index: 0,
+            title: '   ',
+            url: 'https://zulu.example/',
+            windowId: 5,
+          }),
+          createChromeTab({
+            id: 52,
+            index: 1,
+            title: 'Alpha',
+            url: 'https://alpha.example/',
+            windowId: 5,
+          }),
+        ],
+      }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
+
+    const snapshot = await service.loadSnapshot();
+    expect(snapshot.windows[0]?.tabs[0]?.title).toBe('https://zulu.example/');
+
+    await service.sortWindow(5, {
+      criterion: 'title',
+      direction: 'asc',
+      preserveGroups: false,
+    });
+
+    expect(api.tabs.move).toHaveBeenCalledWith(52, { index: 0, windowId: 5 });
   });
 
   it('ungroups tabs before a global sort when preservation is disabled', async () => {

@@ -1,6 +1,7 @@
 import {
-  ArrowDownAZ,
-  ArrowUpZA,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CirclePause,
   CopyX,
   Eye,
@@ -20,7 +21,11 @@ import {
 import { formatTabLocation, isNewTabUrl, isTabSuspended } from '../features/active-windows/model';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
 import { TabIcon } from '../features/active-windows/TabIcon';
-import { type SortCriterion, type SortDirection } from '../features/active-windows/tabSort';
+import {
+  isTabOrderSorted,
+  type SortCriterion,
+  type SortDirection,
+} from '../features/active-windows/tabSort';
 import { useActiveWindows } from '../features/active-windows/useActiveWindows';
 import { planDuplicateTabs } from '../features/deduplication/deduplication';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
@@ -37,6 +42,13 @@ import { OPEN_APP_MESSAGE, isOpenAppResponse, type OpenAppMessage } from '../sha
 interface PopupProps {
   service?: ActiveWindowsService | undefined;
   settingsService?: SettingsService | undefined;
+}
+
+interface AppliedSortSelection {
+  criterion: SortCriterion;
+  direction: SortDirection;
+  preserveGroups: boolean;
+  windowId: number;
 }
 
 function defaultManagerShortcut(): string {
@@ -62,6 +74,9 @@ export function Popup({
   const [query, setQuery] = useState('');
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [appliedSortSelection, setAppliedSortSelection] = useState<AppliedSortSelection | null>(
+    null,
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [duplicateUndoTabs, setDuplicateUndoTabs] = useState<readonly RestorableTab[] | null>(null);
@@ -99,6 +114,24 @@ export function Popup({
     [currentWindow, settings.advancedDuplicateMatchingEnabled, settings.deduplicationRules],
   );
   const sortUnavailable = !currentWindow || settingsLoading;
+  const sortMatchesCurrentOrder = currentWindow
+    ? appliedSortSelection?.windowId === currentWindow.id &&
+      appliedSortSelection.criterion === sortCriterion &&
+      appliedSortSelection.direction === sortDirection &&
+      appliedSortSelection.preserveGroups === settings.preserveGroupsDuringSort &&
+      isTabOrderSorted(currentWindow.tabs, {
+        criterion: sortCriterion,
+        direction: sortDirection,
+        preserveGroups: settings.preserveGroupsDuringSort,
+      })
+    : false;
+  const nextSortDirection: SortDirection = sortMatchesCurrentOrder
+    ? sortDirection === 'asc'
+      ? 'desc'
+      : 'asc'
+    : sortDirection;
+  const nextSortDirectionLabel = nextSortDirection === 'asc' ? 'A to Z' : 'Z to A';
+  const sortCriterionLabel = sortCriterion === 'title' ? 'Title' : 'URL';
   const dedupeUnavailable = sortUnavailable || duplicatePlan.duplicateTabIds.length === 0;
   const suspendableTabIds =
     currentWindow?.tabs.filter((tab) => !tab.active && !isTabSuspended(tab)).map((tab) => tab.id) ??
@@ -185,7 +218,7 @@ export function Popup({
     }
   };
 
-  const sortCurrentWindow = async () => {
+  const sortCurrentWindow = async (direction: SortDirection) => {
     if (!currentWindow || actionInFlight.current || settingsLoading) {
       return;
     }
@@ -195,12 +228,21 @@ export function Popup({
     setActionNotice(null);
     setDuplicateUndoTabs(null);
     setPendingAction('sort');
+    const preserveGroups = settings.preserveGroupsDuringSort;
     try {
       const result = await service.sortWindow(currentWindow.id, {
         criterion: sortCriterion,
-        direction: sortDirection,
-        preserveGroups: settings.preserveGroupsDuringSort,
+        direction,
+        preserveGroups,
       });
+      if (result.sortedWindowIds.includes(currentWindow.id)) {
+        setAppliedSortSelection({
+          criterion: sortCriterion,
+          direction,
+          preserveGroups,
+          windowId: currentWindow.id,
+        });
+      }
       const issue = result.failures[0]?.message ?? result.warnings[0];
       if (issue) {
         setActionError(issue);
@@ -367,28 +409,38 @@ export function Popup({
               value={sortCriterion}
             />
             <button
-              className="popup-sort-direction"
-              type="button"
-              aria-label={`Sort current window direction ${sortDirection === 'asc' ? 'A to Z' : 'Z to A'}`}
-              title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
-              disabled={sortUnavailable || pendingAction !== null}
-              onClick={() => setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))}
-            >
-              {sortDirection === 'asc' ? (
-                <ArrowDownAZ aria-hidden="true" size={16} />
-              ) : (
-                <ArrowUpZA aria-hidden="true" size={16} />
-              )}
-            </button>
-            <button
               className="popup-sort-apply"
               type="button"
-              aria-label="Sort current window"
+              aria-label={`Sort current window by ${sortCriterionLabel}, ${nextSortDirectionLabel}`}
+              aria-describedby={
+                sortMatchesCurrentOrder ? 'popup-sort-state-description' : undefined
+              }
+              title={
+                sortMatchesCurrentOrder
+                  ? `Sorted ${sortDirection === 'asc' ? 'A to Z' : 'Z to A'}. Click to sort ${nextSortDirectionLabel}.`
+                  : `Sort ${nextSortDirectionLabel}`
+              }
               aria-busy={pendingAction === 'sort'}
               disabled={sortUnavailable || pendingAction !== null}
-              onClick={() => void sortCurrentWindow()}
+              onClick={() => {
+                setSortDirection(nextSortDirection);
+                void sortCurrentWindow(nextSortDirection);
+              }}
             >
+              {!sortMatchesCurrentOrder ? (
+                <ArrowUpDown aria-hidden="true" size={16} />
+              ) : sortDirection === 'asc' ? (
+                <ArrowUp aria-hidden="true" size={16} />
+              ) : (
+                <ArrowDown aria-hidden="true" size={16} />
+              )}
               Sort
+              {sortMatchesCurrentOrder ? (
+                <span id="popup-sort-state-description" className="popup-sr-only">
+                  Currently sorted by {sortCriterionLabel},{' '}
+                  {sortDirection === 'asc' ? 'A to Z' : 'Z to A'}.
+                </span>
+              ) : null}
             </button>
           </div>
           <div className="popup-duplicate-control" role="group" aria-label="Duplicate tab actions">
