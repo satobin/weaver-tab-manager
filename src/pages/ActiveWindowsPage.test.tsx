@@ -276,6 +276,11 @@ describe('ActiveWindowsPage', () => {
             tabs: [
               createManagedTab({
                 agentAssociated: true,
+                agentDetection: {
+                  activity: 'working',
+                  evidence: 'claude-status-group',
+                  providerHint: 'claude',
+                },
                 title: 'Agent task',
                 url: 'https://example.test/agent-task',
               }),
@@ -287,8 +292,13 @@ describe('ActiveWindowsPage', () => {
 
     render(<ActiveWindowsPage service={service} />);
 
-    const marker = await screen.findByRole('img', { name: 'Agent-managed tab' });
-    expect(marker).toHaveAttribute('title', 'Agent-managed tab detected locally');
+    const marker = await screen.findByRole('img', {
+      name: 'Agent-associated tab detected locally · likely Claude · working',
+    });
+    expect(marker).toHaveAttribute(
+      'data-tooltip',
+      'Agent-associated tab detected locally · likely Claude · working',
+    );
     expect(screen.getByRole('button', { name: 'Focus Agent task' })).toHaveAttribute(
       'aria-describedby',
       expect.stringContaining('agent-managed-description'),
@@ -340,7 +350,7 @@ describe('ActiveWindowsPage', () => {
 
     const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
     expect(duplicateBanner).toHaveTextContent(
-      'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.',
+      'Tabs labeled Keep stay open, including every pinned or agent-associated match. Tabs labeled Will close are removed.',
     );
     const bannerButtons = within(duplicateBanner).getAllByRole('button');
     expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
@@ -503,7 +513,7 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByText('Pinned second copy')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-managed tabs are never closed automatically.',
+      'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs are never closed automatically.',
     );
     expect(screen.getByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
 
@@ -2236,7 +2246,7 @@ describe('ActiveWindowsPage', () => {
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
     expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.',
+      'Tabs labeled Keep stay open, including every pinned or agent-associated match. Tabs labeled Will close are removed.',
     );
     expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
     expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(

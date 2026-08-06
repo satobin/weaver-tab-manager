@@ -11,7 +11,7 @@ import {
   type ManagedTabGroup,
   type ManagedWindow,
 } from './model';
-import { isAgentAssociatedTab } from './agentManagedTabs';
+import { detectAgentAssociatedTab, isAgentAssociatedTab } from './agentManagedTabs';
 import { planTabSort, type TabSortOptions } from './tabSort';
 import { formatWindowLabel } from './windowLabel';
 
@@ -476,9 +476,11 @@ function toManagedTab(
   }
 
   const url = tab.url ?? tab.pendingUrl ?? '';
+  const agentDetection = detectAgentAssociatedTab(tab, group);
   return {
     active: tab.active,
-    agentAssociated: isAgentAssociatedTab(tab, group),
+    agentAssociated: agentDetection !== null,
+    agentDetection,
     discarded: tab.discarded,
     frozen: tab.frozen ?? false,
     groupId: tab.groupId >= 0 ? tab.groupId : null,

@@ -290,7 +290,7 @@ export function Popup({
       }
       if (result.skippedAgentManagedTabIds.length > 0) {
         issues.push(
-          `${result.skippedAgentManagedTabIds.length} duplicate ${result.skippedAgentManagedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-managed.`,
+          `${result.skippedAgentManagedTabIds.length} duplicate ${result.skippedAgentManagedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
         );
       }
       setActionError(issues.length > 0 ? issues.join(' ') : null);
@@ -589,7 +589,9 @@ export function Popup({
                         {windowLabel} · {formatTabLocation(tab.url, snapshot.extensionOrigin)}
                       </small>
                     </span>
-                    {tab.agentAssociated ? <AgentManagedTabIndicator /> : null}
+                    {tab.agentAssociated ? (
+                      <AgentManagedTabIndicator detection={tab.agentDetection} />
+                    ) : null}
                   </button>
                   <button
                     className="popup-close-tab"

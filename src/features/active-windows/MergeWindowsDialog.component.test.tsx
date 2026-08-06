@@ -17,6 +17,7 @@ function makeWindow(id: number): ManagedWindow {
       {
         active: true,
         agentAssociated: false,
+        agentDetection: null,
         discarded: false,
         frozen: false,
         groupId: null,

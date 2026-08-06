@@ -9,6 +9,7 @@ export function createManagedTab(overrides: Partial<ManagedTab> = {}): ManagedTa
   return {
     active: false,
     agentAssociated: false,
+    agentDetection: null,
     discarded: false,
     frozen: false,
     groupId: null,

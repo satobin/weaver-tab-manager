@@ -1,3 +1,5 @@
+import type { AgentTabDetection } from './agentManagedTabs';
+
 export type TabGroupColor =
   | 'blue'
   | 'cyan'
@@ -20,6 +22,7 @@ export interface ManagedTabGroup {
 export interface ManagedTab {
   active: boolean;
   agentAssociated: boolean;
+  agentDetection: AgentTabDetection | null;
   discarded: boolean;
   frozen: boolean;
   groupId: number | null;

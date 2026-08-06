@@ -70,8 +70,11 @@ function createChromeGroup(
   };
 }
 
-function createOpenAiMarkerUrl() {
-  const svg = '<svg data-codex-favicon-badge="codex-favicon-badge"></svg>';
+const OPENAI_DELIVERABLE_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#22c55e" />';
+const OPENAI_HANDOFF_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#facc15" />';
+
+function createOpenAiMarkerUrl(stateMarker = '') {
+  const svg = `<svg data-codex-favicon-badge="codex-favicon-badge">${stateMarker}</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
@@ -282,18 +285,35 @@ describe('createChromeActiveWindowsService', () => {
     if (!openAiTab || !claudeTab) {
       throw new Error('Missing agent-associated tab fixtures');
     }
-    openAiTab.favIconUrl = createOpenAiMarkerUrl();
+    openAiTab.favIconUrl = createOpenAiMarkerUrl(OPENAI_DELIVERABLE_BADGE_MARKER);
     claudeTab.groupId = 7;
     vi.mocked(api.tabGroups.query).mockResolvedValue([
-      createChromeGroup({ color: 'orange', title: 'Claude', windowId: 2 }),
+      createChromeGroup({ color: 'blue', title: '⌛Nintendo research', windowId: 2 }),
     ]);
     const service = createChromeActiveWindowsService(api);
 
     const snapshot = await service.loadSnapshot();
 
-    expect(snapshot.windows[0]?.tabs.find((tab) => tab.id === 21)?.agentAssociated).toBe(true);
-    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 12)?.agentAssociated).toBe(true);
-    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 11)?.agentAssociated).toBe(false);
+    expect(snapshot.windows[0]?.tabs.find((tab) => tab.id === 21)).toMatchObject({
+      agentAssociated: true,
+      agentDetection: {
+        activity: 'working',
+        evidence: 'claude-status-group',
+        providerHint: 'claude',
+      },
+    });
+    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
+      agentAssociated: true,
+      agentDetection: {
+        activity: 'output-ready',
+        evidence: 'codex-favicon',
+        providerHint: 'codex',
+      },
+    });
+    expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 11)).toMatchObject({
+      agentAssociated: false,
+      agentDetection: null,
+    });
   });
 
   it('uses restored metadata in snapshots and sort planning while Chrome metadata is missing', async () => {
@@ -363,7 +383,8 @@ describe('createChromeActiveWindowsService', () => {
     tabEvents.onUpdated.emit(21, { discarded: true }, tab);
     tabEvents.onUpdated.emit(21, { frozen: true }, tab);
     tabEvents.onUpdated.emit(21, { url: 'https://example.com/updated' }, tab);
-    expect(listener).toHaveBeenCalledTimes(4);
+    tabEvents.onUpdated.emit(21, { favIconUrl: createOpenAiMarkerUrl() }, tab);
+    expect(listener).toHaveBeenCalledTimes(5);
     unsubscribe();
   });
 
@@ -552,9 +573,13 @@ describe('createChromeActiveWindowsService', () => {
 
   it('rechecks agent signals immediately before automatic duplicate removal', async () => {
     const { api } = createApi();
-    const claudeGroup = createChromeGroup({ color: 'orange', title: 'Claude', windowId: 2 });
+    const claudeGroup = createChromeGroup({
+      color: 'purple',
+      title: '🔔Browser approval',
+      windowId: 2,
+    });
     const openAiTab = createChromeTab({
-      favIconUrl: createOpenAiMarkerUrl(),
+      favIconUrl: createOpenAiMarkerUrl(OPENAI_HANDOFF_BADGE_MARKER),
       id: 11,
       title: 'OpenAI controlled',
       url: 'https://example.com/same',

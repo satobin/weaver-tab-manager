@@ -336,6 +336,11 @@ describe('Popup', () => {
             tabs: [
               createManagedTab({
                 agentAssociated: true,
+                agentDetection: {
+                  activity: 'unknown',
+                  evidence: 'codex-favicon',
+                  providerHint: 'codex',
+                },
                 title: 'Agent task',
                 url: 'https://example.test/agent-task',
               }),
@@ -348,9 +353,13 @@ describe('Popup', () => {
 
     await user.type(await screen.findByRole('searchbox', { name: 'Search open tabs' }), 'Agent');
 
-    expect(await screen.findByRole('img', { name: 'Agent-managed tab' })).toHaveAttribute(
-      'title',
-      'Agent-managed tab detected locally',
+    expect(
+      await screen.findByRole('img', {
+        name: 'Agent-associated tab detected locally · likely Codex/ChatGPT',
+      }),
+    ).toHaveAttribute(
+      'data-tooltip',
+      'Agent-associated tab detected locally · likely Codex/ChatGPT',
     );
     const closeButton = screen.getByRole('button', { name: 'Close Agent task' });
     expect(closeButton).toBeEnabled();

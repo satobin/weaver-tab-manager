@@ -1023,7 +1023,7 @@ export function ActiveWindowsPage({
             : []),
           ...(result.skippedAgentManagedTabIds.length > 0
             ? [
-                `${pluralize(result.skippedAgentManagedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-managed.`,
+                `${pluralize(result.skippedAgentManagedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
               ]
             : []),
         ]),
@@ -1703,8 +1703,8 @@ export function ActiveWindowsPage({
             <span>
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
-                ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-managed tabs are never closed automatically.'
-                : 'Tabs labeled Keep stay open, including every pinned or agent-managed match. Tabs labeled Will close are removed.'}
+                ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs are never closed automatically.'
+                : 'Tabs labeled Keep stay open, including every pinned or agent-associated match. Tabs labeled Will close are removed.'}
             </span>
           </div>
           <div className="duplicate-preview-banner-actions">
