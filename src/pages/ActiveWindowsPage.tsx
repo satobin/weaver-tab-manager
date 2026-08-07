@@ -1025,9 +1025,9 @@ export function ActiveWindowsPage({
                 `${pluralize(result.skippedPinnedTabIds.length, 'duplicate tab')} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
               ]
             : []),
-          ...(result.skippedAgentManagedTabIds.length > 0
+          ...(result.skippedAgentAssociatedTabIds.length > 0
             ? [
-                `${pluralize(result.skippedAgentManagedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
+                `${pluralize(result.skippedAgentAssociatedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
               ]
             : []),
           ...(result.skippedChangedTabIds.length > 0

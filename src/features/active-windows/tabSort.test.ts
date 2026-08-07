@@ -59,7 +59,7 @@ describe('planTabSort', () => {
     ).toEqual([1, 2, 4, 3]);
   });
 
-  it('keeps agent-associated groups immutable while sorting ordinary tabs around them', () => {
+  it('keeps groups containing agent-associated tabs immutable while sorting around them', () => {
     const tabs = [
       createTab({ id: 1, index: 0, title: 'Zulu before' }),
       createTab({ id: 2, index: 1, title: 'Alpha before' }),
@@ -129,7 +129,7 @@ describe('isTabOrderSorted', () => {
     expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(false);
   });
 
-  it('treats an unchanged agent-associated group as sorted even when its members are not', () => {
+  it('treats an unchanged association-protected group as sorted even when its members are not', () => {
     const tabs = [
       createTab({ id: 1, index: 0, title: 'Alpha before' }),
       createTab({ agentAssociated: true, groupId: 7, id: 2, index: 1, title: 'Zulu agent' }),

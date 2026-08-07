@@ -81,7 +81,7 @@ function createService(): ActiveWindowsService {
         closedTabIds: [],
         closedTabs: [],
         failures: [],
-        skippedAgentManagedTabIds: [],
+        skippedAgentAssociatedTabIds: [],
         skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),
@@ -268,7 +268,7 @@ afterEach(() => {
 });
 
 describe('ActiveWindowsPage', () => {
-  it('labels locally detected agent-managed tabs with a robot marker', async () => {
+  it('labels locally detected agent-associated tabs with a robot marker', async () => {
     const service = createService();
     vi.mocked(service.loadSnapshot).mockResolvedValue(
       createActiveWindowsSnapshot({
@@ -280,7 +280,6 @@ describe('ActiveWindowsPage', () => {
                 agentDetection: {
                   activity: 'working',
                   evidence: 'claude-status-group',
-                  providerHint: 'claude',
                 },
                 title: 'Agent task',
                 url: 'https://example.test/agent-task',
@@ -294,17 +293,17 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const focusButton = await screen.findByRole('button', { name: 'Focus Agent task' });
-    const marker = focusButton.querySelector('.agent-managed-tab-indicator');
+    const marker = focusButton.querySelector('.agent-associated-tab-indicator');
     expect(marker).toHaveAttribute(
       'data-tooltip',
-      'Agent-associated tab · kept open during duplicate cleanup',
+      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
     );
     expect(focusButton).toHaveAttribute(
       'aria-describedby',
-      expect.stringContaining('agent-managed-description'),
+      expect.stringContaining('agent-associated-description'),
     );
     expect(focusButton).toHaveAccessibleDescription(
-      'Agent-associated tab · kept open during duplicate cleanup',
+      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
     );
   });
 
@@ -430,7 +429,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [202],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -658,7 +657,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [201, 202],
     });
@@ -843,7 +842,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -2124,7 +2123,7 @@ describe('ActiveWindowsPage', () => {
         },
       ],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -2363,7 +2362,7 @@ describe('ActiveWindowsPage', () => {
         },
       ],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -2580,7 +2579,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -2664,7 +2663,7 @@ describe('ActiveWindowsPage', () => {
       closedTabIds: [201, 202],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });

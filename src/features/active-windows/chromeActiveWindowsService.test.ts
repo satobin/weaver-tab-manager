@@ -76,10 +76,10 @@ function createChromeGroup(
   };
 }
 
-const OPENAI_DELIVERABLE_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#22c55e" />';
-const OPENAI_HANDOFF_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#facc15" />';
+const CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#22c55e" />';
+const CODEX_EXTENSION_HANDOFF_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#facc15" />';
 
-function createOpenAiMarkerUrl(stateMarker = '') {
+function createCodexExtensionMarkerUrl(stateMarker = '') {
   const svg = `<svg data-codex-favicon-badge="codex-favicon-badge">${stateMarker}</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
@@ -337,14 +337,16 @@ describe('createChromeActiveWindowsService', () => {
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.unloaded)).toEqual([true, false]);
   });
 
-  it('marks tabs associated with local OpenAI and Claude browser-control signals', async () => {
+  it('marks tabs associated with Codex extension badge and Claude group signals', async () => {
     const { api, windows } = createApi();
-    const openAiTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
+    const codexExtensionTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
     const claudeTab = windows[1]?.tabs?.find((tab) => tab.id === 21);
-    if (!openAiTab || !claudeTab) {
+    if (!codexExtensionTab || !claudeTab) {
       throw new Error('Missing agent-associated tab fixtures');
     }
-    openAiTab.favIconUrl = createOpenAiMarkerUrl(OPENAI_DELIVERABLE_BADGE_MARKER);
+    codexExtensionTab.favIconUrl = createCodexExtensionMarkerUrl(
+      CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER,
+    );
     claudeTab.groupId = 7;
     vi.mocked(api.tabGroups.query).mockResolvedValue([
       createChromeGroup({ color: 'blue', title: '⌛Nintendo research', windowId: 2 }),
@@ -358,15 +360,13 @@ describe('createChromeActiveWindowsService', () => {
       agentDetection: {
         activity: 'working',
         evidence: 'claude-status-group',
-        providerHint: 'claude',
       },
     });
     expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
       agentDetection: {
         activity: 'output-ready',
-        evidence: 'codex-favicon',
-        providerHint: 'codex',
+        evidence: 'codex-extension-badge',
       },
     });
     expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 11)).toMatchObject({
@@ -375,14 +375,16 @@ describe('createChromeActiveWindowsService', () => {
     });
   });
 
-  it('retains Codex association while a loading tab temporarily loses its favicon', async () => {
+  it('retains an extension-badge association while a loading tab loses its favicon', async () => {
     const { api, windows } = createApi();
-    const openAiTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
-    if (!openAiTab) {
-      throw new Error('Missing Codex-associated tab fixture');
+    const codexExtensionTab = windows[0]?.tabs?.find((tab) => tab.id === 12);
+    if (!codexExtensionTab) {
+      throw new Error('Missing extension-badge-associated tab fixture');
     }
-    openAiTab.favIconUrl = createOpenAiMarkerUrl(OPENAI_DELIVERABLE_BADGE_MARKER);
-    openAiTab.status = 'complete';
+    codexExtensionTab.favIconUrl = createCodexExtensionMarkerUrl(
+      CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER,
+    );
+    codexExtensionTab.status = 'complete';
     const service = createChromeActiveWindowsService(api);
 
     const detectedSnapshot = await service.loadSnapshot();
@@ -390,36 +392,33 @@ describe('createChromeActiveWindowsService', () => {
       agentAssociated: true,
       agentDetection: {
         activity: 'output-ready',
-        evidence: 'codex-favicon',
-        providerHint: 'codex',
+        evidence: 'codex-extension-badge',
       },
     });
 
-    delete openAiTab.favIconUrl;
-    openAiTab.status = 'loading';
+    delete codexExtensionTab.favIconUrl;
+    codexExtensionTab.status = 'loading';
     const loadingSnapshot = await service.loadSnapshot();
     expect(loadingSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
       agentDetection: {
         activity: 'output-ready',
-        evidence: 'codex-favicon',
-        providerHint: 'codex',
+        evidence: 'codex-extension-badge',
       },
     });
 
-    delete openAiTab.status;
+    delete codexExtensionTab.status;
     const statusOmittedSnapshot = await service.loadSnapshot();
     expect(statusOmittedSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
       agentDetection: {
         activity: 'output-ready',
-        evidence: 'codex-favicon',
-        providerHint: 'codex',
+        evidence: 'codex-extension-badge',
       },
     });
 
-    openAiTab.favIconUrl = 'https://example.com/replaced-favicon.ico';
-    openAiTab.status = 'complete';
+    codexExtensionTab.favIconUrl = 'https://example.com/replaced-favicon.ico';
+    codexExtensionTab.status = 'complete';
     const stableSnapshot = await service.loadSnapshot();
     expect(stableSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: false,
@@ -494,7 +493,7 @@ describe('createChromeActiveWindowsService', () => {
     tabEvents.onUpdated.emit(21, { discarded: true }, tab);
     tabEvents.onUpdated.emit(21, { frozen: true }, tab);
     tabEvents.onUpdated.emit(21, { url: 'https://example.com/updated' }, tab);
-    tabEvents.onUpdated.emit(21, { favIconUrl: createOpenAiMarkerUrl() }, tab);
+    tabEvents.onUpdated.emit(21, { favIconUrl: createCodexExtensionMarkerUrl() }, tab);
     expect(listener).toHaveBeenCalledTimes(5);
     unsubscribe();
   });
@@ -697,7 +696,7 @@ describe('createChromeActiveWindowsService', () => {
         },
       ],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [11],
     });
@@ -717,10 +716,10 @@ describe('createChromeActiveWindowsService', () => {
       title: '🔔Browser approval',
       windowId: 2,
     });
-    const openAiTab = createChromeTab({
-      favIconUrl: createOpenAiMarkerUrl(OPENAI_HANDOFF_BADGE_MARKER),
+    const codexExtensionTab = createChromeTab({
+      favIconUrl: createCodexExtensionMarkerUrl(CODEX_EXTENSION_HANDOFF_BADGE_MARKER),
       id: 11,
-      title: 'OpenAI controlled',
+      title: 'Extension badge-associated',
       url: 'https://example.com/same',
       windowId: 1,
     });
@@ -728,7 +727,7 @@ describe('createChromeActiveWindowsService', () => {
       groupId: 7,
       id: 21,
       index: 1,
-      title: 'Claude controlled',
+      title: 'Claude group-associated',
       url: 'https://example.com/same',
       windowId: 2,
     });
@@ -745,9 +744,9 @@ describe('createChromeActiveWindowsService', () => {
       url: 'https://example.com/same',
       windowId: 1,
     });
-    vi.mocked(api.tabs.query).mockResolvedValue([openAiTab, claudeTab, ordinaryTab]);
+    vi.mocked(api.tabs.query).mockResolvedValue([codexExtensionTab, claudeTab, ordinaryTab]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
-      const tab = [openAiTab, claudeTab, ordinaryTab, keeperTab].find(
+      const tab = [codexExtensionTab, claudeTab, ordinaryTab, keeperTab].find(
         (candidate) => candidate.id === tabId,
       );
       return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
@@ -764,7 +763,7 @@ describe('createChromeActiveWindowsService', () => {
     );
 
     expect(result.closedTabIds).toEqual([12]);
-    expect(result.skippedAgentManagedTabIds).toEqual([11, 21]);
+    expect(result.skippedAgentAssociatedTabIds).toEqual([11, 21]);
     expect(result.skippedChangedTabIds).toEqual([]);
     expect(result.skippedPinnedTabIds).toEqual([]);
     expect(result.failures).toEqual([]);
@@ -773,15 +772,15 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.remove).toHaveBeenCalledWith(12);
   });
 
-  it('keeps a recently Codex-associated duplicate open when favicon and status are transiently absent', async () => {
+  it('keeps a recently extension-badge-associated duplicate open through transient gaps', async () => {
     const { api, windows } = createApi();
     const candidate = windows[0]?.tabs?.find((tab) => tab.id === 12);
     if (!candidate || candidate.id === undefined) {
-      throw new Error('Missing Codex-associated duplicate fixture');
+      throw new Error('Missing extension-badge-associated duplicate fixture');
     }
     const candidateId = candidate.id;
     const duplicateUrl = candidate.url as string;
-    candidate.favIconUrl = createOpenAiMarkerUrl();
+    candidate.favIconUrl = createCodexExtensionMarkerUrl();
     candidate.status = 'complete';
     const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
     const service = createChromeActiveWindowsService(api);
@@ -805,7 +804,7 @@ describe('createChromeActiveWindowsService', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [candidateId],
+      skippedAgentAssociatedTabIds: [candidateId],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -892,7 +891,7 @@ describe('createChromeActiveWindowsService', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [11, 12, 13, 14, 15, 16, 17],
       skippedPinnedTabIds: [],
     });
@@ -943,7 +942,7 @@ describe('createChromeActiveWindowsService', () => {
         },
       ],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -1053,7 +1052,7 @@ describe('createChromeActiveWindowsService', () => {
         },
       ],
       failures: [{ message: 'Tab is locked', tabId: 13 }],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [12],
       skippedPinnedTabIds: [],
     });
@@ -1180,7 +1179,7 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.ungroup).not.toHaveBeenCalled();
   });
 
-  it('moves a complete Claude-associated group natively into a blank new window', async () => {
+  it('moves a complete group containing a Claude-associated tab into a blank new window', async () => {
     const { api } = createApi();
     vi.mocked(api.tabs.query)
       .mockResolvedValueOnce([
@@ -1218,7 +1217,7 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabGroups.update).not.toHaveBeenCalled();
   });
 
-  it('fails a native agent-group move when a member does not reach the new window', async () => {
+  it('fails a native association-protected group move when a member is missing', async () => {
     const { api } = createApi();
     vi.mocked(api.tabs.query)
       .mockResolvedValueOnce([
@@ -1240,8 +1239,8 @@ describe('createChromeActiveWindowsService', () => {
     await expect(service.moveTabsToNewWindow([21, 22])).resolves.toEqual({
       destinationWindowId: 9,
       failures: [
-        { message: 'Tab 22 did not move with agent-associated group 7.', tabId: 21 },
-        { message: 'Tab 22 did not move with agent-associated group 7.', tabId: 22 },
+        { message: 'Tab 22 did not move with the rest of tab group 7.', tabId: 21 },
+        { message: 'Tab 22 did not move with the rest of tab group 7.', tabId: 22 },
       ],
       movedTabIds: [],
       warnings: [],
@@ -1251,7 +1250,7 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.group).not.toHaveBeenCalled();
   });
 
-  it('rejects moving only part of a Claude-associated group to a new window', async () => {
+  it('rejects moving only part of a group containing a Claude-associated tab', async () => {
     const { api } = createApi();
     vi.mocked(api.tabs.query).mockResolvedValue([
       createChromeTab({ groupId: 7, id: 21, index: 0, windowId: 2 }),
@@ -1266,7 +1265,7 @@ describe('createChromeActiveWindowsService', () => {
       destinationWindowId: null,
       failures: [
         {
-          message: 'Agent-associated tab groups must be moved as a whole.',
+          message: 'Groups containing agent-associated tabs must be moved as a whole.',
           tabId: 21,
         },
       ],
@@ -1646,7 +1645,7 @@ describe('createChromeActiveWindowsService', () => {
   });
 
   it.each([false, true])(
-    'keeps a Claude-associated group intact while sorting ordinary tabs (preserveGroups: %s)',
+    'keeps a group containing a Claude-associated tab intact while sorting ordinary tabs (preserveGroups: %s)',
     async (preserveGroups) => {
       const { api } = createApi();
       vi.mocked(api.windows.getAll).mockResolvedValue([
@@ -1699,7 +1698,7 @@ describe('createChromeActiveWindowsService', () => {
     },
   );
 
-  it('rechecks each window for newly agent-associated groups during a global sort', async () => {
+  it('rechecks each window for newly association-protected groups during a global sort', async () => {
     const { api } = createApi();
     vi.mocked(api.windows.getAll).mockResolvedValue([
       createChromeWindow({
@@ -1833,7 +1832,7 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.windows.update).toHaveBeenCalledWith(1, { focused: true });
   });
 
-  it('moves a Claude-associated group natively while merging windows', async () => {
+  it('moves a group containing a Claude-associated tab natively while merging windows', async () => {
     const { api } = createApi();
     const destinationWindow = createChromeWindow({
       id: 1,

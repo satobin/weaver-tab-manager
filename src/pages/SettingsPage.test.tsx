@@ -179,7 +179,7 @@ describe('SettingsPage', () => {
     ).toBeVisible();
     expect(
       within(preserveGroupsGroup as HTMLElement).getByText(
-        'Keep each browser tab group together. Turning this off removes ordinary group membership during a sort; agent-associated groups stay together.',
+        'Keep each browser tab group together. Turning this off removes ordinary group membership during a sort; groups containing agent-associated tabs stay together.',
       ),
     ).toBeVisible();
     expect(appearanceCard?.nextElementSibling).toBe(behaviorCard);

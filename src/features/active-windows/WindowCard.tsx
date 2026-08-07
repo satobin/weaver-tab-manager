@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Fragment, useEffect, useRef } from 'react';
 
-import { AgentManagedTabIndicator } from './AgentManagedTabIndicator';
+import { AgentAssociatedTabIndicator } from './AgentAssociatedTabIndicator';
 import {
   formatTabLocation,
   isNewTabUrl,
@@ -486,7 +486,7 @@ export function WindowCard({
                   ? 'Keep'
                   : null;
             const duplicatePreviewDescriptionId = `tab-${tab.id}-duplicate-preview-description`;
-            const agentManagedDescriptionId = `tab-${tab.id}-agent-managed-description`;
+            const agentAssociatedDescriptionId = `tab-${tab.id}-agent-associated-description`;
             const pinGroupDescriptionId = `tab-${tab.id}-pin-group-description`;
             const suspendedDescriptionId = `tab-${tab.id}-suspended-description`;
             const suspendUnavailable = tab.active && !suspended;
@@ -494,7 +494,7 @@ export function WindowCard({
             const tabDescriptionIds = [
               suspended ? suspendedDescriptionId : null,
               suspendUnavailable ? suspendUnavailableDescriptionId : null,
-              tab.agentAssociated ? agentManagedDescriptionId : null,
+              tab.agentAssociated ? agentAssociatedDescriptionId : null,
               duplicatePreviewOutcome ? duplicatePreviewDescriptionId : null,
             ]
               .filter(Boolean)
@@ -685,7 +685,7 @@ export function WindowCard({
                       {tab.agentAssociated || duplicatePreviewOutcome ? (
                         <span className="tab-state-icons">
                           {tab.agentAssociated ? (
-                            <AgentManagedTabIndicator id={agentManagedDescriptionId} />
+                            <AgentAssociatedTabIndicator id={agentAssociatedDescriptionId} />
                           ) : null}
                           {duplicatePreviewOutcome ? (
                             <span

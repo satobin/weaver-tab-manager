@@ -55,7 +55,7 @@ function createService(): ActiveWindowsService {
         closedTabIds: [],
         closedTabs: [],
         failures: [],
-        skippedAgentManagedTabIds: [],
+        skippedAgentAssociatedTabIds: [],
         skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),
@@ -327,7 +327,7 @@ describe('Popup', () => {
     expect(window.close).toHaveBeenCalled();
   });
 
-  it('labels agent-managed tabs in search results without disabling manual close', async () => {
+  it('labels agent-associated tabs in search results without disabling manual close', async () => {
     const user = userEvent.setup();
     const service = createService();
     vi.mocked(service.loadSnapshot).mockResolvedValue(
@@ -339,8 +339,7 @@ describe('Popup', () => {
                 agentAssociated: true,
                 agentDetection: {
                   activity: 'unknown',
-                  evidence: 'codex-favicon',
-                  providerHint: 'codex',
+                  evidence: 'codex-extension-badge',
                 },
                 title: 'Agent task',
                 url: 'https://example.test/agent-task',
@@ -355,12 +354,12 @@ describe('Popup', () => {
     await user.type(await screen.findByRole('searchbox', { name: 'Search open tabs' }), 'Agent');
 
     const focusButton = await screen.findByRole('button', { name: 'Focus Agent task' });
-    expect(focusButton.querySelector('.agent-managed-tab-indicator')).toHaveAttribute(
+    expect(focusButton.querySelector('.agent-associated-tab-indicator')).toHaveAttribute(
       'data-tooltip',
-      'Agent-associated tab · kept open during duplicate cleanup',
+      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
     );
     expect(focusButton).toHaveAccessibleDescription(
-      'Agent-associated tab · kept open during duplicate cleanup',
+      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
     );
     const closeButton = screen.getByRole('button', { name: 'Close Agent task' });
     expect(closeButton).toBeEnabled();
@@ -567,7 +566,7 @@ describe('Popup', () => {
         },
       ],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -629,7 +628,7 @@ describe('Popup', () => {
       closedTabIds: [103],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
@@ -662,7 +661,7 @@ describe('Popup', () => {
       closedTabIds: [],
       closedTabs: [],
       failures: [],
-      skippedAgentManagedTabIds: [],
+      skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [102],
     });

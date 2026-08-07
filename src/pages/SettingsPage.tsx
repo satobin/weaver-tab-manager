@@ -122,7 +122,7 @@ export function SettingsPage({
               <h4>Preserve groups when sorting</h4>
               <p>
                 Keep each browser tab group together. Turning this off removes ordinary group
-                membership during a sort; agent-associated groups stay together.
+                membership during a sort; groups containing agent-associated tabs stay together.
               </p>
             </div>
             <SettingSwitch

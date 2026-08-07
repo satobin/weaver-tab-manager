@@ -1,4 +1,4 @@
-import type { AgentTabDetection } from './agentManagedTabs';
+import type { AgentTabDetection } from './agentTabAssociation';
 
 export type TabGroupColor =
   | 'blue'

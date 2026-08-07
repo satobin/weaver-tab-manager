@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   detectAgentAssociatedTab,
-  getRestoredAgentSafeGroupTitle,
+  getRestoredGroupTitleWithProvenance,
   hasClaudeAgentGroupSignal,
   isAgentAssociatedTab,
-} from './agentManagedTabs';
+} from './agentTabAssociation';
 
 function createTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
   return {
@@ -39,99 +39,104 @@ function createGroup(
   };
 }
 
-const OPENAI_ACTIVE_PATH_MARKER =
+const CODEX_EXTENSION_ACTIVE_PATH_MARKER =
   '<path d="M3.04536 4.45259C2.7582 3.60299 3.60299 2.7582 4.45259 3.04536L14.1828 6.33403C15.1637 6.66558 15.0872 8.08006 14.0715 8.39045L10.2994 9.54319C9.93919 9.65327 9.65327 9.93919 9.54319 10.2994L8.39046 14.0715C8.08007 15.0872 6.66558 15.1637 6.33404 14.1828L3.04536 4.45259Z" fill="black" stroke="white" stroke-width="1.5" stroke-linejoin="round" paint-order="stroke fill" transform="translate(-2 -2) scale(2.1)" />';
-const OPENAI_ACTIVE_BADGE_MARKER =
+const CODEX_EXTENSION_ACTIVE_BADGE_MARKER =
   '<image href="data:image/bmp;base64,AA==" width="32" height="32" opacity="0.3" />' +
-  OPENAI_ACTIVE_PATH_MARKER;
-const OPENAI_DELIVERABLE_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#22c55e" />';
-const OPENAI_HANDOFF_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#facc15" />';
+  CODEX_EXTENSION_ACTIVE_PATH_MARKER;
+const CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#22c55e" />';
+const CODEX_EXTENSION_HANDOFF_BADGE_MARKER = '<circle cx="24" cy="24" r="7" fill="#facc15" />';
 
-function createOpenAiMarkerUrl(stateMarker = '') {
+function createCodexExtensionMarkerUrl(stateMarker = '') {
   const svg = `<svg data-codex-favicon-badge="codex-favicon-badge">${stateMarker}</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-describe('agent-managed tab detection', () => {
-  it('recognizes the Codex browser-control favicon marker with provider evidence', () => {
-    const tab = createTab({ favIconUrl: createOpenAiMarkerUrl() });
+describe('agent-associated tab detection', () => {
+  it('recognizes the Codex extension favicon marker without inferring the controller', () => {
+    const tab = createTab({ favIconUrl: createCodexExtensionMarkerUrl() });
 
     expect(detectAgentAssociatedTab(tab, null)).toEqual({
       activity: 'unknown',
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      evidence: 'codex-extension-badge',
     });
     expect(isAgentAssociatedTab(tab, null)).toBe(true);
   });
 
   it.each([
-    ['active pointer', OPENAI_ACTIVE_BADGE_MARKER, 'working'],
-    ['green deliverable dot', OPENAI_DELIVERABLE_BADGE_MARKER, 'output-ready'],
-    ['yellow handoff dot', OPENAI_HANDOFF_BADGE_MARKER, 'waiting-to-continue'],
+    ['active pointer', CODEX_EXTENSION_ACTIVE_BADGE_MARKER, 'working'],
+    ['green deliverable dot', CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER, 'output-ready'],
+    ['yellow handoff dot', CODEX_EXTENSION_HANDOFF_BADGE_MARKER, 'waiting-to-continue'],
   ] as const)('recognizes the Codex %s state', (_label, marker, activity) => {
     expect(
-      detectAgentAssociatedTab(createTab({ favIconUrl: createOpenAiMarkerUrl(marker) }), null),
+      detectAgentAssociatedTab(
+        createTab({ favIconUrl: createCodexExtensionMarkerUrl(marker) }),
+        null,
+      ),
     ).toEqual({
       activity,
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      evidence: 'codex-extension-badge',
     });
   });
 
   it('keeps an unfamiliar or ambiguous Codex marker protected with unknown activity', () => {
     expect(
       detectAgentAssociatedTab(
-        createTab({ favIconUrl: createOpenAiMarkerUrl('<rect width="4" height="4" />') }),
+        createTab({ favIconUrl: createCodexExtensionMarkerUrl('<rect width="4" height="4" />') }),
         null,
       ),
     ).toEqual({
       activity: 'unknown',
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      evidence: 'codex-extension-badge',
     });
     expect(
       detectAgentAssociatedTab(
         createTab({
-          favIconUrl: createOpenAiMarkerUrl(
-            `${OPENAI_DELIVERABLE_BADGE_MARKER}${OPENAI_HANDOFF_BADGE_MARKER}`,
+          favIconUrl: createCodexExtensionMarkerUrl(
+            `${CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER}${CODEX_EXTENSION_HANDOFF_BADGE_MARKER}`,
           ),
         }),
         null,
       ),
     ).toEqual({
       activity: 'unknown',
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      evidence: 'codex-extension-badge',
     });
   });
 
   it('requires exact direct Codex state artwork and a sentinel on the outer SVG', () => {
     expect(
       detectAgentAssociatedTab(
-        createTab({ favIconUrl: createOpenAiMarkerUrl(OPENAI_ACTIVE_PATH_MARKER) }),
-        null,
-      ),
-    ).toMatchObject({ activity: 'unknown', providerHint: 'codex' });
-    expect(
-      detectAgentAssociatedTab(
         createTab({
-          favIconUrl: createOpenAiMarkerUrl(`<g>${OPENAI_DELIVERABLE_BADGE_MARKER}</g>`),
+          favIconUrl: createCodexExtensionMarkerUrl(CODEX_EXTENSION_ACTIVE_PATH_MARKER),
         }),
         null,
       ),
-    ).toMatchObject({ activity: 'unknown', providerHint: 'codex' });
+    ).toMatchObject({ activity: 'unknown', evidence: 'codex-extension-badge' });
     expect(
       detectAgentAssociatedTab(
         createTab({
-          favIconUrl: createOpenAiMarkerUrl('<circle cx="24" cy="24" r="6" fill="#22c55e" />'),
+          favIconUrl: createCodexExtensionMarkerUrl(
+            `<g>${CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER}</g>`,
+          ),
         }),
         null,
       ),
-    ).toMatchObject({ activity: 'unknown', providerHint: 'codex' });
+    ).toMatchObject({ activity: 'unknown', evidence: 'codex-extension-badge' });
+    expect(
+      detectAgentAssociatedTab(
+        createTab({
+          favIconUrl: createCodexExtensionMarkerUrl(
+            '<circle cx="24" cy="24" r="6" fill="#22c55e" />',
+          ),
+        }),
+        null,
+      ),
+    ).toMatchObject({ activity: 'unknown', evidence: 'codex-extension-badge' });
 
     const nestedSentinel =
       '<svg><g data-codex-favicon-badge="codex-favicon-badge">' +
-      `${OPENAI_DELIVERABLE_BADGE_MARKER}</g></svg>`;
+      `${CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER}</g></svg>`;
     expect(
       detectAgentAssociatedTab(
         createTab({
@@ -160,14 +165,12 @@ describe('agent-managed tab detection', () => {
     expect(detectAgentAssociatedTab(tab, createGroup())).toEqual({
       activity: 'working',
       evidence: 'claude-known-group',
-      providerHint: 'claude',
     });
     expect(
       detectAgentAssociatedTab(tab, createGroup({ color: 'yellow', title: 'Claude (MCP)' })),
     ).toEqual({
       activity: 'unknown',
       evidence: 'claude-known-group',
-      providerHint: 'claude',
     });
     expect(isAgentAssociatedTab(tab, createGroup({ color: 'blue' }))).toBe(false);
     expect(isAgentAssociatedTab(tab, createGroup({ title: 'Research task' }))).toBe(false);
@@ -190,7 +193,6 @@ describe('agent-managed tab detection', () => {
       expect(detection).toEqual({
         activity,
         evidence: 'claude-status-group',
-        providerHint: 'claude',
       });
     },
   );
@@ -211,12 +213,16 @@ describe('agent-managed tab detection', () => {
   });
 
   it('adds durable provenance only when restoring a group with a Claude signal', () => {
-    expect(getRestoredAgentSafeGroupTitle(createGroup())).toBe('Restored · Claude');
+    expect(getRestoredGroupTitleWithProvenance(createGroup())).toBe('Restored · Claude');
     expect(
-      getRestoredAgentSafeGroupTitle(createGroup({ color: 'blue', title: '✅Browser research' })),
+      getRestoredGroupTitleWithProvenance(
+        createGroup({ color: 'blue', title: '✅Browser research' }),
+      ),
     ).toBe('Restored · ✅Browser research');
-    expect(getRestoredAgentSafeGroupTitle(createGroup({ title: 'Planning' }))).toBe('Planning');
-    expect(getRestoredAgentSafeGroupTitle(createGroup({ title: 'Restored · Claude' }))).toBe(
+    expect(getRestoredGroupTitleWithProvenance(createGroup({ title: 'Planning' }))).toBe(
+      'Planning',
+    );
+    expect(getRestoredGroupTitleWithProvenance(createGroup({ title: 'Restored · Claude' }))).toBe(
       'Restored · Claude',
     );
   });
@@ -229,23 +235,21 @@ describe('agent-managed tab detection', () => {
     expect(isAgentAssociatedTab(tab, createGroup({ title: '⏳Research' }))).toBe(false);
   });
 
-  it('keeps conflicting Claude and Codex signals protected without claiming a provider', () => {
-    const tab = createTab({ favIconUrl: createOpenAiMarkerUrl(), groupId: 7 });
+  it('keeps conflicting Claude and Codex extension signals protected', () => {
+    const tab = createTab({ favIconUrl: createCodexExtensionMarkerUrl(), groupId: 7 });
 
     expect(detectAgentAssociatedTab(tab, createGroup({ title: '⌛Browser research' }))).toEqual({
       activity: 'unknown',
       evidence: 'conflicting-signals',
-      providerHint: 'unknown',
     });
   });
 
-  it('ignores Claude evidence from a group that does not contain the Codex tab', () => {
-    const tab = createTab({ favIconUrl: createOpenAiMarkerUrl(), groupId: 8 });
+  it('ignores Claude evidence from a group that does not contain the marked tab', () => {
+    const tab = createTab({ favIconUrl: createCodexExtensionMarkerUrl(), groupId: 8 });
 
     expect(detectAgentAssociatedTab(tab, createGroup({ id: 7 }))).toEqual({
       activity: 'unknown',
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      evidence: 'codex-extension-badge',
     });
   });
 });

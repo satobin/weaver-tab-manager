@@ -5,23 +5,21 @@ export type AgentActivity =
   | 'unknown'
   | 'waiting-to-continue'
   | 'working';
-export type AgentProviderHint = 'claude' | 'codex' | 'unknown';
 export type AgentTabEvidence =
   | 'claude-known-group'
   | 'claude-status-group'
-  | 'codex-favicon'
+  | 'codex-extension-badge'
   | 'conflicting-signals';
 
 export interface AgentTabDetection {
   activity: AgentActivity;
   evidence: AgentTabEvidence;
-  providerHint: AgentProviderHint;
 }
 
-const OPENAI_FAVICON_PREFIX = 'data:image/svg+xml,';
-const OPENAI_FAVICON_ATTRIBUTE = 'data-codex-favicon-badge';
-const OPENAI_FAVICON_ATTRIBUTE_VALUE = 'codex-favicon-badge';
-const OPENAI_ACTIVE_PATH_ATTRIBUTES: Readonly<Record<string, string>> = {
+const CODEX_EXTENSION_FAVICON_PREFIX = 'data:image/svg+xml,';
+const CODEX_EXTENSION_FAVICON_ATTRIBUTE = 'data-codex-favicon-badge';
+const CODEX_EXTENSION_FAVICON_ATTRIBUTE_VALUE = 'codex-favicon-badge';
+const CODEX_EXTENSION_ACTIVE_PATH_ATTRIBUTES: Readonly<Record<string, string>> = {
   d: 'M3.04536 4.45259C2.7582 3.60299 3.60299 2.7582 4.45259 3.04536L14.1828 6.33403C15.1637 6.66558 15.0872 8.08006 14.0715 8.39045L10.2994 9.54319C9.93919 9.65327 9.65327 9.93919 9.54319 10.2994L8.39046 14.0715C8.08007 15.0872 6.66558 15.1637 6.33404 14.1828L3.04536 4.45259Z',
   fill: 'black',
   'paint-order': 'stroke fill',
@@ -30,19 +28,19 @@ const OPENAI_ACTIVE_PATH_ATTRIBUTES: Readonly<Record<string, string>> = {
   'stroke-width': '1.5',
   transform: 'translate(-2 -2) scale(2.1)',
 };
-const OPENAI_DELIVERABLE_CIRCLE_ATTRIBUTES: Readonly<Record<string, string>> = {
+const CODEX_EXTENSION_DELIVERABLE_CIRCLE_ATTRIBUTES: Readonly<Record<string, string>> = {
   cx: '24',
   cy: '24',
   fill: '#22c55e',
   r: '7',
 };
-const OPENAI_HANDOFF_CIRCLE_ATTRIBUTES: Readonly<Record<string, string>> = {
+const CODEX_EXTENSION_HANDOFF_CIRCLE_ATTRIBUTES: Readonly<Record<string, string>> = {
   cx: '24',
   cy: '24',
   fill: '#facc15',
   r: '7',
 };
-const RESTORED_AGENT_GROUP_TITLE_PREFIX = 'Restored · ';
+const RESTORED_GROUP_TITLE_PREFIX = 'Restored · ';
 
 type AgentTabCandidate = Pick<chrome.tabs.Tab, 'favIconUrl' | 'groupId' | 'windowId'>;
 type ClaudeAgentGroupCandidate = Pick<chrome.tabGroups.TabGroup, 'color' | 'title'>;
@@ -65,21 +63,22 @@ function hasDirectChildWithAttributes(
   );
 }
 
-function detectOpenAiBrowserControlActivity(favIconUrl: string | undefined): AgentActivity | null {
-  if (!favIconUrl?.startsWith(OPENAI_FAVICON_PREFIX)) {
+function detectCodexExtensionActivity(favIconUrl: string | undefined): AgentActivity | null {
+  if (!favIconUrl?.startsWith(CODEX_EXTENSION_FAVICON_PREFIX)) {
     return null;
   }
 
   try {
-    const svg = decodeURIComponent(favIconUrl.slice(OPENAI_FAVICON_PREFIX.length));
-    if (!svg.includes(OPENAI_FAVICON_ATTRIBUTE)) {
+    const svg = decodeURIComponent(favIconUrl.slice(CODEX_EXTENSION_FAVICON_PREFIX.length));
+    if (!svg.includes(CODEX_EXTENSION_FAVICON_ATTRIBUTE)) {
       return null;
     }
 
     const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
     if (
       root.localName !== 'svg' ||
-      root.getAttribute(OPENAI_FAVICON_ATTRIBUTE) !== OPENAI_FAVICON_ATTRIBUTE_VALUE
+      root.getAttribute(CODEX_EXTENSION_FAVICON_ATTRIBUTE) !==
+        CODEX_EXTENSION_FAVICON_ATTRIBUTE_VALUE
     ) {
       return null;
     }
@@ -87,14 +86,16 @@ function detectOpenAiBrowserControlActivity(favIconUrl: string | undefined): Age
     const activities: AgentActivity[] = [];
     if (
       hasDirectChildWithAttributes(root, 'image', { opacity: '0.3' }) &&
-      hasDirectChildWithAttributes(root, 'path', OPENAI_ACTIVE_PATH_ATTRIBUTES)
+      hasDirectChildWithAttributes(root, 'path', CODEX_EXTENSION_ACTIVE_PATH_ATTRIBUTES)
     ) {
       activities.push('working');
     }
-    if (hasDirectChildWithAttributes(root, 'circle', OPENAI_DELIVERABLE_CIRCLE_ATTRIBUTES)) {
+    if (
+      hasDirectChildWithAttributes(root, 'circle', CODEX_EXTENSION_DELIVERABLE_CIRCLE_ATTRIBUTES)
+    ) {
       activities.push('output-ready');
     }
-    if (hasDirectChildWithAttributes(root, 'circle', OPENAI_HANDOFF_CIRCLE_ATTRIBUTES)) {
+    if (hasDirectChildWithAttributes(root, 'circle', CODEX_EXTENSION_HANDOFF_CIRCLE_ATTRIBUTES)) {
       activities.push('waiting-to-continue');
     }
 
@@ -114,14 +115,12 @@ function detectClaudeGroup(group: ClaudeAgentGroupCandidate | null): AgentTabDet
     return {
       activity: 'working',
       evidence: 'claude-known-group',
-      providerHint: 'claude',
     };
   }
   if (title === 'Claude (MCP)' && group.color === 'yellow') {
     return {
       activity: 'unknown',
       evidence: 'claude-known-group',
-      providerHint: 'claude',
     };
   }
 
@@ -138,7 +137,6 @@ function detectClaudeGroup(group: ClaudeAgentGroupCandidate | null): AgentTabDet
   return {
     activity: activityByPrefix[statusPrefix] ?? 'unknown',
     evidence: 'claude-status-group',
-    providerHint: 'claude',
   };
 }
 
@@ -148,12 +146,12 @@ export function hasClaudeAgentGroupSignal(
   return detectClaudeGroup(group) !== null;
 }
 
-export function getRestoredAgentSafeGroupTitle(
+export function getRestoredGroupTitleWithProvenance(
   group: Pick<chrome.tabGroups.TabGroup, 'color' | 'title'>,
 ): string {
   const title = group.title?.trim() ?? '';
   return title && hasClaudeAgentGroupSignal(group)
-    ? `${RESTORED_AGENT_GROUP_TITLE_PREFIX}${title}`
+    ? `${RESTORED_GROUP_TITLE_PREFIX}${title}`
     : title;
 }
 
@@ -161,24 +159,22 @@ export function detectAgentAssociatedTab(
   tab: AgentTabCandidate,
   group: AgentTabGroupCandidate | null,
 ): AgentTabDetection | null {
-  const openAiActivity = detectOpenAiBrowserControlActivity(tab.favIconUrl);
-  const hasCodexMarker = openAiActivity !== null;
+  const codexExtensionActivity = detectCodexExtensionActivity(tab.favIconUrl);
+  const hasCodexExtensionMarker = codexExtensionActivity !== null;
   const groupMatchesTab =
     tab.groupId >= 0 && group?.id === tab.groupId && group.windowId === tab.windowId;
   const claudeDetection = groupMatchesTab ? detectClaudeGroup(group) : null;
 
-  if (hasCodexMarker && claudeDetection) {
+  if (hasCodexExtensionMarker && claudeDetection) {
     return {
       activity: 'unknown',
       evidence: 'conflicting-signals',
-      providerHint: 'unknown',
     };
   }
-  if (hasCodexMarker) {
+  if (hasCodexExtensionMarker) {
     return {
-      activity: openAiActivity,
-      evidence: 'codex-favicon',
-      providerHint: 'codex',
+      activity: codexExtensionActivity,
+      evidence: 'codex-extension-badge',
     };
   }
 

@@ -49,12 +49,12 @@ function sortPartition(tabs: readonly SortableTab[], options: TabSortOptions): S
   return sorted;
 }
 
-function sortAroundAgentGroups(
+function sortAroundAssociationProtectedGroups(
   tabs: readonly SortableTab[],
   options: TabSortOptions,
 ): SortableTab[] {
   const sorted: SortableTab[] = [];
-  const agentGroupIds = new Set(
+  const associationProtectedGroupIds = new Set(
     tabs.flatMap((tab) => (tab.agentAssociated && tab.groupId !== null ? [tab.groupId] : [])),
   );
   let partitionStart = 0;
@@ -62,16 +62,16 @@ function sortAroundAgentGroups(
 
   while (index < tabs.length) {
     const tab = tabs[index];
-    if (!tab || tab.groupId === null || !agentGroupIds.has(tab.groupId)) {
+    if (!tab || tab.groupId === null || !associationProtectedGroupIds.has(tab.groupId)) {
       index += 1;
       continue;
     }
 
     sorted.push(...sortPartition(tabs.slice(partitionStart, index), options));
 
-    const agentGroupId = tab.groupId;
+    const associationProtectedGroupId = tab.groupId;
     let groupEnd = index + 1;
-    while (groupEnd < tabs.length && tabs[groupEnd]?.groupId === agentGroupId) {
+    while (groupEnd < tabs.length && tabs[groupEnd]?.groupId === associationProtectedGroupId) {
       groupEnd += 1;
     }
     sorted.push(...tabs.slice(index, groupEnd));
@@ -89,7 +89,7 @@ export function planTabSort(tabs: readonly SortableTab[], options: TabSortOption
   const pinned = browserOrder.filter((tab) => tab.pinned);
   const unpinned = browserOrder.filter((tab) => !tab.pinned);
 
-  return [...pinned, ...sortAroundAgentGroups(unpinned, options)];
+  return [...pinned, ...sortAroundAssociationProtectedGroups(unpinned, options)];
 }
 
 export function isTabOrderSorted(tabs: readonly SortableTab[], options: TabSortOptions): boolean {

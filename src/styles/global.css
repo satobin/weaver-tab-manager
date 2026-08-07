@@ -1408,7 +1408,7 @@ a {
   gap: 5px;
 }
 
-.agent-managed-tab-indicator {
+.agent-associated-tab-indicator {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
@@ -1416,7 +1416,7 @@ a {
   color: var(--accent);
 }
 
-.agent-managed-tab-indicator::after {
+.agent-associated-tab-indicator::after {
   position: absolute;
   z-index: 40;
   top: 50%;
@@ -1441,8 +1441,8 @@ a {
   white-space: normal;
 }
 
-.agent-managed-tab-indicator:hover::after,
-.tab-focus-button:focus-visible .agent-managed-tab-indicator::after {
+.agent-associated-tab-indicator:hover::after,
+.tab-focus-button:focus-visible .agent-associated-tab-indicator::after {
   visibility: visible;
   opacity: 1;
 }

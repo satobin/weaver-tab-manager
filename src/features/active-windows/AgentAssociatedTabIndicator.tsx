@@ -1,16 +1,17 @@
 import { Bot } from 'lucide-react';
 
-interface AgentManagedTabIndicatorProps {
+interface AgentAssociatedTabIndicatorProps {
   id: string;
 }
 
-const DESCRIPTION = 'Agent-associated tab · kept open during duplicate cleanup';
+const DESCRIPTION =
+  'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.';
 
-export function AgentManagedTabIndicator({ id }: AgentManagedTabIndicatorProps) {
+export function AgentAssociatedTabIndicator({ id }: AgentAssociatedTabIndicatorProps) {
   return (
     <>
       <span
-        className="agent-managed-tab-indicator"
+        className="agent-associated-tab-indicator"
         aria-hidden="true"
         data-tooltip={DESCRIPTION}
         title=""

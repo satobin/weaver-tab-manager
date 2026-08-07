@@ -18,9 +18,9 @@ import {
 } from './model';
 import {
   detectAgentAssociatedTab,
-  getRestoredAgentSafeGroupTitle,
+  getRestoredGroupTitleWithProvenance,
   type AgentTabDetection,
-} from './agentManagedTabs';
+} from './agentTabAssociation';
 import { planTabSort, type TabSortOptions } from './tabSort';
 import { formatWindowLabel } from './windowLabel';
 
@@ -134,7 +134,7 @@ interface CloseTabsResult {
 
 export interface CloseDuplicateTabsResult extends CloseTabsResult {
   closedTabs: RestorableTab[];
-  skippedAgentManagedTabIds: number[];
+  skippedAgentAssociatedTabIds: number[];
   skippedChangedTabIds: number[];
   skippedPinnedTabIds: number[];
 }
@@ -423,7 +423,7 @@ async function moveTabAcrossWindows(
   return finishCrossWindowTabMove(api, tab, destinationWindowId, finalIndex, movedTab);
 }
 
-async function moveAgentGroupAcrossWindows(
+async function moveAssociationProtectedGroupAcrossWindows(
   api: ActiveWindowsChromeApi,
   groupId: number,
   tabIds: readonly number[],
@@ -448,7 +448,7 @@ async function moveAgentGroupAcrossWindows(
     return !tab || tab.windowId !== destinationWindowId || tab.groupId !== groupId;
   });
   if (missingTabId !== undefined) {
-    throw new Error(`Tab ${missingTabId} did not move with agent-associated group ${groupId}.`);
+    throw new Error(`Tab ${missingTabId} did not move with the rest of tab group ${groupId}.`);
   }
 
   const warnings: string[] = [];
@@ -679,7 +679,7 @@ export function createChromeActiveWindowsService(
   api: ActiveWindowsChromeApi = chrome,
   restoredTabMetadataService: RestoredTabMetadataService = createRestoredTabMetadataService(api),
 ): ActiveWindowsService {
-  const recentCodexDetectionByTabId = new Map<
+  const recentCodexExtensionDetectionByTabId = new Map<
     number,
     { detection: AgentTabDetection; url: string }
   >();
@@ -693,38 +693,43 @@ export function createChromeActiveWindowsService(
       return detection;
     }
 
-    if (detection?.evidence === 'codex-favicon' || detection?.evidence === 'conflicting-signals') {
-      recentCodexDetectionByTabId.set(tabId, {
+    if (
+      detection?.evidence === 'codex-extension-badge' ||
+      detection?.evidence === 'conflicting-signals'
+    ) {
+      recentCodexExtensionDetectionByTabId.set(tabId, {
         detection,
         url: tab.url ?? tab.pendingUrl ?? '',
       });
       return detection;
     }
-    const recentCodexDetection = recentCodexDetectionByTabId.get(tabId);
+    const recentCodexExtensionDetection = recentCodexExtensionDetectionByTabId.get(tabId);
     if (detection) {
       if (
-        recentCodexDetection &&
+        recentCodexExtensionDetection &&
         tab.status !== 'loading' &&
         (tab.pendingUrl?.trim() ?? '') === '' &&
-        ((tab.favIconUrl?.trim() ?? '') !== '' || (tab.url ?? '') !== recentCodexDetection.url)
+        ((tab.favIconUrl?.trim() ?? '') !== '' ||
+          (tab.url ?? '') !== recentCodexExtensionDetection.url)
       ) {
-        recentCodexDetectionByTabId.delete(tabId);
+        recentCodexExtensionDetectionByTabId.delete(tabId);
       }
       return detection;
     }
     if (
-      recentCodexDetection &&
+      recentCodexExtensionDetection &&
       (tab.status === 'loading' ||
         (tab.pendingUrl?.trim() ?? '') !== '' ||
-        ((tab.favIconUrl?.trim() ?? '') === '' && (tab.url ?? '') === recentCodexDetection.url))
+        ((tab.favIconUrl?.trim() ?? '') === '' &&
+          (tab.url ?? '') === recentCodexExtensionDetection.url))
     ) {
-      return recentCodexDetection.detection;
+      return recentCodexExtensionDetection.detection;
     }
 
-    recentCodexDetectionByTabId.delete(tabId);
+    recentCodexExtensionDetectionByTabId.delete(tabId);
     return null;
   };
-  const getAgentGroupIds = (
+  const getAssociationProtectedGroupIds = (
     tabs: readonly chrome.tabs.Tab[],
     groups: readonly chrome.tabGroups.TabGroup[],
   ): Set<number> => {
@@ -809,7 +814,7 @@ export function createChromeActiveWindowsService(
         });
         continue;
       }
-      const agentGroupIds = getAgentGroupIds(originalTabs, groups);
+      const associationProtectedGroupIds = getAssociationProtectedGroupIds(originalTabs, groups);
       const desiredTabs = planTabSort(
         originalTabs.map((tab) => {
           const url = tab.url ?? tab.pendingUrl ?? '';
@@ -835,7 +840,7 @@ export function createChromeActiveWindowsService(
       try {
         if (!options.preserveGroups) {
           const groupedTabIds = originalTabs
-            .filter((tab) => tab.groupId >= 0 && !agentGroupIds.has(tab.groupId))
+            .filter((tab) => tab.groupId >= 0 && !associationProtectedGroupIds.has(tab.groupId))
             .map((tab) => tab.id);
           const [firstGroupedTabId, ...remainingGroupedTabIds] = groupedTabIds;
           if (firstGroupedTabId !== undefined) {
@@ -867,7 +872,7 @@ export function createChromeActiveWindowsService(
       if (options.preserveGroups && groupSensitiveMoveCompleted) {
         const tabIds = new Set(originalTabs.map((tab) => tab.id));
         const restorableGroupIds = new Set(
-          groups.flatMap((group) => (agentGroupIds.has(group.id) ? [] : [group.id])),
+          groups.flatMap((group) => (associationProtectedGroupIds.has(group.id) ? [] : [group.id])),
         );
         const warnings = await restoreTabGroups(
           api,
@@ -891,7 +896,7 @@ export function createChromeActiveWindowsService(
       const closedTabIds: number[] = [];
       const closedTabs: RestorableTab[] = [];
       const failures: TabOperationFailure[] = [];
-      const skippedAgentManagedTabIds: number[] = [];
+      const skippedAgentAssociatedTabIds: number[] = [];
       const skippedChangedTabIds: number[] = [];
       const skippedPinnedTabIds: number[] = [];
       const ambiguousPlanTabIds = new Set<number>();
@@ -964,7 +969,7 @@ export function createChromeActiveWindowsService(
                 return { state: 'changed' as const };
               }
               if (detectAgentAssociation(liveTab, null)) {
-                return { state: 'agent-managed' as const };
+                return { state: 'agent-associated' as const };
               }
 
               const liveGroup =
@@ -975,7 +980,7 @@ export function createChromeActiveWindowsService(
                 );
               }
               if (detectAgentAssociation(liveTab, liveGroup)) {
-                return { state: 'agent-managed' as const };
+                return { state: 'agent-associated' as const };
               }
               if (!tabMatchesCanonicalKey(liveTab, plannedGroup.key, request.rules)) {
                 return { state: 'changed' as const };
@@ -1031,8 +1036,8 @@ export function createChromeActiveWindowsService(
       results.forEach((result) => {
         if ('skippedChanged' in result || ('state' in result && result.state === 'changed')) {
           skippedChangedTabIds.push(result.tabId);
-        } else if ('state' in result && result.state === 'agent-managed') {
-          skippedAgentManagedTabIds.push(result.tabId);
+        } else if ('state' in result && result.state === 'agent-associated') {
+          skippedAgentAssociatedTabIds.push(result.tabId);
         } else if ('state' in result && result.state === 'pinned') {
           skippedPinnedTabIds.push(result.tabId);
         } else if ('closed' in result && result.closed) {
@@ -1046,7 +1051,7 @@ export function createChromeActiveWindowsService(
         closedTabIds,
         closedTabs,
         failures,
-        skippedAgentManagedTabIds,
+        skippedAgentAssociatedTabIds,
         skippedChangedTabIds,
         skippedPinnedTabIds,
       };
@@ -1173,9 +1178,9 @@ export function createChromeActiveWindowsService(
           (window.tabs ?? []).flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
         ),
       );
-      recentCodexDetectionByTabId.forEach((_detection, tabId) => {
+      recentCodexExtensionDetectionByTabId.forEach((_detection, tabId) => {
         if (!liveTabIds.has(tabId)) {
-          recentCodexDetectionByTabId.delete(tabId);
+          recentCodexExtensionDetectionByTabId.delete(tabId);
         }
       });
       const managedWindows = toManagedWindows(
@@ -1341,7 +1346,7 @@ export function createChromeActiveWindowsService(
             await api.tabGroups.update(newGroupId, {
               collapsed: group.collapsed,
               color: group.color,
-              title: getRestoredAgentSafeGroupTitle(group),
+              title: getRestoredGroupTitleWithProvenance(group),
             });
           } catch (error) {
             result.warnings.push(
@@ -1379,7 +1384,7 @@ export function createChromeActiveWindowsService(
       const warnings: string[] = [];
       const originalSourceTabs: chrome.tabs.Tab[] = [];
       const originalSourceGroups: chrome.tabGroups.TabGroup[] = [];
-      const protectedAgentGroupIds = new Set<number>();
+      const associationProtectedGroupIds = new Set<number>();
       const destinationPinnedTabCount = (destinationWindow.tabs ?? []).filter(
         (tab) => tab.pinned,
       ).length;
@@ -1426,38 +1431,47 @@ export function createChromeActiveWindowsService(
           );
           continue;
         }
-        const agentGroupIds = getAgentGroupIds(sourceTabs, sourceGroups);
-        agentGroupIds.forEach((groupId) => protectedAgentGroupIds.add(groupId));
+        const sourceAssociationProtectedGroupIds = getAssociationProtectedGroupIds(
+          sourceTabs,
+          sourceGroups,
+        );
+        sourceAssociationProtectedGroupIds.forEach((groupId) =>
+          associationProtectedGroupIds.add(groupId),
+        );
         originalSourceTabs.push(...sourceTabs);
         originalSourceGroups.push(...sourceGroups);
         let sourceFailed = false;
-        const movedAgentGroupIds = new Set<number>();
+        const movedAssociationProtectedGroupIds = new Set<number>();
         for (const tab of sourceTabs) {
-          if (tab.groupId >= 0 && agentGroupIds.has(tab.groupId)) {
-            if (movedAgentGroupIds.has(tab.groupId)) {
+          if (tab.groupId >= 0 && sourceAssociationProtectedGroupIds.has(tab.groupId)) {
+            if (movedAssociationProtectedGroupIds.has(tab.groupId)) {
               continue;
             }
-            movedAgentGroupIds.add(tab.groupId);
-            const agentGroupTabs = sourceTabs.filter(
+            movedAssociationProtectedGroupIds.add(tab.groupId);
+            const associationProtectedGroupTabs = sourceTabs.filter(
               (candidate) => candidate.groupId === tab.groupId,
             );
-            const agentGroupTabIds = agentGroupTabs.map((candidate) => candidate.id);
+            const associationProtectedGroupTabIds = associationProtectedGroupTabs.map(
+              (candidate) => candidate.id,
+            );
             try {
               warnings.push(
-                ...(await moveAgentGroupAcrossWindows(
+                ...(await moveAssociationProtectedGroupAcrossWindows(
                   api,
                   tab.groupId,
-                  agentGroupTabIds,
+                  associationProtectedGroupTabIds,
                   destinationWindowId,
                   -1,
                   activeDestinationTabId,
                 )),
               );
-              movedTabIds.push(...agentGroupTabIds);
+              movedTabIds.push(...associationProtectedGroupTabIds);
             } catch (error) {
               sourceFailed = true;
               const message = describeChromeError(error);
-              failures.push(...agentGroupTabIds.map((tabId) => ({ message, tabId })));
+              failures.push(
+                ...associationProtectedGroupTabIds.map((tabId) => ({ message, tabId })),
+              );
             }
             continue;
           }
@@ -1519,7 +1533,7 @@ export function createChromeActiveWindowsService(
       const movedSet = new Set(movedTabIds);
       const restorableGroupIds = new Set(
         originalSourceGroups.flatMap((group) =>
-          protectedAgentGroupIds.has(group.id) ? [] : [group.id],
+          associationProtectedGroupIds.has(group.id) ? [] : [group.id],
         ),
       );
       warnings.push(
@@ -1818,14 +1832,14 @@ export function createChromeActiveWindowsService(
         return false;
       });
       const requestedTabIdSet = new Set(readableRequestedTabs.map((tab) => tab.id));
-      const agentGroupIds = getAgentGroupIds(allTabs, allGroups);
-      const rejectedAgentTabIds = new Set<number>();
-      const requestedAgentGroupIds = new Set(
+      const associationProtectedGroupIds = getAssociationProtectedGroupIds(allTabs, allGroups);
+      const rejectedAssociationProtectedTabIds = new Set<number>();
+      const requestedAssociationProtectedGroupIds = new Set(
         readableRequestedTabs.flatMap((tab) =>
-          tab.groupId >= 0 && agentGroupIds.has(tab.groupId) ? [tab.groupId] : [],
+          tab.groupId >= 0 && associationProtectedGroupIds.has(tab.groupId) ? [tab.groupId] : [],
         ),
       );
-      requestedAgentGroupIds.forEach((groupId) => {
+      requestedAssociationProtectedGroupIds.forEach((groupId) => {
         const groupTabIds = allTabs.flatMap((tab) =>
           tab.groupId === groupId && tab.id !== undefined ? [tab.id] : [],
         );
@@ -1834,15 +1848,17 @@ export function createChromeActiveWindowsService(
         }
         readableRequestedTabs.forEach((tab) => {
           if (tab.groupId === groupId) {
-            rejectedAgentTabIds.add(tab.id);
+            rejectedAssociationProtectedTabIds.add(tab.id);
             failures.push({
-              message: 'Agent-associated tab groups must be moved as a whole.',
+              message: 'Groups containing agent-associated tabs must be moved as a whole.',
               tabId: tab.id,
             });
           }
         });
       });
-      const movableTabs = readableRequestedTabs.filter((tab) => !rejectedAgentTabIds.has(tab.id));
+      const movableTabs = readableRequestedTabs.filter(
+        (tab) => !rejectedAssociationProtectedTabIds.has(tab.id),
+      );
       const orderedTabs = [
         ...movableTabs.filter((tab) => tab.pinned),
         ...movableTabs.filter((tab) => !tab.pinned),
@@ -1858,16 +1874,22 @@ export function createChromeActiveWindowsService(
         };
       }
 
-      const preservedGroupIds = new Set([...preserveGroupIds, ...requestedAgentGroupIds]);
+      const preservedGroupIds = new Set([
+        ...preserveGroupIds,
+        ...requestedAssociationProtectedGroupIds,
+      ]);
       const tabIdsToUngroup = orderedTabs.flatMap((tab) =>
         tab.id !== undefined && tab.groupId >= 0 && !preservedGroupIds.has(tab.groupId)
           ? [tab.id]
           : [],
       );
 
-      const firstTabIsAgentGrouped = firstTab.groupId >= 0 && agentGroupIds.has(firstTab.groupId);
+      const firstTabIsInAssociationProtectedGroup =
+        firstTab.groupId >= 0 && associationProtectedGroupIds.has(firstTab.groupId);
       const destination = await api.windows.create(
-        firstTabIsAgentGrouped ? { focused: false } : { focused: false, tabId: firstTab.id },
+        firstTabIsInAssociationProtectedGroup
+          ? { focused: false }
+          : { focused: false, tabId: firstTab.id },
       );
       if (destination?.id === undefined) {
         throw new Error('The browser did not create the destination window.');
@@ -1878,7 +1900,7 @@ export function createChromeActiveWindowsService(
       let restoredPinnedTabCount = 0;
       let activeDestinationTabId: number | undefined;
       let placeholderTabIds: number[] = [];
-      if (firstTabIsAgentGrouped) {
+      if (firstTabIsInAssociationProtectedGroup) {
         if (destination.tabs) {
           placeholderTabIds = destination.tabs.flatMap((tab) =>
             tab.id === undefined ? [] : [tab.id],
@@ -1895,7 +1917,7 @@ export function createChromeActiveWindowsService(
           }
         }
       }
-      if (!firstTabIsAgentGrouped) {
+      if (!firstTabIsInAssociationProtectedGroup) {
         try {
           const adoptedTab =
             destination.tabs?.find((candidate) => candidate.id === firstTab.id) ??
@@ -1916,7 +1938,7 @@ export function createChromeActiveWindowsService(
         }
       }
 
-      const remainingTabIdsToUngroup = firstTabIsAgentGrouped
+      const remainingTabIdsToUngroup = firstTabIsInAssociationProtectedGroup
         ? tabIdsToUngroup
         : tabIdsToUngroup.filter((tabId) => tabId !== firstTab.id);
       const tabsBlockedByUngroupFailure = new Set<number>();
@@ -1932,34 +1954,34 @@ export function createChromeActiveWindowsService(
         }
       }
 
-      const movedAgentGroupIds = new Set<number>();
-      const remainingTabs = (firstTabIsAgentGrouped ? orderedTabs : orderedTabs.slice(1)).filter(
-        (tab) => !tabsBlockedByUngroupFailure.has(tab.id),
-      );
+      const movedAssociationProtectedGroupIds = new Set<number>();
+      const remainingTabs = (
+        firstTabIsInAssociationProtectedGroup ? orderedTabs : orderedTabs.slice(1)
+      ).filter((tab) => !tabsBlockedByUngroupFailure.has(tab.id));
       for (const tab of remainingTabs) {
-        if (tab.groupId >= 0 && agentGroupIds.has(tab.groupId)) {
-          if (movedAgentGroupIds.has(tab.groupId)) {
+        if (tab.groupId >= 0 && associationProtectedGroupIds.has(tab.groupId)) {
+          if (movedAssociationProtectedGroupIds.has(tab.groupId)) {
             continue;
           }
-          movedAgentGroupIds.add(tab.groupId);
-          const agentGroupTabIds = orderedTabs
+          movedAssociationProtectedGroupIds.add(tab.groupId);
+          const associationProtectedGroupTabIds = orderedTabs
             .filter((candidate) => candidate.groupId === tab.groupId)
             .map((candidate) => candidate.id);
           try {
             warnings.push(
-              ...(await moveAgentGroupAcrossWindows(
+              ...(await moveAssociationProtectedGroupAcrossWindows(
                 api,
                 tab.groupId,
-                agentGroupTabIds,
+                associationProtectedGroupTabIds,
                 destination.id,
                 -1,
                 activeDestinationTabId,
               )),
             );
-            movedTabIds.push(...agentGroupTabIds);
+            movedTabIds.push(...associationProtectedGroupTabIds);
           } catch (error) {
             const message = describeChromeError(error);
-            failures.push(...agentGroupTabIds.map((tabId) => ({ message, tabId })));
+            failures.push(...associationProtectedGroupTabIds.map((tabId) => ({ message, tabId })));
           }
           continue;
         }
@@ -1996,7 +2018,7 @@ export function createChromeActiveWindowsService(
 
       const movedSet = new Set(movedTabIds);
       const restorableGroupIds = new Set(
-        [...preservedGroupIds].filter((groupId) => !agentGroupIds.has(groupId)),
+        [...preservedGroupIds].filter((groupId) => !associationProtectedGroupIds.has(groupId)),
       );
       warnings.push(
         ...(await restoreTabGroups(

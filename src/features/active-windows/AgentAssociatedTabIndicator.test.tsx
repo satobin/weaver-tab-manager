@@ -1,14 +1,15 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { AgentManagedTabIndicator } from './AgentManagedTabIndicator';
+import { AgentAssociatedTabIndicator } from './AgentAssociatedTabIndicator';
 
-describe('AgentManagedTabIndicator', () => {
+describe('AgentAssociatedTabIndicator', () => {
   it('provides generic duplicate-cleanup context as the parent control description', () => {
-    const description = 'Agent-associated tab · kept open during duplicate cleanup';
+    const description =
+      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.';
     const { container } = render(
       <button type="button" aria-label="Focus Agent task" aria-describedby="agent-description">
-        <AgentManagedTabIndicator id="agent-description" />
+        <AgentAssociatedTabIndicator id="agent-description" />
       </button>,
     );
 
@@ -16,11 +17,11 @@ describe('AgentManagedTabIndicator', () => {
       description,
     );
     expect(screen.getByText(description)).toHaveClass('sr-only', 'popup-sr-only');
-    expect(container.querySelector('.agent-managed-tab-indicator')).toHaveAttribute(
+    expect(container.querySelector('.agent-associated-tab-indicator')).toHaveAttribute(
       'data-tooltip',
       description,
     );
-    expect(container.querySelector('.agent-managed-tab-indicator')).toHaveAttribute(
+    expect(container.querySelector('.agent-associated-tab-indicator')).toHaveAttribute(
       'aria-hidden',
       'true',
     );

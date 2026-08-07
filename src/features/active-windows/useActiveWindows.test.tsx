@@ -18,7 +18,7 @@ function createService() {
         closedTabIds: [],
         closedTabs: [],
         failures: [],
-        skippedAgentManagedTabIds: [],
+        skippedAgentAssociatedTabIds: [],
         skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),

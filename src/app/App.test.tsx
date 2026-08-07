@@ -45,7 +45,7 @@ function createService(windowCount = 1): ActiveWindowsService {
         closedTabIds: [],
         closedTabs: [],
         failures: [],
-        skippedAgentManagedTabIds: [],
+        skippedAgentAssociatedTabIds: [],
         skippedChangedTabIds: [],
         skippedPinnedTabIds: [],
       }),

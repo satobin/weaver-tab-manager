@@ -5,7 +5,7 @@ import {
   type RestoredTabMetadataRegistration,
   type RestoredTabMetadataService,
 } from '../../platform/chrome/restoredTabMetadata';
-import { getRestoredAgentSafeGroupTitle } from '../active-windows/agentManagedTabs';
+import { getRestoredGroupTitleWithProvenance } from '../active-windows/agentTabAssociation';
 import {
   captureSavedWindow,
   cloneSavedWindow,
@@ -465,7 +465,7 @@ export function createChromeSavedWindowsService(
             await api.tabGroups.update(groupId, {
               collapsed: groupPlan.group.collapsed,
               color: groupPlan.group.color,
-              title: getRestoredAgentSafeGroupTitle(groupPlan.group),
+              title: getRestoredGroupTitleWithProvenance(groupPlan.group),
             });
           } catch (error) {
             warnings.push(

@@ -18,7 +18,7 @@ import {
   type ActiveWindowsService,
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
-import { AgentManagedTabIndicator } from '../features/active-windows/AgentManagedTabIndicator';
+import { AgentAssociatedTabIndicator } from '../features/active-windows/AgentAssociatedTabIndicator';
 import { formatTabLocation, isNewTabUrl, isTabSuspended } from '../features/active-windows/model';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
 import { TabIcon } from '../features/active-windows/TabIcon';
@@ -292,9 +292,9 @@ export function Popup({
           `${result.skippedPinnedTabIds.length} duplicate ${result.skippedPinnedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedPinnedTabIds.length === 1 ? 'it is' : 'they are'} now pinned.`,
         );
       }
-      if (result.skippedAgentManagedTabIds.length > 0) {
+      if (result.skippedAgentAssociatedTabIds.length > 0) {
         issues.push(
-          `${result.skippedAgentManagedTabIds.length} duplicate ${result.skippedAgentManagedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentManagedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
+          `${result.skippedAgentAssociatedTabIds.length} duplicate ${result.skippedAgentAssociatedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
         );
       }
       if (result.skippedChangedTabIds.length > 0) {
@@ -588,7 +588,7 @@ export function Popup({
                     aria-label={`Focus ${tab.title}`}
                     aria-describedby={
                       tab.agentAssociated
-                        ? `popup-tab-${tab.id}-agent-managed-description`
+                        ? `popup-tab-${tab.id}-agent-associated-description`
                         : undefined
                     }
                     title={tab.url || tab.title}
@@ -605,8 +605,8 @@ export function Popup({
                       </small>
                     </span>
                     {tab.agentAssociated ? (
-                      <AgentManagedTabIndicator
-                        id={`popup-tab-${tab.id}-agent-managed-description`}
+                      <AgentAssociatedTabIndicator
+                        id={`popup-tab-${tab.id}-agent-associated-description`}
                       />
                     ) : null}
                   </button>
