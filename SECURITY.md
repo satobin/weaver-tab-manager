@@ -2,7 +2,7 @@
 
 ## Supported Version
 
-Security fixes target the latest version published through the Chrome Web Store.
+Security fixes target the latest published version of Weaver.
 
 ## Reporting A Vulnerability
 
