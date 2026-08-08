@@ -3,10 +3,12 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 import manifest from './manifest.config';
+import { getExtensionOutDir } from './src/config/extensionBuildMode';
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
   plugins: [react(), crx({ manifest })],
   build: {
+    outDir: getExtensionOutDir(mode, command),
     sourcemap: false,
     rollupOptions: {
       input: {
@@ -15,4 +17,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

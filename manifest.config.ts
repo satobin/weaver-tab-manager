@@ -1,41 +1,5 @@
 import { defineManifest } from '@crxjs/vite-plugin';
 
-import packageMetadata from './package.json';
+import { createExtensionManifest } from './src/config/extensionManifest';
 
-export default defineManifest({
-  manifest_version: 3,
-  name: 'Weaver - Window & Tab Manager',
-  short_name: 'Weaver',
-  description: 'Organize, search, sort, save, restore, and deduplicate browser tabs and windows.',
-  version: packageMetadata.version,
-  minimum_chrome_version: '120',
-  incognito: 'not_allowed',
-  icons: {
-    16: 'icons/default-16.png',
-    48: 'icons/default-48.png',
-    128: 'icons/default-128.png',
-  },
-  action: {
-    default_popup: 'src/popup/popup.html',
-    default_title: 'Open Weaver',
-    default_icon: {
-      16: 'icons/default-16.png',
-      48: 'icons/default-48.png',
-      128: 'icons/default-128.png',
-    },
-  },
-  background: {
-    service_worker: 'src/background/service-worker.ts',
-    type: 'module',
-  },
-  permissions: ['tabs', 'storage', 'tabGroups'],
-  commands: {
-    'open-manager': {
-      suggested_key: {
-        default: 'Ctrl+Shift+1',
-        mac: 'Command+Shift+1',
-      },
-      description: 'Open Window Manager',
-    },
-  },
-});
+export default defineManifest(({ mode }) => createExtensionManifest(mode));

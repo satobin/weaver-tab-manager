@@ -37,6 +37,10 @@ Use [GitHub Issues](https://github.com/satobin/weaver-tab-manager/issues) for bu
 
 For other questions, email [weavertabmanager@gmail.com](mailto:weavertabmanager@gmail.com).
 
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for live local testing, signed test CRXs, and public Store packaging.
+
 ## License
 
 Weaver is available under the [MIT License](LICENSE).

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Weaver test icon</title>
+  <desc id="description">An indigo Weaver folder with cyan tabs and a light-blue heart.</desc>
+
+  <path d="
+    M 374 4.5
+    H 480
+    C 495 4.5, 507.5 16.5, 507.5 31.5
+    V 92
+    H 347
+    V 31.5
+    C 347 16.5, 359 4.5, 374 4.5
+    Z"
+    fill="#16B8A7" stroke="#07897A" stroke-width="1"/>
+
+  <path d="
+    M 198 4.5
+    H 314
+    C 329 4.5, 341 16.5, 341 31.5
+    C 341 41, 346 55, 351 65
+    V 92
+    H 171
+    V 31.5
+    C 171 16.5, 183 4.5, 198 4.5
+    Z"
+    fill="#7356F2" stroke="#4D31C7" stroke-width="1"/>
+
+  <path d="
+    M 31 4.5
+    H 139
+    C 154 4.5, 166 16.5, 166 31.5
+    C 166 41, 171 55, 176.5 65
+    V 92
+    H 4
+    V 31.5
+    C 4 16.5, 16 4.5, 31 4.5
+    Z"
+    fill="#14BDEA" stroke="#008DB7" stroke-width="1"/>
+
+  <path d="
+    M 31.5 65
+    H 479.5
+    C 495 65, 507.5 77, 507.5 92
+    V 482
+    C 507.5 497.5, 495 510, 479.5 510
+    H 31.5
+    C 16 510, 3.5 497.5, 3.5 482
+    V 92
+    C 3.5 77, 16 65, 31.5 65
+    Z"
+    fill="#5137DA" stroke="#3820B8" stroke-width="1"/>
+
+  <path d="
+    M 256 180
+    C 276 157, 300 140.5, 334 140.5
+    C 385 140.5, 426 182.5, 426 235
+    C 426 269, 410 294, 390 313
+    L 276 423
+    C 270 430, 257 434, 256 434
+    C 247 434, 239 430, 233 423
+    L 122 313
+    C 102 294, 85.5 269, 85.5 235
+    C 85.5 182.5, 130 140.5, 178 140.5
+    C 212 140.5, 236 157, 256 180
+    Z"
+    fill="#14BDEA" stroke="#B8F2FF" stroke-width="3" stroke-linejoin="round"/>
+</svg>
