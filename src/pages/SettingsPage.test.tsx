@@ -27,6 +27,7 @@ function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWin
                 createManagedTab({
                   active: true,
                   agentAssociated: agentAssociatedTabId === 101,
+                  agentDedupeProtected: agentAssociatedTabId === 101,
                   id: 101,
                   title: 'Quarterly plan',
                   url: 'https://docs.google.com/document/d/doc-id/edit?tab=t.0',
@@ -42,6 +43,7 @@ function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWin
                 createManagedTab({
                   active: true,
                   agentAssociated: agentAssociatedTabId === 201,
+                  agentDedupeProtected: agentAssociatedTabId === 201,
                   id: 201,
                   title: 'Quarterly plan copy',
                   url: 'https://docs.google.com/document/d/doc-id/preview#heading=one',
@@ -96,6 +98,7 @@ describe('SettingsPage', () => {
   const createTab = vi.fn<(_properties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>>(
     () => Promise.resolve({ id: 301 } as chrome.tabs.Tab),
   );
+  const closeWindow = vi.fn();
   const defaultUserAgent = navigator.userAgent;
 
   beforeEach(() => {
@@ -106,6 +109,7 @@ describe('SettingsPage', () => {
     ]);
     createTab.mockReset();
     createTab.mockResolvedValue({ id: 301 } as chrome.tabs.Tab);
+    closeWindow.mockReset();
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       value: defaultUserAgent,
@@ -117,7 +121,10 @@ describe('SettingsPage', () => {
         tabs: { create: createTab },
       },
     });
-    vi.spyOn(window, 'close').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'close', {
+      configurable: true,
+      value: closeWindow,
+    });
   });
 
   it('loads and updates the appearance setting', async () => {
@@ -238,7 +245,7 @@ describe('SettingsPage', () => {
     await user.click(editButton);
 
     expect(createTab).toHaveBeenCalledWith({ url: 'chrome://extensions/shortcuts' });
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('refreshes displayed shortcuts after returning from the browser settings tab', async () => {
@@ -283,7 +290,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Couldn’t open shortcut settings. Enter chrome://extensions/shortcuts in the address bar.',
     );
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('marks shortcuts unavailable and disables editing when browser APIs are missing', async () => {

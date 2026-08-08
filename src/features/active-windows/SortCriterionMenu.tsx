@@ -28,6 +28,7 @@ export function SortCriterionMenu({
       options={OPTIONS}
       popoverClassName="sort-criterion-popover"
       triggerClassName="sort-criterion-trigger"
+      triggerTitle="Choose sort field: Title or URL"
       value={value}
     />
   );

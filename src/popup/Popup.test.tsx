@@ -132,12 +132,14 @@ describe('Popup', () => {
   const createTab = vi.fn<(_properties: chrome.tabs.CreateProperties) => Promise<chrome.tabs.Tab>>(
     () => Promise.resolve({ id: 301 } as chrome.tabs.Tab),
   );
+  const closeWindow = vi.fn();
   const defaultUserAgent = navigator.userAgent;
 
   beforeEach(() => {
     sendMessage.mockClear();
     getCommands.mockClear();
     createTab.mockClear();
+    closeWindow.mockReset();
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       value: defaultUserAgent,
@@ -150,7 +152,10 @@ describe('Popup', () => {
         tabs: { create: createTab },
       },
     });
-    vi.spyOn(window, 'close').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'close', {
+      configurable: true,
+      value: closeWindow,
+    });
   });
 
   it('loads tab and shortcut data without a blocking consent screen', async () => {
@@ -195,7 +200,7 @@ describe('Popup', () => {
         route: APP_ROUTES.windows,
       });
     });
-    expect(window.close).toHaveBeenCalled();
+    expect(closeWindow).toHaveBeenCalled();
   });
 
   it('keeps the manager action available when the shortcut is unassigned', async () => {
@@ -223,7 +228,7 @@ describe('Popup', () => {
 
     expect(createTab).toHaveBeenCalledWith({ url: 'chrome://extensions/shortcuts' });
     expect(sendMessage).not.toHaveBeenCalled();
-    expect(window.close).toHaveBeenCalled();
+    expect(closeWindow).toHaveBeenCalled();
   });
 
   it('opens Edge shortcut settings when running in Edge', async () => {
@@ -258,7 +263,7 @@ describe('Popup', () => {
 
     expect(createTab).toHaveBeenNthCalledWith(1, { url: 'edge://extensions/shortcuts' });
     expect(createTab).toHaveBeenNthCalledWith(2, { url: 'chrome://extensions/shortcuts' });
-    expect(window.close).toHaveBeenCalled();
+    expect(closeWindow).toHaveBeenCalled();
   });
 
   it('keeps the popup open with the shortcut address if browser navigation fails', async () => {
@@ -274,7 +279,7 @@ describe('Popup', () => {
         "Open chrome://extensions/shortcuts in the address bar to set Weaver's shortcut.",
       ),
     ).toBeInTheDocument();
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('opens the manager with duplicate tabs visible from the preview action', async () => {
@@ -293,7 +298,7 @@ describe('Popup', () => {
         route: APP_LAUNCH_ROUTES.duplicateTabs,
       });
     });
-    expect(window.close).toHaveBeenCalled();
+    expect(closeWindow).toHaveBeenCalled();
   });
 
   it('stays open and reports when the manager cannot be launched', async () => {
@@ -309,7 +314,7 @@ describe('Popup', () => {
     expect(
       await screen.findByText('The browser could not open the Window Manager.'),
     ).toBeInTheDocument();
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('searches across tabs and focuses a result', async () => {
@@ -324,7 +329,7 @@ describe('Popup', () => {
     await user.click(await screen.findByTitle('https://issues.example.net/WEAVER-42'));
 
     expect(service.focusTab).toHaveBeenCalledWith(1, 102);
-    expect(window.close).toHaveBeenCalled();
+    expect(closeWindow).toHaveBeenCalled();
   });
 
   it('labels agent-associated tabs in search results without disabling manual close', async () => {
@@ -337,6 +342,7 @@ describe('Popup', () => {
             tabs: [
               createManagedTab({
                 agentAssociated: true,
+                agentDedupeProtected: true,
                 agentDetection: {
                   activity: 'unknown',
                   evidence: 'codex-extension-badge',
@@ -356,10 +362,10 @@ describe('Popup', () => {
     const focusButton = await screen.findByRole('button', { name: 'Focus Agent task' });
     expect(focusButton.querySelector('.agent-associated-tab-indicator')).toHaveAttribute(
       'data-tooltip',
-      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
+      'Agent may still be using this tab — Weaver keeps it open during duplicate cleanup',
     );
     expect(focusButton).toHaveAccessibleDescription(
-      'Agent-associated tab · kept open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
+      'Agent-associated tab · activity appears ongoing or is unclear, so it stays open during duplicate cleanup; Weaver keeps any containing group together during sorting and moving.',
     );
     const closeButton = screen.getByRole('button', { name: 'Close Agent task' });
     expect(closeButton).toBeEnabled();
@@ -377,7 +383,7 @@ describe('Popup', () => {
 
     expect(service.closeTabs).toHaveBeenCalledWith([102]);
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('sorts the current window with default or customized options without closing', async () => {
@@ -416,7 +422,7 @@ describe('Popup', () => {
       });
     });
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('reverses a sort after the refreshed tab order verifies the applied direction', async () => {
@@ -599,7 +605,7 @@ describe('Popup', () => {
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
     expect(screen.queryByText('1 duplicate tab removed.')).not.toBeInTheDocument();
     expect(screen.queryByText(/duplicate tab restored\./i)).not.toBeInTheDocument();
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('protects every pinned duplicate and closes only unpinned matches', async () => {
@@ -747,7 +753,7 @@ describe('Popup', () => {
     expect(screen.queryByText('0 suspended')).not.toBeInTheDocument();
     expect(screen.queryByText(/tabs? suspended · Resumes or reloads/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unsuspend all 0' })).toBeDisabled();
-    expect(window.close).not.toHaveBeenCalled();
+    expect(closeWindow).not.toHaveBeenCalled();
   });
 
   it('relies on live updates instead of exposing a manual refresh control', async () => {

@@ -189,6 +189,7 @@ describe('DedupeRuleEditor', () => {
           tabs: [
             {
               agentAssociated: false,
+              agentDedupeProtected: false,
               id: 1,
               index: 0,
               pinned: false,
@@ -199,6 +200,7 @@ describe('DedupeRuleEditor', () => {
             },
             {
               agentAssociated: false,
+              agentDedupeProtected: false,
               id: 2,
               index: 1,
               pinned: false,

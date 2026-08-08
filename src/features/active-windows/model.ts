@@ -22,6 +22,7 @@ export interface ManagedTabGroup {
 export interface ManagedTab {
   active: boolean;
   agentAssociated: boolean;
+  agentDedupeProtected: boolean;
   agentDetection: AgentTabDetection | null;
   discarded: boolean;
   frozen: boolean;

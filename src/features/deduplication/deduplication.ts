@@ -21,7 +21,7 @@ export interface CanonicalizedTabUrl {
 }
 
 export interface DuplicateTabCandidate {
-  agentAssociated: boolean;
+  agentDedupeProtected: boolean;
   id: number;
   index: number;
   pinned: boolean;
@@ -391,7 +391,7 @@ export function planDuplicateTabs(
       return;
     }
 
-    const protectedTabs = matchingTabs.filter((tab) => tab.pinned || tab.agentAssociated);
+    const protectedTabs = matchingTabs.filter((tab) => tab.pinned || tab.agentDedupeProtected);
     const keptTabs =
       protectedTabs.length > 0
         ? protectedTabs

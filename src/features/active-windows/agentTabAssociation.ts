@@ -16,6 +16,14 @@ export interface AgentTabDetection {
   evidence: AgentTabEvidence;
 }
 
+export function shouldProtectAgentTabFromDuplicateCleanup(
+  detection: AgentTabDetection | null,
+): boolean {
+  return (
+    detection !== null && detection.activity !== 'idle' && detection.activity !== 'output-ready'
+  );
+}
+
 const CODEX_EXTENSION_FAVICON_PREFIX = 'data:image/svg+xml,';
 const CODEX_EXTENSION_FAVICON_ATTRIBUTE = 'data-codex-favicon-badge';
 const CODEX_EXTENSION_FAVICON_ATTRIBUTE_VALUE = 'codex-favicon-badge';

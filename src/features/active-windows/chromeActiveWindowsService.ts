@@ -19,6 +19,7 @@ import {
 import {
   detectAgentAssociatedTab,
   getRestoredGroupTitleWithProvenance,
+  shouldProtectAgentTabFromDuplicateCleanup,
   type AgentTabDetection,
 } from './agentTabAssociation';
 import { planTabSort, type TabSortOptions } from './tabSort';
@@ -591,6 +592,7 @@ function toManagedTab(
   return {
     active: tab.active,
     agentAssociated: agentDetection !== null,
+    agentDedupeProtected: shouldProtectAgentTabFromDuplicateCleanup(agentDetection),
     agentDetection,
     discarded: tab.discarded,
     frozen: tab.frozen ?? false,
@@ -706,26 +708,29 @@ export function createChromeActiveWindowsService(
       return detection;
     }
     const recentCodexExtensionDetection = recentCodexExtensionDetectionByTabId.get(tabId);
-    if (detection) {
-      if (
-        recentCodexExtensionDetection &&
-        tab.status !== 'loading' &&
-        (tab.pendingUrl?.trim() ?? '') === '' &&
-        ((tab.favIconUrl?.trim() ?? '') !== '' ||
-          (tab.url ?? '') !== recentCodexExtensionDetection.url)
-      ) {
-        recentCodexExtensionDetectionByTabId.delete(tabId);
-      }
-      return detection;
-    }
-    if (
-      recentCodexExtensionDetection &&
+    const hasTransientCodexSignalGap =
+      recentCodexExtensionDetection !== undefined &&
       (tab.status === 'loading' ||
         (tab.pendingUrl?.trim() ?? '') !== '' ||
         ((tab.favIconUrl?.trim() ?? '') === '' &&
-          (tab.url ?? '') === recentCodexExtensionDetection.url))
-    ) {
-      return recentCodexExtensionDetection.detection;
+          (tab.url ?? '') === recentCodexExtensionDetection.url));
+    if (detection) {
+      if (recentCodexExtensionDetection && !hasTransientCodexSignalGap) {
+        recentCodexExtensionDetectionByTabId.delete(tabId);
+      }
+      if (recentCodexExtensionDetection && hasTransientCodexSignalGap) {
+        return {
+          activity: 'unknown',
+          evidence: 'conflicting-signals',
+        };
+      }
+      return detection;
+    }
+    if (recentCodexExtensionDetection && hasTransientCodexSignalGap) {
+      return {
+        ...recentCodexExtensionDetection.detection,
+        activity: 'unknown',
+      };
     }
 
     recentCodexExtensionDetectionByTabId.delete(tabId);
@@ -970,7 +975,9 @@ export function createChromeActiveWindowsService(
               if (liveTab.status === 'loading') {
                 return { state: 'changed' as const };
               }
-              if (detectAgentAssociation(liveTab, null)) {
+              if (
+                shouldProtectAgentTabFromDuplicateCleanup(detectAgentAssociation(liveTab, null))
+              ) {
                 return { state: 'agent-associated' as const };
               }
 
@@ -981,7 +988,11 @@ export function createChromeActiveWindowsService(
                   'The live tab group metadata could not be read, so the tab was left open.',
                 );
               }
-              if (detectAgentAssociation(liveTab, liveGroup)) {
+              if (
+                shouldProtectAgentTabFromDuplicateCleanup(
+                  detectAgentAssociation(liveTab, liveGroup),
+                )
+              ) {
                 return { state: 'agent-associated' as const };
               }
               if (!tabMatchesCanonicalKey(liveTab, plannedGroup.key, request.rules)) {

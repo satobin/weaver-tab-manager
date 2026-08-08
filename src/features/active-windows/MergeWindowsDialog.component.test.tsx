@@ -17,6 +17,7 @@ function makeWindow(id: number): ManagedWindow {
       {
         active: true,
         agentAssociated: false,
+        agentDedupeProtected: false,
         agentDetection: null,
         discarded: false,
         frozen: false,
@@ -67,6 +68,14 @@ describe('MergeWindowsDialog', () => {
       'merge-windows-dialog',
     );
     expect(screen.getAllByRole('checkbox')[0]).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Clear all' })).toHaveAttribute(
+      'title',
+      'Clear window selection',
+    );
+    expect(screen.getByRole('button', { name: 'Merge 2 windows' })).toHaveAttribute(
+      'title',
+      'Merge selected windows',
+    );
   });
 
   it('does not close when focus moves within the dialog', async () => {

@@ -1027,7 +1027,7 @@ export function ActiveWindowsPage({
             : []),
           ...(result.skippedAgentAssociatedTabIds.length > 0
             ? [
-                `${pluralize(result.skippedAgentAssociatedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
+                `${pluralize(result.skippedAgentAssociatedTabIds.length, 'duplicate tab')} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it may' : 'they may'} still be in active agent use.`,
               ]
             : []),
           ...(result.skippedChangedTabIds.length > 0
@@ -1529,6 +1529,7 @@ export function ActiveWindowsPage({
               role="searchbox"
               value={query}
               placeholder="Filter tabs"
+              title="Filter tabs by title or URL"
               disabled={!snapshot}
               onChange={(event) => updateQuery(event.target.value)}
             />
@@ -1554,6 +1555,7 @@ export function ActiveWindowsPage({
               (!selectionButtonClears && (!hasFilter || visibleTabIds.length === 0))
             }
             aria-pressed={selectionButtonClears}
+            title={selectionButtonClears ? 'Clear selected tabs' : 'Select filtered tabs'}
             onClick={toggleFilteredSelection}
           >
             <ListChecks aria-hidden="true" size={16} />
@@ -1615,6 +1617,7 @@ export function ActiveWindowsPage({
           <button
             className="toolbar-button"
             type="button"
+            title="Move selected tabs to a new window"
             disabled={!canMoveSelectedTabsToNewWindow || operationLabel !== null}
             onClick={() => void moveSelectedTabs()}
           >
@@ -1626,6 +1629,7 @@ export function ActiveWindowsPage({
           <button
             className="toolbar-button danger-toolbar-button"
             type="button"
+            title="Close selected tabs"
             disabled={actionSelectedCount === 0 || operationLabel !== null}
             onClick={() => void closeSelectedTabs()}
           >
@@ -1651,7 +1655,7 @@ export function ActiveWindowsPage({
         <div className="inline-alert" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <span>Live refresh failed: {errorMessage}</span>
-          <button type="button" onClick={() => void refresh()}>
+          <button type="button" title="Retry live refresh" onClick={() => void refresh()}>
             Retry
           </button>
         </div>
@@ -1661,7 +1665,7 @@ export function ActiveWindowsPage({
         <div className="inline-alert" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <span>{navigationError}</span>
-          <button type="button" onClick={() => setNavigationError(null)}>
+          <button type="button" title="Dismiss error" onClick={() => setNavigationError(null)}>
             Dismiss
           </button>
         </div>
@@ -1678,7 +1682,7 @@ export function ActiveWindowsPage({
         <div className="inline-alert" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <span>{operationError}</span>
-          <button type="button" onClick={() => setOperationError(null)}>
+          <button type="button" title="Dismiss error" onClick={() => setOperationError(null)}>
             Dismiss
           </button>
         </div>
@@ -1692,12 +1696,13 @@ export function ActiveWindowsPage({
               <button
                 className="notice-undo-button"
                 type="button"
+                title="Restore closed duplicate tabs"
                 onClick={() => void undoDuplicateRemoval()}
               >
                 Undo
               </button>
             ) : null}
-            <button type="button" onClick={dismissOperationNotice}>
+            <button type="button" title="Dismiss notification" onClick={dismissOperationNotice}>
               Dismiss
             </button>
           </div>
@@ -1712,8 +1717,8 @@ export function ActiveWindowsPage({
             <span>
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
-                ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; duplicate cleanup keeps agent-associated tabs open.'
-                : 'Tabs labeled Keep stay open, including every pinned or agent-associated match. Duplicate cleanup removes tabs labeled Will close.'}
+                ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs stay open while activity is ongoing or unclear.'
+                : 'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup removes tabs labeled Will close.'}
             </span>
           </div>
           <div className="duplicate-preview-banner-actions">
@@ -1734,6 +1739,7 @@ export function ActiveWindowsPage({
               className="duplicate-preview-banner-action duplicate-preview-banner-exit"
               type="button"
               aria-label="Exit duplicate tabs view"
+              title="Exit duplicate tabs view"
               onClick={() => setDuplicatePreviewMode(false)}
             >
               Show all tabs
@@ -1755,7 +1761,7 @@ export function ActiveWindowsPage({
           <AlertTriangle aria-hidden="true" size={24} />
           <h3>Could not load browser windows</h3>
           <p>{errorMessage}</p>
-          <button type="button" onClick={() => void refresh()}>
+          <button type="button" title="Retry loading windows" onClick={() => void refresh()}>
             <RefreshCw aria-hidden="true" size={16} />
             Retry
           </button>
@@ -1890,14 +1896,18 @@ export function ActiveWindowsPage({
                   visibleDuplicateGroups.length === 0 ? (
                   <>
                     <h3>No matching duplicate tabs</h3>
-                    <button type="button" onClick={() => updateQuery('')}>
+                    <button type="button" title="Clear tab filter" onClick={() => updateQuery('')}>
                       Clear filter
                     </button>
                   </>
                 ) : (
                   <>
                     <h3>No duplicate tabs</h3>
-                    <button type="button" onClick={() => setDuplicatePreviewMode(false)}>
+                    <button
+                      type="button"
+                      title="Exit duplicate tabs view"
+                      onClick={() => setDuplicatePreviewMode(false)}
+                    >
                       Show all tabs
                     </button>
                   </>
@@ -1907,7 +1917,7 @@ export function ActiveWindowsPage({
               <>
                 <Search aria-hidden="true" size={24} />
                 <h3>No matching tabs</h3>
-                <button type="button" onClick={() => updateQuery('')}>
+                <button type="button" title="Clear tab filter" onClick={() => updateQuery('')}>
                   Clear filter
                 </button>
               </>

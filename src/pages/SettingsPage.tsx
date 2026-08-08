@@ -57,6 +57,7 @@ export function SettingsPage({
         snapshot?.windows.flatMap((window) =>
           window.tabs.map((tab) => ({
             agentAssociated: tab.agentAssociated,
+            agentDedupeProtected: tab.agentDedupeProtected,
             id: tab.id,
             index: tab.index,
             pinned: tab.pinned,

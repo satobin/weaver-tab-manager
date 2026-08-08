@@ -109,6 +109,7 @@ describe('WindowCard large-window rendering', () => {
           ? {
               ...tab,
               agentAssociated: true,
+              agentDedupeProtected: true,
               title: 'Updated while collapsed',
             }
           : tab,

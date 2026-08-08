@@ -294,7 +294,7 @@ export function Popup({
       }
       if (result.skippedAgentAssociatedTabIds.length > 0) {
         issues.push(
-          `${result.skippedAgentAssociatedTabIds.length} duplicate ${result.skippedAgentAssociatedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it is' : 'they are'} agent-associated.`,
+          `${result.skippedAgentAssociatedTabIds.length} duplicate ${result.skippedAgentAssociatedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedAgentAssociatedTabIds.length === 1 ? 'it may' : 'they may'} still be in active agent use.`,
         );
       }
       if (result.skippedChangedTabIds.length > 0) {
@@ -606,6 +606,7 @@ export function Popup({
                     </span>
                     {tab.agentAssociated ? (
                       <AgentAssociatedTabIndicator
+                        dedupeProtected={tab.agentDedupeProtected}
                         id={`popup-tab-${tab.id}-agent-associated-description`}
                       />
                     ) : null}

@@ -79,6 +79,7 @@ export function formatDedupeExampleUrl(rawUrl: string): string {
 }
 
 export interface DedupePreviewTab extends DuplicateTabCandidate {
+  agentAssociated: boolean;
   title: string;
   windowLabel: string;
 }

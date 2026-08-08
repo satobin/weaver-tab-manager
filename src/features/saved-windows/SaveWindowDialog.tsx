@@ -145,6 +145,7 @@ export function SaveWindowDialog({
             <button
               className="toolbar-button"
               type="button"
+              title="Cancel saving this window"
               disabled={savingAction !== null}
               onClick={onClose}
             >
@@ -153,6 +154,7 @@ export function SaveWindowDialog({
             <button
               className="toolbar-button"
               type="button"
+              title="Save this window and close it"
               disabled={savingAction !== null}
               onClick={() => void save(true)}
             >
@@ -162,6 +164,7 @@ export function SaveWindowDialog({
             <button
               className="toolbar-button primary-button"
               type="submit"
+              title="Save this window"
               disabled={savingAction !== null}
             >
               <Save aria-hidden="true" size={16} />

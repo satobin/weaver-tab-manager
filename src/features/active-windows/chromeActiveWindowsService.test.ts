@@ -403,8 +403,9 @@ describe('createChromeActiveWindowsService', () => {
         .find((tab) => tab.id === candidate.id),
     ).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: true,
       agentDetection: {
-        activity: 'output-ready',
+        activity: 'unknown',
         evidence: 'codex-extension-badge',
       },
     });
@@ -454,6 +455,7 @@ describe('createChromeActiveWindowsService', () => {
 
     expect(snapshot.windows[0]?.tabs.find((tab) => tab.id === 21)).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: true,
       agentDetection: {
         activity: 'working',
         evidence: 'claude-status-group',
@@ -461,6 +463,7 @@ describe('createChromeActiveWindowsService', () => {
     });
     expect(snapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: false,
       agentDetection: {
         activity: 'output-ready',
         evidence: 'codex-extension-badge',
@@ -487,6 +490,7 @@ describe('createChromeActiveWindowsService', () => {
     const detectedSnapshot = await service.loadSnapshot();
     expect(detectedSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: false,
       agentDetection: {
         activity: 'output-ready',
         evidence: 'codex-extension-badge',
@@ -498,8 +502,9 @@ describe('createChromeActiveWindowsService', () => {
     const loadingSnapshot = await service.loadSnapshot();
     expect(loadingSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: true,
       agentDetection: {
-        activity: 'output-ready',
+        activity: 'unknown',
         evidence: 'codex-extension-badge',
       },
     });
@@ -508,8 +513,9 @@ describe('createChromeActiveWindowsService', () => {
     const statusOmittedSnapshot = await service.loadSnapshot();
     expect(statusOmittedSnapshot.windows[1]?.tabs.find((tab) => tab.id === 12)).toMatchObject({
       agentAssociated: true,
+      agentDedupeProtected: true,
       agentDetection: {
-        activity: 'output-ready',
+        activity: 'unknown',
         evidence: 'codex-extension-badge',
       },
     });
@@ -869,7 +875,135 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.remove).toHaveBeenCalledWith(12);
   });
 
-  it('keeps a recently extension-badge-associated duplicate open through transient gaps', async () => {
+  it('allows finished Codex and Claude tabs to participate in duplicate removal', async () => {
+    const { api } = createApi();
+    const duplicateUrl = 'https://example.com/finished-agent-duplicate';
+    const claudeGroup = createChromeGroup({
+      color: 'green',
+      title: '✅Browser research',
+      windowId: 2,
+    });
+    const codexTab = createChromeTab({
+      favIconUrl: createCodexExtensionMarkerUrl(CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER),
+      id: 11,
+      title: 'Codex output ready',
+      url: duplicateUrl,
+      windowId: 1,
+    });
+    const claudeTab = createChromeTab({
+      groupId: 7,
+      id: 21,
+      title: 'Claude finished',
+      url: duplicateUrl,
+      windowId: 2,
+    });
+    const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+    vi.mocked(api.tabs.query).mockResolvedValue([codexTab, claudeTab]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      const tab = [codexTab, claudeTab, keeper].find((candidate) => candidate.id === tabId);
+      return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
+    });
+    vi.mocked(api.tabGroups.query).mockResolvedValue([claudeGroup]);
+    vi.mocked(api.tabGroups.get).mockResolvedValue(claudeGroup);
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs(
+      createCloseDuplicateTabsRequest(
+        [11, 21],
+        [createDuplicateGroup([11, 21], [91], duplicateUrl)],
+      ),
+    );
+
+    expect(result.closedTabIds).toEqual([11, 21]);
+    expect(result.skippedAgentAssociatedTabIds).toEqual([]);
+    expect(result.skippedChangedTabIds).toEqual([]);
+    expect(result.skippedPinnedTabIds).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(api.tabs.remove).toHaveBeenCalledTimes(2);
+    expect(api.tabs.remove).toHaveBeenCalledWith(11);
+    expect(api.tabs.remove).toHaveBeenCalledWith(21);
+  });
+
+  it('keeps a finished Codex tab that moves to a resumable handoff before removal', async () => {
+    const { api } = createApi();
+    const duplicateUrl = 'https://example.com/agent-reactivated';
+    const finishedTab = createChromeTab({
+      favIconUrl: createCodexExtensionMarkerUrl(CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER),
+      id: 11,
+      url: duplicateUrl,
+      windowId: 1,
+    });
+    const activeTab = createChromeTab({
+      ...finishedTab,
+      favIconUrl: createCodexExtensionMarkerUrl(CODEX_EXTENSION_HANDOFF_BADGE_MARKER),
+    });
+    const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+    let candidateReadCount = 0;
+    vi.mocked(api.tabs.query).mockResolvedValue([finishedTab]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      if (tabId === 91) {
+        return Promise.resolve(keeper);
+      }
+      candidateReadCount += 1;
+      return Promise.resolve(candidateReadCount === 1 ? finishedTab : activeTab);
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs(
+      createCloseDuplicateTabsRequest([11], [createDuplicateGroup([11], [91], duplicateUrl)]),
+    );
+
+    expect(result.closedTabIds).toEqual([]);
+    expect(result.skippedAgentAssociatedTabIds).toEqual([11]);
+    expect(result.failures).toEqual([]);
+    expect(candidateReadCount).toBe(2);
+    expect(api.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('keeps a finished Claude tab whose group becomes active before removal', async () => {
+    const { api } = createApi();
+    const duplicateUrl = 'https://example.com/claude-reactivated';
+    const candidate = createChromeTab({
+      groupId: 7,
+      id: 21,
+      url: duplicateUrl,
+      windowId: 2,
+    });
+    const finishedGroup = createChromeGroup({
+      color: 'green',
+      title: '✅Browser research',
+      windowId: 2,
+    });
+    const activeGroup = createChromeGroup({
+      color: 'blue',
+      title: '⌛Browser research',
+      windowId: 2,
+    });
+    const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+    let groupReadCount = 0;
+    vi.mocked(api.tabs.query).mockResolvedValue([candidate]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) =>
+      Promise.resolve(tabId === 91 ? keeper : candidate),
+    );
+    vi.mocked(api.tabGroups.query).mockResolvedValue([finishedGroup]);
+    vi.mocked(api.tabGroups.get).mockImplementation(() => {
+      groupReadCount += 1;
+      return Promise.resolve(groupReadCount === 1 ? finishedGroup : activeGroup);
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs(
+      createCloseDuplicateTabsRequest([21], [createDuplicateGroup([21], [91], duplicateUrl)]),
+    );
+
+    expect(result.closedTabIds).toEqual([]);
+    expect(result.skippedAgentAssociatedTabIds).toEqual([21]);
+    expect(result.failures).toEqual([]);
+    expect(groupReadCount).toBe(2);
+    expect(api.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('keeps a recently output-ready duplicate open while its current activity is unclear', async () => {
     const { api, windows } = createApi();
     const candidate = windows[0]?.tabs?.find((tab) => tab.id === 12);
     if (!candidate || candidate.id === undefined) {
@@ -877,7 +1011,7 @@ describe('createChromeActiveWindowsService', () => {
     }
     const candidateId = candidate.id;
     const duplicateUrl = candidate.url as string;
-    candidate.favIconUrl = createCodexExtensionMarkerUrl();
+    candidate.favIconUrl = createCodexExtensionMarkerUrl(CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER);
     candidate.status = 'complete';
     const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
     const service = createChromeActiveWindowsService(api);

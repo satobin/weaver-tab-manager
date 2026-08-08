@@ -29,7 +29,7 @@ function createRule(overrides: Partial<DedupeRule> = {}): DedupeRule {
 
 function createTab(overrides: Partial<DuplicateTabCandidate> = {}): DuplicateTabCandidate {
   return {
-    agentAssociated: false,
+    agentDedupeProtected: false,
     id: 1,
     index: 0,
     pinned: false,
@@ -301,12 +301,13 @@ describe('planDuplicateTabs', () => {
     });
   });
 
-  it('protects every agent-associated match and closes only ordinary matches', () => {
+  it('protects agent tabs with ongoing or unclear activity and closes finished matches', () => {
     const plan = planDuplicateTabs(
       [
-        createTab({ agentAssociated: true, id: 1, windowId: 2 }),
-        createTab({ agentAssociated: true, id: 2, index: 1, windowId: 3 }),
+        createTab({ agentDedupeProtected: true, id: 1, windowId: 2 }),
+        createTab({ agentDedupeProtected: true, id: 2, index: 1, windowId: 3 }),
         createTab({ id: 3, index: 2, windowId: 1 }),
+        createTab({ id: 4, index: 3, windowId: 4 }),
       ],
       [],
       { tabId: 3, windowId: 1 },
@@ -315,14 +316,14 @@ describe('planDuplicateTabs', () => {
     expect(plan).toEqual({
       duplicateGroups: [
         {
-          duplicateTabIds: [3],
+          duplicateTabIds: [3, 4],
           keepTabIds: [1, 2],
           key: 'exact:https://example.com/path',
           matchType: 'exact',
           ruleId: null,
         },
       ],
-      duplicateTabIds: [3],
+      duplicateTabIds: [3, 4],
       keepTabIds: [1, 2],
     });
   });

@@ -8,6 +8,7 @@ import { buildDedupePreview, type DedupePreviewTab } from './dedupeRulePresentat
 function createTab(id: number, title: string, url: string): DedupePreviewTab {
   return {
     agentAssociated: false,
+    agentDedupeProtected: false,
     id,
     index: id - 1,
     pinned: false,
@@ -136,6 +137,29 @@ describe('DedupePreviewGroups', () => {
     expect(screen.getByText('Keep 2 pinned')).toBeInTheDocument();
     expect(screen.getByText('Pinned in current - Current Window')).toBeVisible();
     expect(screen.getByText('Pinned elsewhere - Window 2')).toBeVisible();
+    expect(screen.getByText('Close 1')).toBeInTheDocument();
+  });
+
+  it('does not label a finished agent-associated keeper as protected', () => {
+    const url = 'https://example.com/finished-agent-duplicate';
+    const finishedAgentTab = {
+      ...createTab(1, 'Finished agent tab', url),
+      agentAssociated: true,
+      agentDedupeProtected: false,
+    };
+    const duplicate = createTab(2, 'Ordinary duplicate', url);
+
+    render(
+      <DedupePreviewGroups
+        groups={buildDedupePreview([finishedAgentTab, duplicate], [], {
+          tabId: finishedAgentTab.id,
+          windowId: finishedAgentTab.windowId,
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Keep open')).toBeInTheDocument();
+    expect(screen.queryByText('Keep protected')).not.toBeInTheDocument();
     expect(screen.getByText('Close 1')).toBeInTheDocument();
   });
 });

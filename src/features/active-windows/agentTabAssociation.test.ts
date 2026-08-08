@@ -5,6 +5,7 @@ import {
   getRestoredGroupTitleWithProvenance,
   hasClaudeAgentGroupSignal,
   isAgentAssociatedTab,
+  shouldProtectAgentTabFromDuplicateCleanup,
 } from './agentTabAssociation';
 
 function createTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
@@ -53,6 +54,26 @@ function createCodexExtensionMarkerUrl(stateMarker = '') {
 }
 
 describe('agent-associated tab detection', () => {
+  it.each([
+    ['working', true],
+    ['awaiting-permission', true],
+    ['waiting-to-continue', true],
+    ['unknown', true],
+    ['idle', false],
+    ['output-ready', false],
+  ] as const)('maps %s activity to duplicate-cleanup protection %s', (activity, expected) => {
+    expect(
+      shouldProtectAgentTabFromDuplicateCleanup({
+        activity,
+        evidence: 'codex-extension-badge',
+      }),
+    ).toBe(expected);
+  });
+
+  it('does not protect a tab without an agent signal', () => {
+    expect(shouldProtectAgentTabFromDuplicateCleanup(null)).toBe(false);
+  });
+
   it('recognizes the Codex extension favicon marker without inferring the controller', () => {
     const tab = createTab({ favIconUrl: createCodexExtensionMarkerUrl() });
 

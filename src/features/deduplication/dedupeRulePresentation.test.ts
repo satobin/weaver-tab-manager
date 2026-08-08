@@ -24,6 +24,7 @@ function createRule(overrides: Partial<DedupeRule> = {}): DedupeRule {
 function createTab(overrides: Partial<DedupePreviewTab> = {}): DedupePreviewTab {
   return {
     agentAssociated: false,
+    agentDedupeProtected: false,
     id: 1,
     index: 0,
     pinned: false,

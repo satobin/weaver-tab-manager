@@ -23,6 +23,7 @@ interface AnchoredSelectMenuProps<T extends number | string> {
   options: readonly AnchoredSelectOption<T>[];
   popoverClassName?: string | undefined;
   showChevron?: boolean | undefined;
+  triggerTitle?: string | undefined;
   triggerClassName?: string | undefined;
   value: T;
 }
@@ -72,6 +73,7 @@ export function AnchoredSelectMenu<T extends number | string>({
   options,
   popoverClassName,
   showChevron = true,
+  triggerTitle,
   triggerClassName,
   value,
 }: AnchoredSelectMenuProps<T>) {
@@ -175,7 +177,7 @@ export function AnchoredSelectMenu<T extends number | string>({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`${ariaLabel}: ${selectedLabel}`}
-        title={iconOnly ? `${ariaLabel}: ${selectedLabel}` : undefined}
+        title={triggerTitle ?? (iconOnly ? `${ariaLabel}: ${selectedLabel}` : undefined)}
         disabled={disabled || options.length === 0}
         onClick={() => (open ? closeMenu(false) : openMenu())}
         onKeyDown={(event) => {

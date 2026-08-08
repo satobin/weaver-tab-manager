@@ -105,6 +105,7 @@ export function MergeWindowsDialog({
         <button
           className="merge-select-all-button"
           type="button"
+          title={allWindowsSelected ? 'Clear window selection' : 'Select all windows'}
           disabled={disabled || windows.length === 0}
           onClick={() => onSetAllWindows(!allWindowsSelected)}
         >
@@ -118,6 +119,7 @@ export function MergeWindowsDialog({
         <button
           className="toolbar-button merge-apply-button"
           type="button"
+          title="Merge selected windows"
           disabled={disabled || selectedWindowIds.size < 2}
           onClick={onApply}
         >

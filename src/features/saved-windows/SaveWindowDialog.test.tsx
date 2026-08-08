@@ -59,6 +59,15 @@ describe('SaveWindowDialog', () => {
 
     const saveButton = screen.getByRole('button', { name: 'Save' });
     const closeButton = screen.getByRole('button', { name: 'Close save window' });
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute(
+      'title',
+      'Cancel saving this window',
+    );
+    expect(screen.getByRole('button', { name: 'Save & close' })).toHaveAttribute(
+      'title',
+      'Save this window and close it',
+    );
+    expect(saveButton).toHaveAttribute('title', 'Save this window');
     saveButton.focus();
     await user.tab();
     expect(closeButton).toHaveFocus();

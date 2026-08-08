@@ -23,6 +23,7 @@ describe('SortCriterionMenu', () => {
     const user = userEvent.setup();
     render(<SortCriterionHarness />);
     const trigger = screen.getByRole('button', { name: 'Sort test window by: Title' });
+    expect(trigger).toHaveAttribute('title', 'Choose sort field: Title or URL');
 
     await user.click(trigger);
     expect(screen.getByRole('menu', { name: 'Sort test window by' })).toBeInTheDocument();
