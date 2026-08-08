@@ -1,4 +1,7 @@
-import { type RestoredTabMetadataService } from '../platform/chrome/restoredTabMetadata';
+import {
+  type RestoredTabMetadataService,
+  type RestoredTabMetadataTracker,
+} from '../platform/chrome/restoredTabMetadata';
 
 interface ChromeEvent<TArgs extends unknown[]> {
   addListener: (listener: (...args: TArgs) => void) => void;
@@ -16,13 +19,14 @@ export interface RestoredTabMetadataEventApi {
 
 export function installRestoredTabMetadataListeners(
   api: RestoredTabMetadataEventApi,
-  metadataService: RestoredTabMetadataService,
+  metadataService: Pick<RestoredTabMetadataService, 'remove' | 'resolve'> &
+    RestoredTabMetadataTracker,
 ): () => void {
   const handleRemoved = (tabId: number) => {
     void metadataService.remove([tabId]).catch(() => undefined);
   };
   const handleUpdated = (
-    _tabId: number,
+    tabId: number,
     changeInfo: chrome.tabs.OnUpdatedInfo,
     tab: chrome.tabs.Tab,
   ) => {
@@ -33,7 +37,12 @@ export function installRestoredTabMetadataListeners(
     ) {
       return;
     }
-    void metadataService.resolve([tab], { pruneMissing: false }).catch(() => undefined);
+    void metadataService
+      .isTracked(tabId)
+      .then((isTracked) =>
+        isTracked ? metadataService.resolve([tab], { pruneMissing: false }) : undefined,
+      )
+      .catch(() => undefined);
   };
   api.tabs.onRemoved.addListener(handleRemoved);
   api.tabs.onUpdated.addListener(handleUpdated);

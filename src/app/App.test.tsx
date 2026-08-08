@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -39,6 +39,7 @@ function createService(windowCount = 1): ActiveWindowsService {
             }),
           ),
         });
+  const windowCountListeners = new Set<() => void>();
   return {
     closeDuplicateTabs: () =>
       Promise.resolve({
@@ -53,7 +54,8 @@ function createService(windowCount = 1): ActiveWindowsService {
     closeWindow: () => Promise.resolve(),
     focusTab: () => Promise.resolve(),
     focusWindow: () => Promise.resolve(),
-    loadSnapshot: () => Promise.resolve(snapshot),
+    loadSnapshot: vi.fn(() => Promise.resolve(snapshot)),
+    loadWindowCount: vi.fn(() => Promise.resolve(windowCount)),
     mergeWindows: () =>
       Promise.resolve({
         destinationWindowId: 1,
@@ -94,6 +96,10 @@ function createService(windowCount = 1): ActiveWindowsService {
     sortAllWindows: () => Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] }),
     sortWindow: () => Promise.resolve({ failures: [], sortedWindowIds: [], warnings: [] }),
     subscribe: () => () => undefined,
+    subscribeWindowCount: vi.fn((listener: () => void) => {
+      windowCountListeners.add(listener);
+      return () => windowCountListeners.delete(listener);
+    }),
     suspendTabs: () => Promise.resolve({ affectedTabIds: [], failures: [] }),
     unpinTab: () => Promise.resolve(),
     unsuspendTabs: () => Promise.resolve({ affectedTabIds: [], failures: [] }),
@@ -123,10 +129,12 @@ function createSavedService(windowCount: number): SavedWindowsService {
   const windows = Array.from({ length: windowCount }, (_, index) =>
     createSavedWindow(`saved-${index + 1}`),
   );
+  const countListeners = new Set<() => void>();
   return {
     deleteWindow: vi.fn(() => Promise.resolve()),
     keepWindow: vi.fn((savedWindow: SavedWindow) => Promise.resolve(savedWindow)),
     load: vi.fn(() => Promise.resolve(windows)),
+    loadCount: vi.fn(() => Promise.resolve(windows.length)),
     openTab: vi.fn(() => Promise.resolve(42)),
     renameWindow: vi.fn((_savedWindowId: string, name: string) =>
       Promise.resolve({ ...windows[0]!, name }),
@@ -142,6 +150,10 @@ function createSavedService(windowCount: number): SavedWindowsService {
     ),
     saveWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     subscribe: vi.fn(() => () => undefined),
+    subscribeCount: vi.fn((listener: () => void) => {
+      countListeners.add(listener);
+      return () => countListeners.delete(listener);
+    }),
   };
 }
 
@@ -206,14 +218,82 @@ describe('App', () => {
 
   it('shows active and saved window counts in the sidebar', async () => {
     window.location.hash = APP_ROUTES.about;
+    const activeWindowsService = createService(2);
+    const savedWindowsService = createSavedService(3);
     render(
-      <App activeWindowsService={createService(2)} savedWindowsService={createSavedService(3)} />,
+      <App activeWindowsService={activeWindowsService} savedWindowsService={savedWindowsService} />,
     );
 
     const activeWindowsLink = await screen.findByRole('link', { name: 'Active Windows: 2' });
     const savedWindowsLink = await screen.findByRole('link', { name: 'Saved Windows: 3' });
     expect(within(activeWindowsLink).getByText('2')).toHaveClass('nav-count');
     expect(within(savedWindowsLink).getByText('3')).toHaveClass('nav-count');
+    expect(activeWindowsService.loadWindowCount).toHaveBeenCalledOnce();
+    expect(activeWindowsService.loadSnapshot).not.toHaveBeenCalled();
+    expect(savedWindowsService.loadCount).toHaveBeenCalledOnce();
+    expect(savedWindowsService.load).not.toHaveBeenCalled();
+  });
+
+  it('uses the Saved Windows page load for its sidebar count', async () => {
+    window.location.hash = APP_ROUTES.savedWindows;
+    const savedWindowsService = createSavedService(2);
+    render(
+      <App activeWindowsService={createService()} savedWindowsService={savedWindowsService} />,
+    );
+
+    await screen.findByRole('link', { name: 'Saved Windows: 2' });
+    expect(savedWindowsService.load).toHaveBeenCalledOnce();
+    expect(savedWindowsService.subscribe).toHaveBeenCalledOnce();
+    expect(savedWindowsService.loadCount).not.toHaveBeenCalled();
+    expect(savedWindowsService.subscribeCount).not.toHaveBeenCalled();
+  });
+
+  it('hands the saved-window count between the page and its lightweight navigation source', async () => {
+    window.location.hash = APP_ROUTES.savedWindows;
+    const savedWindowsService = createSavedService(2);
+    const countListeners = new Set<() => void>();
+    let navigationCount = 3;
+    savedWindowsService.loadCount = vi.fn(() => Promise.resolve(navigationCount));
+    savedWindowsService.subscribeCount = vi.fn((listener: () => void) => {
+      countListeners.add(listener);
+      return () => countListeners.delete(listener);
+    });
+    render(
+      <App activeWindowsService={createService()} savedWindowsService={savedWindowsService} />,
+    );
+
+    await screen.findByRole('link', { name: 'Saved Windows: 2' });
+    expect(countListeners.size).toBe(0);
+
+    window.location.hash = APP_ROUTES.about;
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByRole('link', { name: 'Saved Windows: 3' });
+    expect(countListeners.size).toBe(1);
+
+    navigationCount = 4;
+    act(() => countListeners.forEach((listener) => listener()));
+    await screen.findByRole('link', { name: 'Saved Windows: 4' });
+
+    window.location.hash = APP_ROUTES.savedWindows;
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    await screen.findByRole('link', { name: 'Saved Windows: 2' });
+    expect(countListeners.size).toBe(0);
+    expect(savedWindowsService.load).toHaveBeenCalledTimes(2);
+
+    navigationCount = 6;
+    let resolveNavigationCount: ((count: number) => void) | undefined;
+    vi.mocked(savedWindowsService.loadCount).mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveNavigationCount = resolve;
+        }),
+    );
+    window.location.hash = APP_ROUTES.about;
+    fireEvent(window, new HashChangeEvent('hashchange'));
+    expect(screen.getByRole('link', { name: 'Saved Windows' })).toBeInTheDocument();
+    await waitFor(() => expect(savedWindowsService.loadCount).toHaveBeenCalledTimes(3));
+    act(() => resolveNavigationCount?.(6));
+    await screen.findByRole('link', { name: 'Saved Windows: 6' });
   });
 
   it('omits the saved-window badge when there are no saved windows', async () => {

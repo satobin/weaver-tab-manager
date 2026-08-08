@@ -1,5 +1,5 @@
 import { Archive, CircleAlert, Info, PanelsTopLeft, Settings } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { AboutPage } from '../pages/AboutPage';
 import { ActiveWindowsPage } from '../pages/ActiveWindowsPage';
@@ -9,18 +9,17 @@ import {
   createChromeActiveWindowsService,
   type ActiveWindowsService,
 } from '../features/active-windows/chromeActiveWindowsService';
-import { useActiveWindows } from '../features/active-windows/useActiveWindows';
 import {
   createSavedWindowsService,
   type SavedWindowsService,
 } from '../features/saved-windows/savedWindowsService';
-import { useSavedWindows } from '../features/saved-windows/useSavedWindows';
 import { AppearanceControl } from '../features/settings/AppearanceControl';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useAppearance } from '../features/settings/useAppearance';
 import { useSettings } from '../features/settings/useSettings';
 import { APP_ROUTES, type AppRoute } from './routes';
 import { useHashRoute } from './useHashRoute';
+import { useActiveWindowCount, useSavedWindowCount } from './useNavigationCounts';
 
 const NAV_ITEMS = [
   { route: APP_ROUTES.windows, label: 'Active Windows', icon: PanelsTopLeft },
@@ -36,10 +35,33 @@ const PAGE_TITLES: Record<AppRoute, string> = {
   [APP_ROUTES.about]: 'About Weaver',
 };
 
+function SavedWindowCountObserver({
+  onCountChange,
+  service,
+}: {
+  onCountChange: (count: number | null) => void;
+  service: SavedWindowsService;
+}) {
+  const count = useSavedWindowCount(service);
+
+  useEffect(() => {
+    onCountChange(count);
+  }, [count, onCountChange]);
+  useEffect(
+    () => () => {
+      onCountChange(null);
+    },
+    [onCountChange],
+  );
+
+  return null;
+}
+
 function CurrentPage({
   actionPortalTarget,
   activeWindowsService,
   headerPortalTarget,
+  onSavedWindowCountChange,
   route,
   savedWindowsService,
   settingsService,
@@ -47,6 +69,7 @@ function CurrentPage({
   actionPortalTarget: HTMLDivElement | null;
   activeWindowsService?: ActiveWindowsService | undefined;
   headerPortalTarget: HTMLDivElement | null;
+  onSavedWindowCountChange: (count: number | null) => void;
   route: AppRoute;
   savedWindowsService?: SavedWindowsService | undefined;
   settingsService: SettingsService;
@@ -54,7 +77,11 @@ function CurrentPage({
   switch (route) {
     case APP_ROUTES.savedWindows:
       return (
-        <SavedWindowsPage headerPortalTarget={headerPortalTarget} service={savedWindowsService} />
+        <SavedWindowsPage
+          headerPortalTarget={headerPortalTarget}
+          onWindowCountChange={onSavedWindowCountChange}
+          service={savedWindowsService}
+        />
       );
     case APP_ROUTES.settings:
       return <SettingsPage activeWindowsService={activeWindowsService} service={settingsService} />;
@@ -83,6 +110,8 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
   const route = useHashRoute();
   const [actionPortalTarget, setActionPortalTarget] = useState<HTMLDivElement | null>(null);
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLDivElement | null>(null);
+  const [navigationSavedWindowCount, setNavigationSavedWindowCount] = useState<number | null>(null);
+  const [savedWindowPageCount, setSavedWindowPageCount] = useState<number | null>(null);
   const resolvedSettingsService = useMemo(
     () => settingsService ?? createSettingsService(),
     [settingsService],
@@ -95,24 +124,29 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
     () => savedWindowsService ?? createSavedWindowsService(),
     [savedWindowsService],
   );
-  const { snapshot: navigationActiveWindows } = useActiveWindows(resolvedActiveWindowsService);
-  const { status: savedWindowsStatus, windows: navigationSavedWindows } = useSavedWindows(
-    resolvedSavedWindowsService,
-  );
+  const navigationActiveWindowCount = useActiveWindowCount(resolvedActiveWindowsService);
   const { errorMessage, isLoading, savingSettings, setColorMode, settings } =
     useSettings(resolvedSettingsService);
   useAppearance(settings.colorMode);
 
-  const activeWindowCount = navigationActiveWindows?.windows.length ?? null;
+  const activeWindowCount = navigationActiveWindowCount;
+  const resolvedSavedWindowCount =
+    route === APP_ROUTES.savedWindows ? savedWindowPageCount : navigationSavedWindowCount;
   const savedWindowCount =
-    savedWindowsStatus === 'ready'
-      ? navigationSavedWindows.length > 0
-        ? navigationSavedWindows.length
-        : undefined
-      : null;
+    resolvedSavedWindowCount === null
+      ? null
+      : resolvedSavedWindowCount > 0
+        ? resolvedSavedWindowCount
+        : undefined;
 
   return (
     <div className="app-shell">
+      {route !== APP_ROUTES.savedWindows ? (
+        <SavedWindowCountObserver
+          onCountChange={setNavigationSavedWindowCount}
+          service={resolvedSavedWindowsService}
+        />
+      ) : null}
       <aside className="sidebar" aria-label="Weaver navigation">
         <a className="brand" href={APP_ROUTES.windows} aria-label="Weaver home">
           <img src="/icons/default-128.png" alt="" width="42" height="42" />
@@ -180,6 +214,7 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
           actionPortalTarget={actionPortalTarget}
           activeWindowsService={resolvedActiveWindowsService}
           headerPortalTarget={headerPortalTarget}
+          onSavedWindowCountChange={setSavedWindowPageCount}
           route={route}
           savedWindowsService={resolvedSavedWindowsService}
           settingsService={resolvedSettingsService}

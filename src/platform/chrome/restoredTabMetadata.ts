@@ -53,6 +53,10 @@ export interface RestoredTabMetadataService {
   subscribe: (listener: () => void) => () => void;
 }
 
+export interface RestoredTabMetadataTracker {
+  isTracked: (tabId: number) => Promise<boolean>;
+}
+
 interface RestoredTabMetadataEnvironment {
   withWriteLock: <T>(operation: () => Promise<T>) => Promise<T>;
 }
@@ -147,9 +151,15 @@ export function applyRestoredTabMetadata(
 export function createRestoredTabMetadataService(
   api: RestoredTabMetadataChromeApi = chrome,
   environment: RestoredTabMetadataEnvironment = DEFAULT_ENVIRONMENT,
-): RestoredTabMetadataService {
+): RestoredTabMetadataService & RestoredTabMetadataTracker {
   const storage = api.storage?.session;
+  const subscribers = new Set<() => void>();
   let writeQueue: Promise<void> = Promise.resolve();
+  let trackedTabIds: ReadonlySet<number> | null = null;
+  let trackedTabIdsLoad: Promise<ReadonlySet<number>> | null = null;
+  let trackedTabIdsRevision = 0;
+  let trackingCacheEnabled = false;
+  let listeningForStorageChanges = false;
 
   const load = async (): Promise<RestoredTabMetadataCollection> => {
     if (!storage) {
@@ -170,6 +180,86 @@ export function createRestoredTabMetadataService(
     await storage.set({ [RESTORED_TAB_METADATA_STORAGE_KEY]: collection });
   };
 
+  const tabIdsFromCollection = (collection: RestoredTabMetadataCollection): ReadonlySet<number> =>
+    new Set(Object.keys(collection.tabs).map(Number));
+
+  const rememberTrackedTabIds = (
+    collection: RestoredTabMetadataCollection,
+    expectedRevision: number,
+  ) => {
+    if (trackedTabIdsRevision === expectedRevision) {
+      trackedTabIds = tabIdsFromCollection(collection);
+    }
+  };
+
+  const loadTrackedTabIds = (): Promise<ReadonlySet<number>> => {
+    if (trackedTabIds) {
+      return Promise.resolve(trackedTabIds);
+    }
+    if (trackedTabIdsLoad) {
+      return trackedTabIdsLoad;
+    }
+
+    const pendingLoad = (async () => {
+      while (true) {
+        const pendingWrites = writeQueue;
+        await pendingWrites;
+        if (pendingWrites !== writeQueue) {
+          continue;
+        }
+        if (trackedTabIds) {
+          return trackedTabIds;
+        }
+        const revision = trackedTabIdsRevision;
+        const collection = await load();
+        // Never cache a negative lookup from before a local mutation or external storage change.
+        if (pendingWrites !== writeQueue || revision !== trackedTabIdsRevision) {
+          continue;
+        }
+        const tabIds = tabIdsFromCollection(collection);
+        trackedTabIds = tabIds;
+        return tabIds;
+      }
+    })();
+    trackedTabIdsLoad = pendingLoad;
+    const clearPendingLoad = () => {
+      if (trackedTabIdsLoad === pendingLoad) {
+        trackedTabIdsLoad = null;
+      }
+    };
+    void pendingLoad.then(clearPendingLoad, clearPendingLoad);
+    return pendingLoad;
+  };
+
+  const onChanged = api.storage?.onChanged;
+  const handleStorageChange = (changes: StorageChanges, areaName: string) => {
+    if (areaName !== 'session' || !changes[RESTORED_TAB_METADATA_STORAGE_KEY]) {
+      return;
+    }
+    trackedTabIdsRevision += 1;
+    trackedTabIds = null;
+    subscribers.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // Keep notifying independent subscribers after one consumer fails.
+      }
+    });
+  };
+  const syncStorageChangeListener = () => {
+    if (!onChanged) {
+      return;
+    }
+    const shouldListen = trackingCacheEnabled || subscribers.size > 0;
+    if (shouldListen && !listeningForStorageChanges) {
+      onChanged.addListener(handleStorageChange);
+      listeningForStorageChanges = true;
+    } else if (!shouldListen && listeningForStorageChanges) {
+      onChanged.removeListener(handleStorageChange);
+      listeningForStorageChanges = false;
+    }
+  };
+
   const mutate = <T>(
     mutation: (
       collection: RestoredTabMetadataCollection,
@@ -182,11 +272,13 @@ export function createRestoredTabMetadataService(
     }
     const operation = writeQueue.then(() =>
       environment.withWriteLock(async () => {
+        const trackedTabIdsRevisionAtLoad = trackedTabIdsRevision;
         const collection = await load();
         const output = await mutation(collection);
         if (output.changed) {
           await write(collection);
         }
+        rememberTrackedTabIds(collection, trackedTabIdsRevisionAtLoad);
         return output.result;
       }),
     );
@@ -198,6 +290,18 @@ export function createRestoredTabMetadataService(
   };
 
   return {
+    async isTracked(tabId) {
+      if (!Number.isInteger(tabId) || tabId < 0) {
+        return false;
+      }
+      if (!trackingCacheEnabled) {
+        trackingCacheEnabled = true;
+        trackedTabIds = null;
+      }
+      syncStorageChangeListener();
+      return (await loadTrackedTabIds()).has(tabId);
+    },
+
     async register(entries) {
       const normalizedEntries = entries.flatMap((entry) => {
         const title = entry.title.trim();
@@ -278,17 +382,16 @@ export function createRestoredTabMetadataService(
     },
 
     subscribe(listener) {
-      const onChanged = api.storage?.onChanged;
       if (!onChanged) {
         return () => undefined;
       }
-      const handleChange = (changes: StorageChanges, areaName: string) => {
-        if (areaName === 'session' && changes[RESTORED_TAB_METADATA_STORAGE_KEY]) {
-          listener();
-        }
+      const subscription = () => listener();
+      subscribers.add(subscription);
+      syncStorageChangeListener();
+      return () => {
+        subscribers.delete(subscription);
+        syncStorageChangeListener();
       };
-      onChanged.addListener(handleChange);
-      return () => onChanged.removeListener(handleChange);
     },
   };
 }

@@ -107,6 +107,20 @@ describe('SavedWindowsPage', () => {
     expect(container.querySelector('.saved-windows-toolbar')).not.toBeInTheDocument();
   });
 
+  it('reports its loaded count and clears page ownership when it unmounts', async () => {
+    const onWindowCountChange = vi.fn();
+    const { unmount } = render(
+      <SavedWindowsPage
+        onWindowCountChange={onWindowCountChange}
+        service={createService([createSavedWindow(), createSavedWindow({ id: 'saved-2' })])}
+      />,
+    );
+
+    await waitFor(() => expect(onWindowCountChange).toHaveBeenLastCalledWith(2));
+    unmount();
+    expect(onWindowCountChange).toHaveBeenLastCalledWith(null);
+  });
+
   it('shows and dismisses the invalid-record cleanup notice', async () => {
     const user = userEvent.setup();
     const service = createService();

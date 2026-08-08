@@ -100,6 +100,7 @@ export interface SavedWindowsService {
   dismissCleanupNotice?: (() => Promise<void>) | undefined;
   keepWindow: (savedWindow: SavedWindow) => Promise<SavedWindow>;
   load: () => Promise<SavedWindow[]>;
+  loadCount?: (() => Promise<number>) | undefined;
   loadCleanupNotice?: (() => Promise<string | null>) | undefined;
   openTab: (tab: OpenSavedTabInput) => Promise<number>;
   renameWindow: (savedWindowId: string, name: string) => Promise<SavedWindow>;
@@ -110,6 +111,7 @@ export interface SavedWindowsService {
     closeSource: boolean,
   ) => Promise<SaveWindowResult>;
   subscribe: (listener: () => void) => () => void;
+  subscribeCount?: ((listener: () => void) => () => void) | undefined;
 }
 
 export interface SavedWindowsEnvironment {
@@ -291,6 +293,11 @@ export function createChromeSavedWindowsService(
     async load() {
       const collection = await loadCollection();
       return cloneSavedWindows(collection.windows);
+    },
+
+    async loadCount() {
+      const collection = await loadCollection();
+      return collection.windows.length;
     },
 
     async loadCleanupNotice() {
@@ -589,6 +596,16 @@ export function createChromeSavedWindowsService(
       api.storage.onChanged.addListener(handleChange);
       return () => api.storage.onChanged.removeListener(handleChange);
     },
+
+    subscribeCount(listener) {
+      const handleChange = (changes: StorageChanges, areaName: string) => {
+        if (areaName === 'local' && changes[SAVED_WINDOWS_STORAGE_KEY]) {
+          listener();
+        }
+      };
+      api.storage.onChanged.addListener(handleChange);
+      return () => api.storage.onChanged.removeListener(handleChange);
+    },
   };
 }
 
@@ -618,6 +635,7 @@ export function createSavedWindowsService(): SavedWindowsService {
       });
     },
     load: () => Promise.resolve(cloneSavedWindows(windows)),
+    loadCount: () => Promise.resolve(windows.length),
     keepWindow(savedWindow) {
       return Promise.resolve().then(() => {
         const existing = windows.find((window) => window.id === savedWindow.id);
@@ -650,6 +668,10 @@ export function createSavedWindowsService(): SavedWindowsService {
     restoreWindow: () => Promise.reject(new Error('Browser extension APIs are unavailable.')),
     saveWindow: () => Promise.reject(new Error('Browser extension APIs are unavailable.')),
     subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    subscribeCount: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },

@@ -845,6 +845,7 @@ describe('createChromeSavedWindowsService', () => {
   it('subscribes only to local changes for the saved-window key and cleans up', () => {
     const fake = createApi();
     const service = createChromeSavedWindowsService(fake.api, environment);
+    const baselineListenerCount = fake.listenerCount();
     const listener = vi.fn();
     const unsubscribe = service.subscribe(listener);
 
@@ -857,6 +858,28 @@ describe('createChromeSavedWindowsService', () => {
     unsubscribe();
     fake.emit();
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(fake.listenerCount()).toBe(0);
+    expect(fake.listenerCount()).toBe(baselineListenerCount);
+  });
+
+  it('loads and subscribes to the saved-window count without cloning the page collection', async () => {
+    const fake = createApi([createSavedWindow(), createSavedWindow({ id: 'saved-2' })]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const baselineListenerCount = fake.listenerCount();
+    const listener = vi.fn();
+
+    await expect(service.loadCount?.()).resolves.toBe(2);
+    const unsubscribe = service.subscribeCount?.(listener);
+
+    fake.emit(SAVED_WINDOWS_CLEANUP_NOTICE_STORAGE_KEY);
+    fake.emit('another-key');
+    fake.emit(SAVED_WINDOWS_STORAGE_KEY, 'sync');
+    expect(listener).not.toHaveBeenCalled();
+    fake.emit();
+    expect(listener).toHaveBeenCalledOnce();
+
+    unsubscribe?.();
+    fake.emit();
+    expect(listener).toHaveBeenCalledOnce();
+    expect(fake.listenerCount()).toBe(baselineListenerCount);
   });
 });

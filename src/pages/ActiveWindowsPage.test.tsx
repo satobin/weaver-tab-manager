@@ -1509,6 +1509,9 @@ describe('ActiveWindowsPage', () => {
     const header = heading.closest('header');
     expect(card).not.toBeNull();
     expect(header).not.toBeNull();
+    const tabList = (card as HTMLElement).querySelector('#window-1-tabs');
+    expect(tabList).not.toBeNull();
+    expect(tabList?.querySelectorAll('.tab-list-item')).toHaveLength(2);
 
     const collapseButton = within(header as HTMLElement).getByRole('button', {
       name: 'Collapse Window 1',
@@ -1545,6 +1548,8 @@ describe('ActiveWindowsPage', () => {
       within(header as HTMLElement).getByRole('button', { name: 'Expand Window 1' }),
     ).toHaveAttribute('aria-expanded', 'false');
     expect(within(header as HTMLElement).queryByText('Collapsed')).not.toBeInTheDocument();
+    expect(tabList).toHaveAttribute('hidden');
+    expect(tabList?.querySelectorAll('.tab-list-item')).toHaveLength(0);
     expect(
       within(card as HTMLElement).queryByRole('button', { name: 'Focus Quarterly plan' }),
     ).not.toBeInTheDocument();
@@ -1558,6 +1563,8 @@ describe('ActiveWindowsPage', () => {
       }),
     );
     expect(card).not.toHaveClass('is-collapsed');
+    expect(tabList).not.toHaveAttribute('hidden');
+    expect(tabList?.querySelectorAll('.tab-list-item')).toHaveLength(2);
     expect(
       within(card as HTMLElement).getByRole('button', { name: 'Focus Quarterly plan' }),
     ).toBeVisible();

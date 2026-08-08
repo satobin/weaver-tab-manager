@@ -29,6 +29,7 @@ import { EmptyState } from '../ui/EmptyState';
 
 interface SavedWindowsPageProps {
   headerPortalTarget?: Element | null;
+  onWindowCountChange?: ((count: number | null) => void) | undefined;
   service?: SavedWindowsService | undefined;
 }
 
@@ -155,6 +156,7 @@ function SavedWindowPreview({
 
 export function SavedWindowsPage({
   headerPortalTarget,
+  onWindowCountChange,
   service: providedService,
 }: SavedWindowsPageProps) {
   const service = useMemo(() => providedService ?? createSavedWindowsService(), [providedService]);
@@ -172,6 +174,17 @@ export function SavedWindowsPage({
   } | null>(null);
   const operationRef = useRef(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    onWindowCountChange?.(status === 'ready' ? windows.length : null);
+  }, [onWindowCountChange, status, windows.length]);
+
+  useEffect(
+    () => () => {
+      onWindowCountChange?.(null);
+    },
+    [onWindowCountChange],
+  );
 
   useEffect(() => {
     if (renamingId) {

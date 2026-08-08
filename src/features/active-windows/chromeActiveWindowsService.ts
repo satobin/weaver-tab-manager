@@ -95,6 +95,7 @@ export interface ActiveWindowsService {
   closeWindow: (windowId: number) => Promise<void>;
   focusTab: (windowId: number, tabId: number) => Promise<void>;
   focusWindow: (windowId: number) => Promise<void>;
+  loadWindowCount?: (() => Promise<number>) | undefined;
   loadSnapshot: () => Promise<ActiveWindowsSnapshot>;
   moveTab: (
     tabId: number,
@@ -117,6 +118,7 @@ export interface ActiveWindowsService {
   sortAllWindows: (options: TabSortOptions) => Promise<SortWindowsResult>;
   sortWindow: (windowId: number, options: TabSortOptions) => Promise<SortWindowsResult>;
   subscribe: (listener: () => void) => () => void;
+  subscribeWindowCount?: ((listener: () => void) => () => void) | undefined;
   suspendTabs: (tabIds: readonly number[]) => Promise<TabSuspensionResult>;
   unpinTab: (tabId: number) => Promise<void>;
   unsuspendTabs: (tabIds: readonly number[]) => Promise<TabSuspensionResult>;
@@ -1198,6 +1200,11 @@ export function createChromeActiveWindowsService(
       };
     },
 
+    async loadWindowCount() {
+      const windows = await api.windows.getAll({ populate: false, windowTypes: ['normal'] });
+      return windows.filter(isManagedChromeWindow).length;
+    },
+
     async restoreTabs(tabs) {
       const requestedTabs = [...new Map(tabs.map((tab) => [tab.originalTabId, tab])).values()];
       const result: RestoreTabsResult = {
@@ -2078,6 +2085,52 @@ export function createChromeActiveWindowsService(
 
       return () => {
         cleanups.forEach((cleanup) => cleanup());
+      };
+    },
+
+    subscribeWindowCount(listener) {
+      // Preserve transient Codex badge continuity off full-snapshot routes without
+      // notifying the count subscriber or querying tab/group collections.
+      const handleCreated = (window: chrome.windows.Window) => {
+        if (isManagedChromeWindow(window)) {
+          listener();
+        }
+      };
+      const handleRemoved = () => listener();
+      const handleTabCreated = (tab: chrome.tabs.Tab) => {
+        detectAgentAssociation(tab, null);
+      };
+      const handleTabRemoved = (tabId: number) => {
+        recentCodexExtensionDetectionByTabId.delete(tabId);
+      };
+      const handleTabReplaced = (addedTabId: number, removedTabId: number) => {
+        recentCodexExtensionDetectionByTabId.delete(removedTabId);
+        recentCodexExtensionDetectionByTabId.delete(addedTabId);
+      };
+      const handleTabUpdated = (
+        _tabId: number,
+        changeInfo: chrome.tabs.OnUpdatedInfo,
+        tab: chrome.tabs.Tab,
+      ) => {
+        if (!('favIconUrl' in changeInfo || 'status' in changeInfo || 'url' in changeInfo)) {
+          return;
+        }
+        detectAgentAssociation(tab, null);
+      };
+      api.windows.onCreated.addListener(handleCreated);
+      api.windows.onRemoved.addListener(handleRemoved);
+      api.tabs.onCreated.addListener(handleTabCreated);
+      api.tabs.onRemoved.addListener(handleTabRemoved);
+      api.tabs.onReplaced.addListener(handleTabReplaced);
+      api.tabs.onUpdated.addListener(handleTabUpdated);
+
+      return () => {
+        api.windows.onCreated.removeListener(handleCreated);
+        api.windows.onRemoved.removeListener(handleRemoved);
+        api.tabs.onCreated.removeListener(handleTabCreated);
+        api.tabs.onRemoved.removeListener(handleTabRemoved);
+        api.tabs.onReplaced.removeListener(handleTabReplaced);
+        api.tabs.onUpdated.removeListener(handleTabUpdated);
       };
     },
 

@@ -282,6 +282,7 @@ function createApi() {
     api,
     callOrder,
     tabEvents,
+    windowEvents,
     windows,
   };
 }
@@ -335,6 +336,102 @@ describe('createChromeActiveWindowsService', () => {
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.discarded)).toEqual([false, true]);
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.frozen)).toEqual([false, true]);
     expect(snapshot.windows[1]?.tabs.map((tab) => tab.unloaded)).toEqual([true, false]);
+  });
+
+  it('loads and subscribes to the active-window count without populating tabs', async () => {
+    const { api, tabEvents, windowEvents } = createApi();
+    const service = createChromeActiveWindowsService(api);
+    const listener = vi.fn();
+
+    await expect(service.loadWindowCount?.()).resolves.toBe(2);
+    expect(api.windows.getAll).toHaveBeenCalledWith({
+      populate: false,
+      windowTypes: ['normal'],
+    });
+    expect(api.windows.getCurrent).not.toHaveBeenCalled();
+    expect(api.tabGroups.query).not.toHaveBeenCalled();
+
+    const unsubscribe = service.subscribeWindowCount?.(listener);
+    windowEvents.onCreated.emit(createChromeWindow({ id: 5 }));
+    windowEvents.onCreated.emit(createChromeWindow({ id: 6, type: 'popup' }));
+    windowEvents.onCreated.emit(createChromeWindow({ id: 7, incognito: true }));
+    windowEvents.onRemoved.emit(5);
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(windowEvents.onCreated.listenerCount()).toBe(1);
+    expect(windowEvents.onRemoved.listenerCount()).toBe(1);
+    expect(tabEvents.onCreated.listenerCount()).toBe(1);
+    expect(tabEvents.onRemoved.listenerCount()).toBe(1);
+    expect(tabEvents.onReplaced.listenerCount()).toBe(1);
+    expect(tabEvents.onUpdated.listenerCount()).toBe(1);
+
+    unsubscribe?.();
+    expect(windowEvents.onCreated.listenerCount()).toBe(0);
+    expect(windowEvents.onRemoved.listenerCount()).toBe(0);
+    expect(tabEvents.onCreated.listenerCount()).toBe(0);
+    expect(tabEvents.onRemoved.listenerCount()).toBe(0);
+    expect(tabEvents.onReplaced.listenerCount()).toBe(0);
+    expect(tabEvents.onUpdated.listenerCount()).toBe(0);
+  });
+
+  it('preserves transient Codex badge detection between lightweight events and a later snapshot', async () => {
+    const { api, tabEvents, windows } = createApi();
+    const candidate = windows[0]?.tabs?.find((tab) => tab.id === 12);
+    if (!candidate || candidate.id === undefined) {
+      throw new Error('Missing extension-badge-associated tab fixture');
+    }
+    const service = createChromeActiveWindowsService(api);
+    const countListener = vi.fn();
+    const unsubscribe = service.subscribeWindowCount?.(countListener);
+    if (!unsubscribe) {
+      throw new Error('Missing lightweight window-count subscription');
+    }
+
+    candidate.favIconUrl = createCodexExtensionMarkerUrl(CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER);
+    candidate.status = 'complete';
+    tabEvents.onUpdated.emit(candidate.id, { favIconUrl: candidate.favIconUrl }, candidate);
+    candidate.favIconUrl = 'https://example.com/ordinary-favicon.ico';
+    tabEvents.onUpdated.emit(candidate.id, { title: 'Unrelated title update' }, candidate);
+    delete candidate.favIconUrl;
+    candidate.status = 'loading';
+    tabEvents.onUpdated.emit(candidate.id, { status: 'loading' }, candidate);
+
+    const warmedSnapshot = await service.loadSnapshot();
+    expect(
+      warmedSnapshot.windows
+        .flatMap((window) => window.tabs)
+        .find((tab) => tab.id === candidate.id),
+    ).toMatchObject({
+      agentAssociated: true,
+      agentDetection: {
+        activity: 'output-ready',
+        evidence: 'codex-extension-badge',
+      },
+    });
+    expect(countListener).not.toHaveBeenCalled();
+
+    tabEvents.onRemoved.emit(candidate.id, {
+      isWindowClosing: false,
+      windowId: candidate.windowId,
+    });
+    const clearedSnapshot = await service.loadSnapshot();
+    expect(
+      clearedSnapshot.windows
+        .flatMap((window) => window.tabs)
+        .find((tab) => tab.id === candidate.id),
+    ).toMatchObject({ agentAssociated: false, agentDetection: null });
+
+    unsubscribe();
+    candidate.favIconUrl = createCodexExtensionMarkerUrl(CODEX_EXTENSION_DELIVERABLE_BADGE_MARKER);
+    tabEvents.onUpdated.emit(candidate.id, { favIconUrl: candidate.favIconUrl }, candidate);
+    delete candidate.favIconUrl;
+    tabEvents.onUpdated.emit(candidate.id, { status: 'loading' }, candidate);
+    const unsubscribedSnapshot = await service.loadSnapshot();
+    expect(
+      unsubscribedSnapshot.windows
+        .flatMap((window) => window.tabs)
+        .find((tab) => tab.id === candidate.id),
+    ).toMatchObject({ agentAssociated: false, agentDetection: null });
   });
 
   it('marks tabs associated with Codex extension badge and Claude group signals', async () => {

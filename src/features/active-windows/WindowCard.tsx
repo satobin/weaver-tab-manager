@@ -228,6 +228,7 @@ export function WindowCard({
     visualIndex: window.tabs.length,
     windowId: window.id,
   };
+  const tabsToRender: readonly ManagedTab[] = collapsed ? [] : window.tabs;
 
   useEffect(
     () => () => {
@@ -452,7 +453,7 @@ export function WindowCard({
             onTabDrop(dropTarget?.windowId === window.id ? dropTarget : appendDropTarget);
           }}
         >
-          {window.tabs.map((tab, index) => {
+          {tabsToRender.map((tab, index) => {
             const group = tab.groupId === null ? undefined : groupsById.get(tab.groupId);
             const beginsGroup =
               group !== undefined && window.tabs[index - 1]?.groupId !== tab.groupId;
@@ -836,7 +837,9 @@ export function WindowCard({
               </Fragment>
             );
           })}
-          {dropTarget?.windowId === window.id && dropTarget.visualIndex === window.tabs.length ? (
+          {!collapsed &&
+          dropTarget?.windowId === window.id &&
+          dropTarget.visualIndex === window.tabs.length ? (
             <li className="tab-drop-indicator" aria-hidden="true" />
           ) : null}
         </ul>
