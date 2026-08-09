@@ -26,9 +26,17 @@ pnpm install --frozen-lockfile
 
 Generated builds, CRXs, environment files, and common private-key formats are ignored by Git. This is a safety net, not a security boundary: keep signing keys outside the checkout, and never force-add them or generated packages.
 
+## Repository workflow
+
+Weaver is a single-owner repository. Ordinary development does not use review pull requests: validate locally, commit the intended changes, merge any temporary task branch into `main`, and push `main`. Task branches are optional organization, not an approval boundary.
+
+GitHub CI is an automated verification signal rather than a merge gate. It runs after changes reach `main`; it also runs on Dependabot pull requests so those machine-generated proposals can be checked before the owner chooses whether to apply them. Store packaging, tags, uploads, and publication remain separate explicit release actions.
+
 ## Dependency maintenance
 
-Dependabot checks npm and GitHub Actions twice a year. Routine minor and patch updates are grouped to reduce review noise, while major npm upgrades remain separate so their migration and validation can be reviewed deliberately. React, React DOM, and their type packages are grouped because the runtime packages must use exactly matching versions. `@types/node` stays on the same major as the Node.js version in `.node-version`.
+Dependabot checks npm and GitHub Actions twice a year. Routine minor and patch updates are grouped to reduce maintenance noise, while major npm upgrades remain separate so their migration and validation can be handled deliberately. React, React DOM, and their type packages are grouped because the runtime packages must use exactly matching versions. `@types/node` stays on the same major as the Node.js version in `.node-version`.
+
+Dependabot pull requests are automated maintenance proposals, not a human review workflow. The owner may use their checks as evidence, apply the coordinated update directly to `main`, and close the proposals as superseded. Security-update proposals may appear outside the twice-yearly routine schedule when GitHub finds a relevant vulnerability.
 
 Version-update cooldowns do not delay Dependabot security updates. Repository administrators must enable Dependabot alerts and security updates separately in GitHub settings; `.github/dependabot.yml` does not enable those features.
 
