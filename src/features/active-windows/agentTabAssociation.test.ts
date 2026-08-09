@@ -19,6 +19,7 @@ function createTab(overrides: Partial<chrome.tabs.Tab> = {}): chrome.tabs.Tab {
     highlighted: false,
     incognito: false,
     index: 0,
+    lastAccessed: 0,
     pinned: false,
     selected: false,
     windowId: 1,

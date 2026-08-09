@@ -3,8 +3,8 @@ Weaver Third-Party Notices
 
 This distribution includes the following third-party software:
 
-- React 19.2.7
-- React DOM 19.2.7
+- React 19.2.8
+- React DOM 19.2.8
 - Scheduler 0.27.0
 
 MIT License

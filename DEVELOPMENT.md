@@ -26,6 +26,22 @@ pnpm install --frozen-lockfile
 
 Generated builds, CRXs, environment files, and common private-key formats are ignored by Git. This is a safety net, not a security boundary: keep signing keys outside the checkout, and never force-add them or generated packages.
 
+## Dependency maintenance
+
+Dependabot checks npm and GitHub Actions twice a year. Routine minor and patch updates are grouped to reduce review noise, while major npm upgrades remain separate so their migration and validation can be reviewed deliberately. React, React DOM, and their type packages are grouped because the runtime packages must use exactly matching versions. `@types/node` stays on the same major as the Node.js version in `.node-version`.
+
+Version-update cooldowns do not delay Dependabot security updates. Repository administrators must enable Dependabot alerts and security updates separately in GitHub settings; `.github/dependabot.yml` does not enable those features.
+
+When updating dependencies locally, regenerate and install the lockfile with the pinned Node.js and pnpm versions, then run:
+
+```sh
+pnpm audit --audit-level high
+pnpm run check
+pnpm run build:test
+pnpm run package:preview:chrome
+pnpm run package:preview:edge
+```
+
 ## 1. Live local testing
 
 Start the test-branded Vite development build:
