@@ -27,7 +27,6 @@ function createPopupSettingsService(advancedDuplicateMatchingEnabled: boolean): 
     setAdvancedDuplicateMatchingEnabled: vi.fn(() => Promise.resolve(settings)),
     setColorMode: vi.fn(() => Promise.resolve(settings)),
     setDeduplicationRules: vi.fn(() => Promise.resolve(settings)),
-    setPreserveGroupsDuringSort: vi.fn(() => Promise.resolve(settings)),
     setShowTabUrls: vi.fn(() => Promise.resolve(settings)),
     subscribe: vi.fn(() => () => undefined),
   };
@@ -401,7 +400,6 @@ describe('Popup', () => {
       expect(service.sortWindow).toHaveBeenCalledWith(1, {
         criterion: 'title',
         direction: 'asc',
-        preserveGroups: true,
       });
     });
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
@@ -418,7 +416,6 @@ describe('Popup', () => {
       expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
         criterion: 'url',
         direction: 'asc',
-        preserveGroups: true,
       });
     });
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
@@ -469,7 +466,6 @@ describe('Popup', () => {
       expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
         criterion: 'title',
         direction: 'desc',
-        preserveGroups: true,
       }),
     );
   });

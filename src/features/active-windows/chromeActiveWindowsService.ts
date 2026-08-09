@@ -845,16 +845,6 @@ export function createChromeActiveWindowsService(
       let groupSensitiveMoveCompleted = false;
 
       try {
-        if (!options.preserveGroups) {
-          const groupedTabIds = originalTabs
-            .filter((tab) => tab.groupId >= 0 && !associationProtectedGroupIds.has(tab.groupId))
-            .map((tab) => tab.id);
-          const [firstGroupedTabId, ...remainingGroupedTabIds] = groupedTabIds;
-          if (firstGroupedTabId !== undefined) {
-            await api.tabs.ungroup([firstGroupedTabId, ...remainingGroupedTabIds]);
-          }
-        }
-
         for (let targetIndex = 0; targetIndex < desiredTabs.length; targetIndex += 1) {
           const tabId = desiredTabs[targetIndex]?.id;
           if (tabId === undefined) {
@@ -876,7 +866,7 @@ export function createChromeActiveWindowsService(
         result.failures.push({ message: describeChromeError(error), windowId });
       }
 
-      if (options.preserveGroups && groupSensitiveMoveCompleted) {
+      if (groupSensitiveMoveCompleted) {
         const tabIds = new Set(originalTabs.map((tab) => tab.id));
         const restorableGroupIds = new Set(
           groups.flatMap((group) => (associationProtectedGroupIds.has(group.id) ? [] : [group.id])),

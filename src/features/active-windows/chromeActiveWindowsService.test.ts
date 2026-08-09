@@ -558,7 +558,6 @@ describe('createChromeActiveWindowsService', () => {
     await service.sortWindow(1, {
       criterion: 'title',
       direction: 'asc',
-      preserveGroups: true,
     });
     expect(api.tabs.move).toHaveBeenCalledWith(12, { index: 0, windowId: 1 });
   });
@@ -1792,12 +1791,12 @@ describe('createChromeActiveWindowsService', () => {
       service.sortWindow(5, {
         criterion: 'title',
         direction: 'asc',
-        preserveGroups: true,
       }),
     ).resolves.toEqual({ failures: [], sortedWindowIds: [5], warnings: [] });
 
     expect(api.tabs.move).toHaveBeenCalledTimes(1);
     expect(api.tabs.move).toHaveBeenCalledWith(52, { index: 0, windowId: 5 });
+    expect(api.tabs.ungroup).not.toHaveBeenCalled();
     expect(api.tabs.group).toHaveBeenCalledWith({
       createProperties: { windowId: 5 },
       tabIds: [51, 52],
@@ -1828,7 +1827,6 @@ describe('createChromeActiveWindowsService', () => {
       service.sortWindow(5, {
         criterion: 'title',
         direction: 'asc',
-        preserveGroups: false,
       }),
     ).resolves.toEqual({ failures: [], sortedWindowIds: [5], warnings: [] });
 
@@ -1869,65 +1867,60 @@ describe('createChromeActiveWindowsService', () => {
     await service.sortWindow(5, {
       criterion: 'title',
       direction: 'asc',
-      preserveGroups: false,
     });
 
     expect(api.tabs.move).toHaveBeenCalledWith(52, { index: 0, windowId: 5 });
   });
 
-  it.each([false, true])(
-    'keeps a group containing a Claude-associated tab intact while sorting ordinary tabs (preserveGroups: %s)',
-    async (preserveGroups) => {
-      const { api } = createApi();
-      vi.mocked(api.windows.getAll).mockResolvedValue([
-        createChromeWindow({
-          id: 5,
-          tabs: [
-            createChromeTab({ id: 51, index: 0, title: 'Zulu before', windowId: 5 }),
-            createChromeTab({ id: 52, index: 1, title: 'Alpha before', windowId: 5 }),
-            createChromeTab({
-              groupId: 7,
-              id: 53,
-              index: 2,
-              title: 'Zulu agent',
-              windowId: 5,
-            }),
-            createChromeTab({
-              groupId: 7,
-              id: 54,
-              index: 3,
-              title: 'Alpha agent',
-              windowId: 5,
-            }),
-            createChromeTab({ id: 55, index: 4, title: 'Zulu after', windowId: 5 }),
-            createChromeTab({ id: 56, index: 5, title: 'Alpha after', windowId: 5 }),
-          ],
-        }),
-      ]);
-      vi.mocked(api.tabGroups.query).mockResolvedValue([
-        createChromeGroup({ color: 'orange', id: 7, title: 'Claude', windowId: 5 }),
-      ]);
-      const service = createChromeActiveWindowsService(api);
+  it('keeps a group containing a Claude-associated tab intact while sorting ordinary tabs', async () => {
+    const { api } = createApi();
+    vi.mocked(api.windows.getAll).mockResolvedValue([
+      createChromeWindow({
+        id: 5,
+        tabs: [
+          createChromeTab({ id: 51, index: 0, title: 'Zulu before', windowId: 5 }),
+          createChromeTab({ id: 52, index: 1, title: 'Alpha before', windowId: 5 }),
+          createChromeTab({
+            groupId: 7,
+            id: 53,
+            index: 2,
+            title: 'Zulu agent',
+            windowId: 5,
+          }),
+          createChromeTab({
+            groupId: 7,
+            id: 54,
+            index: 3,
+            title: 'Alpha agent',
+            windowId: 5,
+          }),
+          createChromeTab({ id: 55, index: 4, title: 'Zulu after', windowId: 5 }),
+          createChromeTab({ id: 56, index: 5, title: 'Alpha after', windowId: 5 }),
+        ],
+      }),
+    ]);
+    vi.mocked(api.tabGroups.query).mockResolvedValue([
+      createChromeGroup({ color: 'orange', id: 7, title: 'Claude', windowId: 5 }),
+    ]);
+    const service = createChromeActiveWindowsService(api);
 
-      await expect(
-        service.sortWindow(5, {
-          criterion: 'title',
-          direction: 'asc',
-          preserveGroups,
-        }),
-      ).resolves.toEqual({ failures: [], sortedWindowIds: [5], warnings: [] });
+    await expect(
+      service.sortWindow(5, {
+        criterion: 'title',
+        direction: 'asc',
+      }),
+    ).resolves.toEqual({ failures: [], sortedWindowIds: [5], warnings: [] });
 
-      expect(api.tabs.move).toHaveBeenCalledTimes(2);
-      expect(api.tabs.move).toHaveBeenNthCalledWith(1, 52, { index: 0, windowId: 5 });
-      expect(api.tabs.move).toHaveBeenNthCalledWith(2, 56, { index: 4, windowId: 5 });
-      expect(api.tabs.move).not.toHaveBeenCalledWith(53, expect.anything());
-      expect(api.tabs.move).not.toHaveBeenCalledWith(54, expect.anything());
-      expect(api.tabs.ungroup).not.toHaveBeenCalled();
-      expect(api.tabs.group).not.toHaveBeenCalled();
-      expect(api.tabGroups.move).not.toHaveBeenCalled();
-      expect(api.tabGroups.update).not.toHaveBeenCalled();
-    },
-  );
+    expect(api.tabs.move).toHaveBeenCalledTimes(2);
+    expect(api.tabs.move).toHaveBeenNthCalledWith(1, 52, { index: 0, windowId: 5 });
+    expect(api.tabs.move).toHaveBeenNthCalledWith(2, 56, { index: 4, windowId: 5 });
+    expect(api.tabs.move).not.toHaveBeenCalledWith(53, expect.anything());
+    expect(api.tabs.move).not.toHaveBeenCalledWith(54, expect.anything());
+    expect(api.tabs.ungroup).not.toHaveBeenCalled();
+    expect(api.tabs.group).not.toHaveBeenCalled();
+    expect(api.tabGroups.move).not.toHaveBeenCalled();
+    expect(api.tabGroups.update).not.toHaveBeenCalled();
+  });
 
   it('rechecks each window for newly association-protected groups during a global sort', async () => {
     const { api } = createApi();
@@ -1955,7 +1948,6 @@ describe('createChromeActiveWindowsService', () => {
       service.sortAllWindows({
         criterion: 'title',
         direction: 'asc',
-        preserveGroups: false,
       }),
     ).resolves.toEqual({ failures: [], sortedWindowIds: [5, 6], warnings: [] });
 
@@ -1964,33 +1956,6 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.ungroup).not.toHaveBeenCalled();
     expect(api.tabs.move).not.toHaveBeenCalledWith(61, expect.anything());
     expect(api.tabs.move).not.toHaveBeenCalledWith(62, expect.anything());
-  });
-
-  it('ungroups tabs before a global sort when preservation is disabled', async () => {
-    const { api } = createApi();
-    vi.mocked(api.windows.getAll).mockResolvedValue([
-      createChromeWindow({
-        id: 5,
-        tabs: [
-          createChromeTab({ groupId: 7, id: 51, index: 0, title: 'Zulu', windowId: 5 }),
-          createChromeTab({ id: 52, index: 1, title: 'Alpha', windowId: 5 }),
-        ],
-      }),
-    ]);
-    vi.mocked(api.tabGroups.query).mockResolvedValue([
-      createChromeGroup({ id: 7, title: 'Planning', windowId: 5 }),
-    ]);
-    const service = createChromeActiveWindowsService(api);
-
-    await service.sortWindow(5, {
-      criterion: 'title',
-      direction: 'asc',
-      preserveGroups: false,
-    });
-
-    expect(api.tabs.ungroup).toHaveBeenCalledWith([51]);
-    expect(api.tabs.move).toHaveBeenCalledWith(52, { index: 0, windowId: 5 });
-    expect(api.tabs.group).not.toHaveBeenCalled();
   });
 
   it('does not sort a grouped window when its latest group metadata is unavailable', async () => {
@@ -2011,7 +1976,6 @@ describe('createChromeActiveWindowsService', () => {
       service.sortWindow(5, {
         criterion: 'title',
         direction: 'asc',
-        preserveGroups: false,
       }),
     ).resolves.toEqual({
       failures: [

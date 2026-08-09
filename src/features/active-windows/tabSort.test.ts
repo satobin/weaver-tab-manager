@@ -18,7 +18,6 @@ function createTab(overrides: Partial<SortableTab> = {}): SortableTab {
 const DEFAULT_OPTIONS: TabSortOptions = {
   criterion: 'title',
   direction: 'asc',
-  preserveGroups: true,
 };
 
 describe('planTabSort', () => {
@@ -34,18 +33,6 @@ describe('planTabSort', () => {
     expect(planTabSort(tabs, DEFAULT_OPTIONS).map((tab) => tab.id)).toEqual([2, 1, 4, 3, 5]);
   });
 
-  it('sorts all tabs when group preservation is disabled', () => {
-    const tabs = [
-      createTab({ groupId: 7, id: 1, index: 0, title: 'Zulu' }),
-      createTab({ id: 2, index: 1, title: 'Alpha' }),
-      createTab({ groupId: 8, id: 3, index: 2, title: 'Delta' }),
-    ];
-
-    expect(
-      planTabSort(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false }).map((tab) => tab.id),
-    ).toEqual([2, 3, 1]);
-  });
-
   it('keeps the pinned prefix untouched while sorting only unpinned tabs', () => {
     const tabs = [
       createTab({ id: 1, index: 0, pinned: true, title: 'Zulu' }),
@@ -54,9 +41,7 @@ describe('planTabSort', () => {
       createTab({ id: 4, index: 3, title: 'Alpha unpinned' }),
     ];
 
-    expect(
-      planTabSort(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false }).map((tab) => tab.id),
-    ).toEqual([1, 2, 4, 3]);
+    expect(planTabSort(tabs, DEFAULT_OPTIONS).map((tab) => tab.id)).toEqual([1, 2, 4, 3]);
   });
 
   it('keeps groups containing agent-associated tabs immutable while sorting around them', () => {
@@ -69,9 +54,6 @@ describe('planTabSort', () => {
       createTab({ id: 6, index: 5, title: 'Alpha after' }),
     ];
 
-    expect(
-      planTabSort(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false }).map((tab) => tab.id),
-    ).toEqual([2, 1, 3, 4, 6, 5]);
     expect(planTabSort(tabs, DEFAULT_OPTIONS).map((tab) => tab.id)).toEqual([2, 1, 3, 4, 6, 5]);
   });
 
@@ -86,7 +68,6 @@ describe('planTabSort', () => {
       planTabSort(tabs, {
         criterion: 'url',
         direction: 'desc',
-        preserveGroups: false,
       }).map((tab) => tab.id),
     ).toEqual([1, 3, 2]);
   });
@@ -126,7 +107,6 @@ describe('isTabOrderSorted', () => {
     ];
 
     expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
-    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(false);
   });
 
   it('treats an unchanged association-protected group as sorted even when its members are not', () => {
@@ -138,7 +118,6 @@ describe('isTabOrderSorted', () => {
     ];
 
     expect(isTabOrderSorted(tabs, DEFAULT_OPTIONS)).toBe(true);
-    expect(isTabOrderSorted(tabs, { ...DEFAULT_OPTIONS, preserveGroups: false })).toBe(true);
   });
 
   it('uses browser indices rather than input array order and treats an empty window as sorted', () => {

@@ -179,11 +179,6 @@ function createSettingsService() {
       notify();
       return Promise.resolve(settings);
     },
-    setPreserveGroupsDuringSort: (preserveGroupsDuringSort) => {
-      settings = { ...settings, preserveGroupsDuringSort };
-      notify();
-      return Promise.resolve(settings);
-    },
     setShowTabUrls: (showTabUrls) => {
       settings = { ...settings, showTabUrls };
       notify();

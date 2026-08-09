@@ -13,30 +13,46 @@ import {
 
 type BuiltInDedupePresetId = 'google-workspace' | 'notion';
 
+export interface BuiltInDedupePresetUrlFormat {
+  label?: string;
+  pattern: string;
+}
+
 export interface BuiltInDedupePreset {
-  comparedAs: string;
   description: string;
   id: BuiltInDedupePresetId;
   name: string;
   ruleIds: readonly string[];
+  supportedUrlFormatNote: string;
+  supportedUrlFormats: readonly BuiltInDedupePresetUrlFormat[];
 }
 
 export const BUILT_IN_DEDUPE_PRESETS: readonly BuiltInDedupePreset[] = Object.freeze([
   Object.freeze({
-    comparedAs: 'docs.google.com/document/d/FILE_ID',
     description:
       'Treat tabs with the same file ID as duplicates. Ignores /edit, query parameters, and page sections.',
     id: 'google-workspace',
     name: 'Google Docs, Sheets & Slides',
     ruleIds: GOOGLE_WORKSPACE_DEDUPE_RULE_IDS,
+    supportedUrlFormatNote: 'Anything after the file ID is ignored.',
+    supportedUrlFormats: Object.freeze([
+      Object.freeze({ label: 'Docs', pattern: 'docs.google.com/document/d/FILE_ID' }),
+      Object.freeze({ label: 'Sheets', pattern: 'docs.google.com/spreadsheets/d/FILE_ID' }),
+      Object.freeze({ label: 'Slides', pattern: 'docs.google.com/presentation/d/FILE_ID' }),
+    ]),
   }),
   Object.freeze({
-    comparedAs: 'notion.com/your-page-path',
     description:
       'Treat tabs with the same page path as duplicates. Ignores query parameters and page sections on notion.so, its subdomains, and notion.com.',
     id: 'notion',
     name: 'Notion',
     ruleIds: NOTION_DEDUPE_RULE_IDS,
+    supportedUrlFormatNote: 'Query parameters and page sections are ignored.',
+    supportedUrlFormats: Object.freeze([
+      Object.freeze({ pattern: 'notion.so/PAGE_PATH' }),
+      Object.freeze({ pattern: 'WORKSPACE.notion.so/PAGE_PATH' }),
+      Object.freeze({ pattern: 'notion.com/PAGE_PATH' }),
+    ]),
   }),
 ]);
 

@@ -16,7 +16,6 @@ export interface WeaverSettings {
   advancedDuplicateMatchingEnabled: boolean;
   colorMode: ColorMode;
   deduplicationRules: DedupeRule[];
-  preserveGroupsDuringSort: boolean;
   showTabUrls: boolean;
   schemaVersion: 1;
 }
@@ -25,7 +24,6 @@ export const DEFAULT_SETTINGS: WeaverSettings = Object.freeze({
   advancedDuplicateMatchingEnabled: false,
   colorMode: 'system',
   deduplicationRules: cloneDedupeRules(DEFAULT_DEDUPLICATION_RULES),
-  preserveGroupsDuringSort: true,
   showTabUrls: false,
   schemaVersion: SETTINGS_SCHEMA_VERSION,
 });
@@ -84,7 +82,6 @@ export interface SettingsService {
   setAdvancedDuplicateMatchingEnabled: (value: boolean) => Promise<WeaverSettings>;
   setColorMode: (value: ColorMode) => Promise<WeaverSettings>;
   setDeduplicationRules: (rules: readonly DedupeRule[]) => Promise<WeaverSettings>;
-  setPreserveGroupsDuringSort: (value: boolean) => Promise<WeaverSettings>;
   setShowTabUrls: (value: boolean) => Promise<WeaverSettings>;
   subscribe: (listener: (settings: WeaverSettings) => void) => () => void;
 }
@@ -134,10 +131,6 @@ export function parseSettings(value: unknown): WeaverSettings {
         : DEFAULT_SETTINGS.advancedDuplicateMatchingEnabled,
     colorMode,
     deduplicationRules,
-    preserveGroupsDuringSort:
-      typeof candidate.preserveGroupsDuringSort === 'boolean'
-        ? candidate.preserveGroupsDuringSort
-        : DEFAULT_SETTINGS.preserveGroupsDuringSort,
     showTabUrls:
       typeof candidate.showTabUrls === 'boolean'
         ? candidate.showTabUrls
@@ -202,14 +195,6 @@ export function createChromeSettingsService(
       });
     },
 
-    setPreserveGroupsDuringSort(value) {
-      return updateSettings((current) =>
-        current.preserveGroupsDuringSort === value
-          ? current
-          : { ...current, preserveGroupsDuringSort: value },
-      );
-    },
-
     setShowTabUrls(value) {
       return updateSettings((current) =>
         current.showTabUrls === value ? current : { ...current, showTabUrls: value },
@@ -250,11 +235,6 @@ export function createSettingsService(): SettingsService {
     },
     setDeduplicationRules: (rules) => {
       settings = { ...settings, deduplicationRules: validateRulesForStorage(rules) };
-      listeners.forEach((listener) => listener(settings));
-      return Promise.resolve(settings);
-    },
-    setPreserveGroupsDuringSort: (value) => {
-      settings = { ...settings, preserveGroupsDuringSort: value };
       listeners.forEach((listener) => listener(settings));
       return Promise.resolve(settings);
     },

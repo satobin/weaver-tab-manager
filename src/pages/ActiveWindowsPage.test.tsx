@@ -218,7 +218,6 @@ function createSettingsService(
     setAdvancedDuplicateMatchingEnabled: vi.fn(() => Promise.resolve(settings)),
     setColorMode: vi.fn(() => Promise.resolve(settings)),
     setDeduplicationRules: vi.fn(() => Promise.resolve(settings)),
-    setPreserveGroupsDuringSort: vi.fn(() => Promise.resolve(settings)),
     setShowTabUrls: vi.fn(() => Promise.resolve(settings)),
     subscribe: vi.fn(() => () => undefined),
   };
@@ -1901,7 +1900,6 @@ describe('ActiveWindowsPage', () => {
     expect(service.sortWindow).toHaveBeenCalledWith(1, {
       criterion: 'url',
       direction: 'desc',
-      preserveGroups: true,
     });
 
     await user.click(
@@ -1912,7 +1910,6 @@ describe('ActiveWindowsPage', () => {
     expect(service.sortWindow).toHaveBeenLastCalledWith(2, {
       criterion: 'title',
       direction: 'asc',
-      preserveGroups: true,
     });
     expect(
       within(otherWindow as HTMLElement).getByRole('button', {
@@ -1933,7 +1930,6 @@ describe('ActiveWindowsPage', () => {
     expect(service.sortAllWindows).toHaveBeenCalledWith({
       criterion: 'url',
       direction: 'desc',
-      preserveGroups: true,
     });
   });
 

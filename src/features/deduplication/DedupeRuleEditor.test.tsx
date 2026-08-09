@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -235,7 +235,7 @@ describe('DedupeRuleEditor', () => {
       screen.getByText(/handled first by app\.example\.com - One tab per site/i),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Open tab URL')).toHaveLength(2);
-    expect(screen.getAllByText('Compared as')).toHaveLength(4);
+    expect(screen.getAllByText('Compared as')).toHaveLength(2);
     expect(screen.getAllByText('app.example.com/projects/42?view=board')).toHaveLength(2);
 
     await user.click(screen.getByRole('button', { name: /Preview matches/ }));
@@ -266,8 +266,6 @@ describe('DedupeRuleEditor', () => {
       screen.getByRole('switch', { name: 'Google Docs, Sheets & Slides preset' }),
     ).not.toBeChecked();
     expect(screen.getByRole('switch', { name: 'Notion preset' })).not.toBeChecked();
-    expect(screen.getByText('docs.google.com/document/d/FILE_ID')).toBeInTheDocument();
-    expect(screen.getByText('notion.com/your-page-path')).toBeInTheDocument();
 
     await user.click(screen.getByRole('switch', { name: 'Google Docs, Sheets & Slides preset' }));
 
@@ -275,6 +273,119 @@ describe('DedupeRuleEditor', () => {
     const savedRules = onSave.mock.calls[0]?.[0];
     expect(savedRules?.slice(0, 3).every((rule) => rule.enabled)).toBe(true);
     expect(savedRules?.slice(3).every((rule) => !rule.enabled)).toBe(true);
+  });
+
+  it('shows every supported preset URL format in accessible popovers', async () => {
+    const user = userEvent.setup();
+    const clickOnlyUser = userEvent.setup({ skipHover: true });
+    render(
+      <DedupeRuleEditor
+        advancedDuplicateMatchingEnabled
+        disabled={false}
+        onSave={vi.fn(() => Promise.resolve(true))}
+        rules={DEFAULT_DEDUPLICATION_RULES}
+      />,
+    );
+    const googleFormats = screen.getByRole('button', {
+      name: 'Show supported Google URL formats',
+    });
+    const notionFormats = screen.getByRole('button', {
+      name: 'Show supported Notion URL formats',
+    });
+
+    expect(screen.queryByText('Compared as')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(0);
+    expect(googleFormats).toHaveAccessibleDescription(
+      /Supported URL formats.*Docs:.*docs\.google\.com\/document\/d\/FILE_ID.*Sheets:.*docs\.google\.com\/spreadsheets\/d\/FILE_ID.*Slides:.*docs\.google\.com\/presentation\/d\/FILE_ID.*Anything after the file ID is ignored\./,
+    );
+
+    await user.hover(googleFormats);
+    const googleTooltip = screen.getByRole('tooltip');
+    expect(within(googleTooltip).getByText('Supported URL formats')).toBeInTheDocument();
+    expect(within(googleTooltip).getByText('Docs:')).toBeInTheDocument();
+    expect(
+      within(googleTooltip).getByText('docs.google.com/document/d/FILE_ID'),
+    ).toBeInTheDocument();
+    expect(within(googleTooltip).getByText('Sheets:')).toBeInTheDocument();
+    expect(
+      within(googleTooltip).getByText('docs.google.com/spreadsheets/d/FILE_ID'),
+    ).toBeInTheDocument();
+    expect(within(googleTooltip).getByText('Slides:')).toBeInTheDocument();
+    expect(
+      within(googleTooltip).getByText('docs.google.com/presentation/d/FILE_ID'),
+    ).toBeInTheDocument();
+    expect(within(googleTooltip).getByText('Anything after the file ID is ignored.')).toBeVisible();
+
+    await user.unhover(googleFormats);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(0);
+
+    act(() => googleFormats.focus());
+    expect(screen.getByRole('tooltip')).toBeVisible();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(googleFormats).toHaveFocus();
+    act(() => googleFormats.blur());
+
+    await clickOnlyUser.click(notionFormats);
+    const notionTooltip = screen.getByRole('tooltip');
+    expect(within(notionTooltip).getByText('notion.so/PAGE_PATH')).toBeInTheDocument();
+    expect(within(notionTooltip).getByText('WORKSPACE.notion.so/PAGE_PATH')).toBeInTheDocument();
+    expect(within(notionTooltip).getByText('notion.com/PAGE_PATH')).toBeInTheDocument();
+    expect(
+      within(notionTooltip).getByText('Query parameters and page sections are ignored.'),
+    ).toBeVisible();
+    expect(notionFormats).toHaveAccessibleDescription(
+      /Supported URL formats.*notion\.so\/PAGE_PATH.*WORKSPACE\.notion\.so\/PAGE_PATH.*notion\.com\/PAGE_PATH.*Query parameters and page sections are ignored\./,
+    );
+
+    await clickOnlyUser.click(screen.getByRole('heading', { name: 'Advanced duplicate matching' }));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(0);
+
+    await clickOnlyUser.click(notionFormats);
+    await clickOnlyUser.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(notionFormats).toHaveFocus();
+  });
+
+  it('closes a clicked tooltip on mouse leave and keeps only one preset tooltip open', async () => {
+    const user = userEvent.setup();
+    render(
+      <DedupeRuleEditor
+        advancedDuplicateMatchingEnabled
+        disabled={false}
+        onSave={vi.fn(() => Promise.resolve(true))}
+        rules={DEFAULT_DEDUPLICATION_RULES}
+      />,
+    );
+    const googleFormats = screen.getByRole('button', {
+      name: 'Show supported Google URL formats',
+    });
+    const notionFormats = screen.getByRole('button', {
+      name: 'Show supported Notion URL formats',
+    });
+
+    await user.click(googleFormats);
+    expect(googleFormats).toHaveFocus();
+    expect(screen.getByRole('tooltip')).toHaveTextContent('docs.google.com/document/d/FILE_ID');
+
+    await user.unhover(googleFormats);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(googleFormats).toHaveFocus();
+
+    act(() => googleFormats.blur());
+    act(() => googleFormats.focus());
+    expect(screen.getByRole('tooltip')).toHaveTextContent('docs.google.com/document/d/FILE_ID');
+
+    await user.hover(notionFormats);
+    expect(screen.getAllByRole('tooltip')).toHaveLength(1);
+    expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(1);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('notion.so/PAGE_PATH');
+
+    await user.unhover(notionFormats);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(0);
   });
 
   it('derives the item-ID cutoff from the custom pattern', async () => {

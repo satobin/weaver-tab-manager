@@ -58,10 +58,9 @@ describe('settingsService', () => {
 
   it('uses clean defaults for missing, malformed, or pre-public settings data', () => {
     expect(parseSettings(undefined)).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings({ schemaVersion: 1, preserveGroupsDuringSort: 'no' })).toEqual({
-      ...DEFAULT_SETTINGS,
-      preserveGroupsDuringSort: DEFAULT_SETTINGS.preserveGroupsDuringSort,
-    });
+    expect(parseSettings({ schemaVersion: 1, preserveGroupsDuringSort: 'no' })).toEqual(
+      DEFAULT_SETTINGS,
+    );
     expect(
       parseSettings({
         deduplicationRules: [
@@ -99,23 +98,26 @@ describe('settingsService', () => {
       advancedDuplicateMatchingEnabled: true,
       colorMode: 'dark',
       deduplicationRules: [customRule],
-      preserveGroupsDuringSort: false,
       schemaVersion: 1,
       showTabUrls: true,
     });
   });
 
-  it('loads and writes the current local settings record', async () => {
-    const { api } = createApi({ schemaVersion: 1, preserveGroupsDuringSort: false });
+  it('ignores the retired group preference and drops it on the next settings write', async () => {
+    const { api } = createApi({
+      preserveGroupsDuringSort: false,
+      schemaVersion: 1,
+      showTabUrls: false,
+    });
     const service = createChromeSettingsService(api);
 
-    await expect(service.load()).resolves.toEqual({
+    await expect(service.load()).resolves.toEqual(DEFAULT_SETTINGS);
+    await expect(service.setShowTabUrls(true)).resolves.toEqual({
       ...DEFAULT_SETTINGS,
-      preserveGroupsDuringSort: false,
+      showTabUrls: true,
     });
-    await expect(service.setPreserveGroupsDuringSort(true)).resolves.toEqual(DEFAULT_SETTINGS);
     expect(api.storage.local.set).toHaveBeenCalledWith({
-      [SETTINGS_STORAGE_KEY]: DEFAULT_SETTINGS,
+      [SETTINGS_STORAGE_KEY]: { ...DEFAULT_SETTINGS, showTabUrls: true },
     });
   });
 
@@ -124,12 +126,12 @@ describe('settingsService', () => {
     const service = createChromeSettingsService(fake.api);
     const listener = vi.fn();
     const unsubscribe = service.subscribe(listener);
-    const changed = { ...DEFAULT_SETTINGS, preserveGroupsDuringSort: false };
+    const changed = { ...DEFAULT_SETTINGS, preserveGroupsDuringSort: false, showTabUrls: true };
 
     fake.emit(changed, 'sync');
     expect(listener).not.toHaveBeenCalled();
     fake.emit(changed);
-    expect(listener).toHaveBeenCalledWith(changed);
+    expect(listener).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, showTabUrls: true });
 
     unsubscribe();
     expect(fake.listenerCount()).toBe(0);

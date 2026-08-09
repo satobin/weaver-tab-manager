@@ -59,6 +59,18 @@ describe('dedupe rule presentation', () => {
       'Google Docs, Sheets & Slides',
       'Notion',
     ]);
+    expect(BUILT_IN_DEDUPE_PRESETS.map((preset) => preset.supportedUrlFormats)).toEqual([
+      [
+        { label: 'Docs', pattern: 'docs.google.com/document/d/FILE_ID' },
+        { label: 'Sheets', pattern: 'docs.google.com/spreadsheets/d/FILE_ID' },
+        { label: 'Slides', pattern: 'docs.google.com/presentation/d/FILE_ID' },
+      ],
+      [
+        { pattern: 'notion.so/PAGE_PATH' },
+        { pattern: 'WORKSPACE.notion.so/PAGE_PATH' },
+        { pattern: 'notion.com/PAGE_PATH' },
+      ],
+    ]);
   });
 
   it('formats an open URL for the Original and Compared as explanation', () => {

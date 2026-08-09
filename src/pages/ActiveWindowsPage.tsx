@@ -110,11 +110,7 @@ function sortSelectionsMatch(
   first: TabSortOptions | null | undefined,
   second: TabSortOptions,
 ): boolean {
-  return (
-    first?.criterion === second.criterion &&
-    first.direction === second.direction &&
-    first.preserveGroups === second.preserveGroups
-  );
+  return first?.criterion === second.criterion && first.direction === second.direction;
 }
 
 function newWindowTargetsMatch(
@@ -278,9 +274,8 @@ export function ActiveWindowsPage({
     () => ({
       criterion: sortCriterion,
       direction: sortDirection,
-      preserveGroups: settings.preserveGroupsDuringSort,
     }),
-    [settings.preserveGroupsDuringSort, sortCriterion, sortDirection],
+    [sortCriterion, sortDirection],
   );
   const globalSortMatchesCurrentOrder = useMemo(
     () =>
@@ -1099,7 +1094,6 @@ export function ActiveWindowsPage({
     const selection: TabSortOptions = {
       criterion: sortCriterion,
       direction: globalSortActionDirection,
-      preserveGroups: settings.preserveGroupsDuringSort,
     };
     setSortDirection(globalSortActionDirection);
     const result = await sortTabs(undefined, selection);
@@ -1121,7 +1115,6 @@ export function ActiveWindowsPage({
   ) => {
     const appliedSelection: TabSortOptions = {
       ...selection,
-      preserveGroups: settings.preserveGroupsDuringSort,
     };
     updateWindowSortSelection(windowId, { direction: selection.direction });
     const result = await sortTabs(windowId, appliedSelection);
@@ -1791,10 +1784,7 @@ export function ActiveWindowsPage({
                     window.tabs;
                   const windowSortSelection =
                     windowSortSelections.get(window.id) ?? DEFAULT_WINDOW_SORT_SELECTION;
-                  const windowSortOptions: TabSortOptions = {
-                    ...windowSortSelection,
-                    preserveGroups: settings.preserveGroupsDuringSort,
-                  };
+                  const windowSortOptions: TabSortOptions = windowSortSelection;
                   const windowSortMatchesCurrentOrder =
                     sortSelectionsMatch(
                       appliedWindowSortSelections.get(window.id),

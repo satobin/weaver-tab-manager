@@ -59,14 +59,10 @@ function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWin
   };
 }
 
-function createService(
-  preserveGroupsDuringSort = true,
-  advancedDuplicateMatchingEnabled = true,
-): SettingsService {
+function createService(advancedDuplicateMatchingEnabled = true): SettingsService {
   const createSettings = (overrides: Partial<typeof DEFAULT_SETTINGS> = {}) => ({
     ...DEFAULT_SETTINGS,
     advancedDuplicateMatchingEnabled,
-    preserveGroupsDuringSort,
     ...overrides,
   });
   return {
@@ -77,9 +73,6 @@ function createService(
     setColorMode: vi.fn((colorMode: ColorMode) => Promise.resolve(createSettings({ colorMode }))),
     setDeduplicationRules: vi.fn((rules: readonly DedupeRule[]) =>
       Promise.resolve(createSettings({ deduplicationRules: [...rules] })),
-    ),
-    setPreserveGroupsDuringSort: vi.fn((value: boolean) =>
-      Promise.resolve(createSettings({ preserveGroupsDuringSort: value })),
     ),
     setShowTabUrls: vi.fn((value: boolean) =>
       Promise.resolve(createSettings({ showTabUrls: value })),
@@ -148,7 +141,7 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(dark).toBeChecked());
   });
 
-  it('groups appearance settings separately from tab behavior settings', async () => {
+  it('lists general settings together with URL visibility below keyboard shortcuts', async () => {
     const { container } = render(
       <SettingsPage
         activeWindowsService={createActiveWindowsDataSource()}
@@ -163,33 +156,26 @@ describe('SettingsPage', () => {
       .getByRole('heading', { name: 'Keyboard shortcuts', level: 3 })
       .closest('.settings-group');
     const showUrlsGroup = screen
-      .getByRole('heading', { name: 'Show tab URLs', level: 4 })
+      .getByRole('heading', { name: 'Show tab URLs', level: 3 })
       .closest('.settings-group');
-    const preserveGroupsGroup = screen
-      .getByRole('heading', { name: 'Preserve groups when sorting', level: 4 })
-      .closest('.settings-group');
-    const appearanceCard = container.querySelector('.appearance-settings-layout');
-    const behaviorCard = screen.getByRole('region', { name: 'Tab behavior' });
-    const behaviorHeading = screen.getByRole('heading', { name: 'Tab behavior', level: 3 });
-    const behaviorHeader = behaviorHeading.closest('.behavior-settings-heading');
-    const behaviorList = behaviorCard.querySelector('.behavior-settings-list');
+    const generalSettingsCard = container.querySelector('.settings-layout');
 
     await waitFor(() => expect(screen.getByRole('radio', { name: 'System' })).toBeEnabled());
     expect(container.querySelectorAll('.settings-layout')).toHaveLength(1);
-    expect(Array.from(appearanceCard?.children ?? [])).toEqual([appearanceGroup, shortcutGroup]);
-    expect(Array.from(behaviorCard.children)).toEqual([behaviorHeader, behaviorList]);
-    expect(Array.from(behaviorList?.children ?? [])).toEqual([showUrlsGroup, preserveGroupsGroup]);
+    expect(Array.from(generalSettingsCard?.children ?? [])).toEqual([
+      appearanceGroup,
+      shortcutGroup,
+      showUrlsGroup,
+    ]);
     expect(
-      within(behaviorCard).getByText(
-        'Choose how tabs appear and how browser tab groups behave when sorting.',
+      within(showUrlsGroup as HTMLElement).getByText(
+        'Show URLs below tab titles in Active Windows. Turn this off for denser cards.',
       ),
     ).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'Tab behavior' })).not.toBeInTheDocument();
     expect(
-      within(preserveGroupsGroup as HTMLElement).getByText(
-        'Keep each browser tab group together. Turning this off removes ordinary group membership during a sort; groups containing agent-associated tabs stay together.',
-      ),
-    ).toBeVisible();
-    expect(appearanceCard?.nextElementSibling).toBe(behaviorCard);
+      screen.queryByRole('switch', { name: 'Preserve groups when sorting' }),
+    ).not.toBeInTheDocument();
   });
 
   it('lists live keyboard shortcuts as sub-rows below their heading and description', async () => {
@@ -309,22 +295,6 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Edit shortcuts' })).toBeDisabled();
   });
 
-  it('loads and updates the group-preserving sort preference', async () => {
-    const user = userEvent.setup();
-    const service = createService(false);
-    render(
-      <SettingsPage activeWindowsService={createActiveWindowsDataSource()} service={service} />,
-    );
-    const toggle = screen.getByRole('switch', { name: 'Preserve groups when sorting' });
-
-    await waitFor(() => expect(toggle).toBeEnabled());
-    expect(toggle).not.toBeChecked();
-    await user.click(toggle);
-
-    expect(service.setPreserveGroupsDuringSort).toHaveBeenCalledWith(true);
-    await waitFor(() => expect(toggle).toBeChecked());
-  });
-
   it('loads and updates the tab URL visibility preference', async () => {
     const user = userEvent.setup();
     const service = createService();
@@ -378,18 +348,18 @@ describe('SettingsPage', () => {
 
   it('keeps the previous value and reports a failed save', async () => {
     const user = userEvent.setup();
-    const service = createService(true);
-    vi.mocked(service.setPreserveGroupsDuringSort).mockRejectedValue(new Error('Storage full'));
+    const service = createService();
+    vi.mocked(service.setShowTabUrls).mockRejectedValue(new Error('Storage full'));
     render(
       <SettingsPage activeWindowsService={createActiveWindowsDataSource()} service={service} />,
     );
-    const toggle = screen.getByRole('switch', { name: 'Preserve groups when sorting' });
+    const toggle = screen.getByRole('switch', { name: 'Show tab URLs' });
 
     await waitFor(() => expect(toggle).toBeEnabled());
     await user.click(toggle);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Storage full');
-    expect(toggle).toBeChecked();
+    expect(toggle).not.toBeChecked();
   });
 
   it('persists a valid rule draft through the shared settings service', async () => {
@@ -439,7 +409,7 @@ describe('SettingsPage', () => {
 
   it('starts with advanced matching off and expands it without disabling exact matching', async () => {
     const user = userEvent.setup();
-    const service = createService(true, false);
+    const service = createService(false);
     render(
       <SettingsPage activeWindowsService={createActiveWindowsDataSource()} service={service} />,
     );

@@ -35,6 +35,7 @@ import {
   getDedupeStrategyDescription,
   getDedupeStrategyLabel,
 } from './dedupeRulePresentation';
+import { DedupePresetFormatsTooltip } from './DedupePresetFormatsTooltip';
 import { DedupeRuleHelpPopover } from './DedupeRuleHelpPopover';
 
 interface DedupeRulePreviewInput {
@@ -129,6 +130,7 @@ export function DedupeRuleEditor({
   );
   const [previewOpen, setPreviewOpen] = useState(false);
   const [resetRequested, setResetRequested] = useState(false);
+  const [activePresetFormatsId, setActivePresetFormatsId] = useState<string | null>(null);
   const customRules = customDraft ?? persistedCustomRules;
   const customDirty = customDraft !== null;
   const draftRules = useMemo(
@@ -299,7 +301,19 @@ export function DedupeRuleEditor({
                 >
                   <div className="dedupe-preset-control">
                     <span className="dedupe-preset-copy">
-                      <strong>{preset.name}</strong>
+                      <span className="dedupe-preset-title">
+                        <strong>{preset.name}</strong>
+                        <DedupePresetFormatsTooltip
+                          onClose={() =>
+                            setActivePresetFormatsId((current) =>
+                              current === preset.id ? null : current,
+                            )
+                          }
+                          onOpen={() => setActivePresetFormatsId(preset.id)}
+                          open={activePresetFormatsId === preset.id}
+                          preset={preset}
+                        />
+                      </span>
                       <small>{preset.description}</small>
                     </span>
                   </div>
@@ -309,10 +323,6 @@ export function DedupeRuleEditor({
                     label={`${preset.name} preset`}
                     onChange={() => void togglePreset(preset)}
                   />
-                  <div className="dedupe-preset-example">
-                    <span>Compared as</span>
-                    <code>{preset.comparedAs}</code>
-                  </div>
                 </div>
               );
             })}

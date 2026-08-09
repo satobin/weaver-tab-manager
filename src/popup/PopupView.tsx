@@ -48,7 +48,6 @@ interface PopupProps {
 interface AppliedSortSelection {
   criterion: SortCriterion;
   direction: SortDirection;
-  preserveGroups: boolean;
   windowId: number;
 }
 
@@ -119,11 +118,9 @@ export function Popup({
     ? appliedSortSelection?.windowId === currentWindow.id &&
       appliedSortSelection.criterion === sortCriterion &&
       appliedSortSelection.direction === sortDirection &&
-      appliedSortSelection.preserveGroups === settings.preserveGroupsDuringSort &&
       isTabOrderSorted(currentWindow.tabs, {
         criterion: sortCriterion,
         direction: sortDirection,
-        preserveGroups: settings.preserveGroupsDuringSort,
       })
     : false;
   const nextSortDirection: SortDirection = sortMatchesCurrentOrder
@@ -229,18 +226,15 @@ export function Popup({
     setActionNotice(null);
     setDuplicateUndoTabs(null);
     setPendingAction('sort');
-    const preserveGroups = settings.preserveGroupsDuringSort;
     try {
       const result = await service.sortWindow(currentWindow.id, {
         criterion: sortCriterion,
         direction,
-        preserveGroups,
       });
       if (result.sortedWindowIds.includes(currentWindow.id)) {
         setAppliedSortSelection({
           criterion: sortCriterion,
           direction,
-          preserveGroups,
           windowId: currentWindow.id,
         });
       }

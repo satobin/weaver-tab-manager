@@ -4,7 +4,6 @@ export type SortDirection = 'asc' | 'desc';
 export interface TabSortOptions {
   criterion: SortCriterion;
   direction: SortDirection;
-  preserveGroups: boolean;
 }
 
 export interface SortableTab {
@@ -30,10 +29,6 @@ function compareTabs(left: SortableTab, right: SortableTab, options: TabSortOpti
 }
 
 function sortPartition(tabs: readonly SortableTab[], options: TabSortOptions): SortableTab[] {
-  if (!options.preserveGroups) {
-    return [...tabs].sort((left, right) => compareTabs(left, right, options));
-  }
-
   const sorted: SortableTab[] = [];
   let chunk: SortableTab[] = [];
 

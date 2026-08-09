@@ -12,7 +12,6 @@ type SettingsSaveTarget =
   | 'advancedDuplicateMatchingEnabled'
   | 'colorMode'
   | 'deduplicationRules'
-  | 'preserveGroupsDuringSort'
   | 'showTabUrls';
 
 export interface SettingsState {
@@ -23,7 +22,6 @@ export interface SettingsState {
   setAdvancedDuplicateMatchingEnabled: (value: boolean) => Promise<boolean>;
   setColorMode: (value: ColorMode) => Promise<boolean>;
   setDeduplicationRules: (rules: readonly DedupeRule[]) => Promise<boolean>;
-  setPreserveGroupsDuringSort: (value: boolean) => Promise<boolean>;
   setShowTabUrls: (value: boolean) => Promise<boolean>;
   settings: WeaverSettings;
 }
@@ -109,18 +107,6 @@ export function useSettings(service: SettingsService): SettingsState {
     };
   }, [applySettings, service]);
 
-  const setPreserveGroupsDuringSort = useCallback(
-    async (value: boolean) => {
-      if (settingsRef.current.preserveGroupsDuringSort === value) {
-        return true;
-      }
-      return saveSetting('preserveGroupsDuringSort', () =>
-        service.setPreserveGroupsDuringSort(value),
-      );
-    },
-    [saveSetting, service],
-  );
-
   const setColorMode = useCallback(
     async (value: ColorMode) => {
       if (settingsRef.current.colorMode === value) {
@@ -168,7 +154,6 @@ export function useSettings(service: SettingsService): SettingsState {
     setAdvancedDuplicateMatchingEnabled,
     setColorMode,
     setDeduplicationRules,
-    setPreserveGroupsDuringSort,
     setShowTabUrls,
     settings,
   };
