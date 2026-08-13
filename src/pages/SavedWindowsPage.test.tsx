@@ -326,7 +326,7 @@ describe('SavedWindowsPage', () => {
     const service = createService([research, notes]);
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     let researchCard = screen.getByRole('article', { name: 'Research' });
     const researchSort = within(researchCard).getByRole('button', {
       name: 'Sort Research by Title, A to Z',
@@ -392,7 +392,7 @@ describe('SavedWindowsPage', () => {
     const search = await screen.findByRole('searchbox', {
       name: 'Filter saved tabs by title or URL',
     });
-    await user.click(screen.getByRole('button', { name: 'Show preview for Research' }));
+    await user.click(screen.getByRole('button', { name: 'Expand Research' }));
     await user.type(search, 'alpha');
     const card = screen.getByRole('article', { name: 'Research' });
     await user.click(within(card).getByRole('button', { name: 'Sort Research by Title, A to Z' }));
@@ -418,6 +418,95 @@ describe('SavedWindowsPage', () => {
         name: 'Sort Research by: Title',
       }),
     ).toBeDisabled();
+  });
+
+  it('keeps filtered saved windows collapsible and restores their normal collapse state', async () => {
+    const user = userEvent.setup();
+    render(<SavedWindowsPage service={createService()} />);
+
+    const card = await screen.findByRole('article', { name: 'Research' });
+    const preview = document.getElementById('saved-window-saved-1-preview');
+    expect(card).toHaveClass('is-collapsed', 'is-compact-tabs');
+    expect(preview).toHaveAttribute('hidden');
+
+    const search = screen.getByRole('searchbox', {
+      name: 'Filter saved tabs by title or URL',
+    });
+    await user.type(search, 'plan');
+
+    const collapse = within(card).getByRole('button', { name: 'Collapse Research' });
+    expect(collapse).toHaveAttribute('aria-controls', 'saved-window-saved-1-preview');
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+
+    await user.click(collapse);
+    expect(within(card).getByRole('button', { name: 'Expand Research' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(card).toHaveClass('is-collapsed');
+    expect(preview).toHaveAttribute('hidden');
+    expect(screen.queryByText('Plan')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Clear saved-tab filter' }));
+    expect(within(card).getByRole('button', { name: 'Expand Research' })).toBeInTheDocument();
+    expect(screen.queryByText('Inbox')).not.toBeInTheDocument();
+
+    await user.type(search, 'plan');
+    expect(within(card).getByRole('button', { name: 'Collapse Research' })).toBeInTheDocument();
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+  });
+
+  it('uses the Active Windows card and tab visual primitives for saved windows', async () => {
+    const user = userEvent.setup();
+    render(
+      <SavedWindowsPage
+        service={createService()}
+        settingsService={createSettingsService({ showTabUrls: true })}
+      />,
+    );
+
+    const card = await screen.findByRole('article', { name: 'Research' });
+    const header = card.querySelector(':scope > .window-card-header');
+    const collapse = within(card).getByRole('button', { name: 'Expand Research' });
+    expect(card).toHaveClass('window-card', 'saved-window-card', 'is-collapsed');
+    expect(header).toBeInTheDocument();
+    expect(header?.querySelector('.window-identity')).toBeInTheDocument();
+    expect(header?.querySelector('.window-heading-copy')).toBeInTheDocument();
+    expect(header?.querySelector('.window-card-actions')).toBeInTheDocument();
+    const heading = within(card).getByRole('heading', { name: 'Research' });
+    const headingName = heading.querySelector('.window-heading-static');
+    const collapseState = heading.querySelector('.window-collapse-state');
+    expect(headingName).toHaveTextContent('Research');
+    expect(headingName?.nextElementSibling).toBe(collapseState);
+    expect(collapse.parentElement).toBe(header);
+    expect(collapse).not.toContainElement(
+      within(card).getByRole('button', { name: 'Sort Research by: Title' }),
+    );
+    expect(within(card).getByRole('button', { name: 'Restore Research' })).toHaveTextContent(
+      'Restore',
+    );
+
+    await user.click(collapse);
+
+    const list = card.querySelector('.saved-tab-list');
+    const planRow = screen.getByText('Plan').closest('.saved-tab-row');
+    const planItem = planRow?.closest('.tab-list-item');
+    expect(list).toHaveClass('tab-list');
+    expect(planItem).toHaveClass('group-color-purple');
+    expect(planItem?.querySelector('.tab-group-heading')).toBeInTheDocument();
+    expect(planRow).toHaveClass('tab-row');
+    expect(card.querySelector('.saved-tab-order')).not.toBeInTheDocument();
+    expect(screen.getByText('Plan')).toHaveClass('tab-title');
+    expect(await screen.findByText('docs.example.com/plan')).toHaveClass('tab-location');
+    expect(within(card).getByRole('button', { name: 'Open Plan in a new tab' })).toHaveClass(
+      'tab-focus-button',
+    );
+    expect(
+      within(card).getByRole('button', {
+        name: 'Remove Plan from Research, saved tab 2',
+      }),
+    ).toHaveClass('tab-close-button');
   });
 
   it('filters saved tabs, selects the visible matches, removes them, and offers Undo', async () => {
@@ -530,7 +619,7 @@ describe('SavedWindowsPage', () => {
       />,
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     await user.click(screen.getByRole('checkbox', { name: 'Select Inbox in Research' }));
     await user.keyboard('{Shift>}');
     await user.click(screen.getByRole('checkbox', { name: 'Select Notes in Research' }));
@@ -1378,7 +1467,7 @@ describe('SavedWindowsPage', () => {
     const service = createService();
     render(<SavedWindowsPage service={service} />);
 
-    const expand = await screen.findByRole('button', { name: 'Show preview for Research' });
+    const expand = await screen.findByRole('button', { name: 'Expand Research' });
     expect(expand).toHaveAttribute('aria-expanded', 'false');
     await user.click(expand);
 
@@ -1390,7 +1479,7 @@ describe('SavedWindowsPage', () => {
     expect(screen.queryByText('Focused after restore')).not.toBeInTheDocument();
     expect(screen.queryByTitle('Focused after restore')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Restore' }));
+    await user.click(screen.getByRole('button', { name: 'Restore Research' }));
     expect(service.restoreWindow).toHaveBeenCalledWith('saved-1');
     expect(
       await screen.findByText('Restored 2 tabs from "Research". Removed it from Saved Windows.'),
@@ -1416,9 +1505,14 @@ describe('SavedWindowsPage', () => {
         tabs: savedWindow.tabs.map((tab) => (tab.order === 0 ? { ...tab, url: fullUrl } : tab)),
       },
     ]);
-    render(<SavedWindowsPage service={service} />);
+    render(
+      <SavedWindowsPage
+        service={service}
+        settingsService={createSettingsService({ showTabUrls: true })}
+      />,
+    );
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     const openPinnedTab = screen.getByRole('button', {
       name: 'Open Inbox in a new pinned tab',
     });
@@ -1428,7 +1522,7 @@ describe('SavedWindowsPage', () => {
     expect(openPinnedTab).toHaveAttribute('title', 'Open in a new pinned tab');
     expect(openPinnedTab).toHaveClass('has-remove-action');
     expect(openPinnedTab.querySelector('.lucide-external-link')).toBeInTheDocument();
-    expect(screen.getByText('mail.example.com/inbox')).toHaveAttribute('title', fullUrl);
+    expect(await screen.findByText('mail.example.com/inbox')).toHaveAttribute('title', fullUrl);
     expect(removePinnedTab).toHaveAttribute('title', 'Remove tab from Saved Windows');
     expect(removePinnedTab.querySelector('.lucide-x')).toBeInTheDocument();
     expect(openPinnedTab.nextElementSibling).toBe(removePinnedTab);
@@ -1495,7 +1589,7 @@ describe('SavedWindowsPage', () => {
     const service = createService();
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     const removeInbox = screen.getByRole('button', {
       name: 'Remove Inbox from Research, saved tab 1',
     });
@@ -1529,7 +1623,7 @@ describe('SavedWindowsPage', () => {
     ]);
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Solo' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Solo' }));
     await user.click(
       screen.getByRole('button', { name: 'Remove Solo tab from Solo, saved tab 1' }),
     );
@@ -1540,7 +1634,7 @@ describe('SavedWindowsPage', () => {
     expect(screen.getByRole('heading', { name: 'No saved windows' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Undo' }));
-    const restoredPreview = await screen.findByRole('button', { name: 'Show preview for Solo' });
+    const restoredPreview = await screen.findByRole('button', { name: 'Expand Solo' });
     expect(screen.getByText('Restored "Solo tab" to "Solo".')).toBeInTheDocument();
     await user.click(restoredPreview);
     expect(
@@ -1556,7 +1650,7 @@ describe('SavedWindowsPage', () => {
     );
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     const removeInbox = screen.getByRole('button', {
       name: 'Remove Inbox from Research, saved tab 1',
     });
@@ -1603,7 +1697,7 @@ describe('SavedWindowsPage', () => {
     ]);
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     expect(screen.getByRole('button', { name: 'Copy URL for Local reference' })).toHaveAttribute(
       'title',
       'Copy URL',
@@ -1635,7 +1729,7 @@ describe('SavedWindowsPage', () => {
     ]);
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     await user.click(screen.getByRole('button', { name: 'Copy URL for Local reference' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -1649,7 +1743,7 @@ describe('SavedWindowsPage', () => {
     vi.mocked(service.openTab).mockRejectedValue(new Error('URL blocked'));
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Show preview for Research' }));
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     await user.click(screen.getByRole('button', { name: 'Open Plan in a new tab' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('URL blocked');
@@ -1703,7 +1797,7 @@ describe('SavedWindowsPage', () => {
     });
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Restore' }));
+    await user.click(await screen.findByRole('button', { name: 'Restore Research' }));
 
     expect(
       await screen.findByText('Restored 1 tab from "Research". 1 tab failed. URL blocked'),
@@ -1717,7 +1811,7 @@ describe('SavedWindowsPage', () => {
     const service = createService([createSavedWindow()], ['One tab group could not be restored.']);
     render(<SavedWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Restore' }));
+    await user.click(await screen.findByRole('button', { name: 'Restore Research' }));
 
     expect(
       await screen.findByText(

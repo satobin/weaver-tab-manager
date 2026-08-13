@@ -781,7 +781,14 @@ export function createChromeSavedWindowsService(
       const resolvedSourceWindow = sourceWindow.tabs
         ? {
             ...sourceWindow,
-            tabs: sourceWindow.tabs.map((tab) => applyRestoredTabMetadata(tab, restoredMetadata)),
+            tabs: sourceWindow.tabs.map((tab) => {
+              const resolvedTab = applyRestoredTabMetadata(tab, restoredMetadata);
+              // The metadata resolver already verified this pending destination. Clear it only on
+              // the capture copy so captureSavedWindow keeps the recovered page title.
+              return tab.id !== undefined && restoredMetadata.has(tab.id)
+                ? { ...resolvedTab, pendingUrl: undefined }
+                : resolvedTab;
+            }),
           }
         : sourceWindow;
       const capture = captureSavedWindow(
@@ -826,7 +833,7 @@ export function createChromeSavedWindowsService(
             liveSourceTabs.length !== sourceTabCloseTargets.length
           ) {
             warnings.push(
-              'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+              'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
             );
           } else {
             const anchorTab =
@@ -834,13 +841,13 @@ export function createChromeSavedWindowsService(
             const anchorTabId = anchorTab ? getTabId(anchorTab) : null;
             if (anchorTabId === null || !anchorTab) {
               warnings.push(
-                'The window was saved, but your browser did not return a safe tab to close last.',
+                'Your browser did not return a safe tab to close last, so Weaver left the original window open.',
               );
             } else {
               const anchorUrl = getTabCloseIdentityUrl(anchorTab);
               if (anchorUrl === null) {
                 warnings.push(
-                  'The window was saved, but your browser did not return a stable tab to close last.',
+                  'Your browser did not return a stable tab to close last, so Weaver left the original window open.',
                 );
                 return {
                   savedWindow: capture.savedWindow,
@@ -909,7 +916,7 @@ export function createChromeSavedWindowsService(
                   if (remainingNonAnchorIds.size > 0) {
                     return {
                       completion: null,
-                      errorMessage: `${pluralizeForMessage(remainingNonAnchorIds.size, 'tab')} ${remainingNonAnchorIds.size === 1 ? 'still needs' : 'still need'} attention before the source window can close.`,
+                      errorMessage: `${pluralizeForMessage(remainingNonAnchorIds.size, 'tab')} ${remainingNonAnchorIds.size === 1 ? 'still needs' : 'still need'} attention before the original window can close.`,
                       status: 'partial',
                     };
                   }
@@ -933,7 +940,7 @@ export function createChromeSavedWindowsService(
                     return {
                       completion: null,
                       errorMessage:
-                        'The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+                        'The original window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
                       status: 'partial',
                     };
                   }
@@ -987,7 +994,7 @@ export function createChromeSavedWindowsService(
           }
         } catch (error) {
           warnings.push(
-            `The window was saved, but its tabs could not be prepared for closing: ${describeChromeError(error)}`,
+            `Weaver could not prepare the original window's tabs for closing: ${describeChromeError(error)}`,
           );
         }
       }

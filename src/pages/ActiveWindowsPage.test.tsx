@@ -334,7 +334,7 @@ async function renderCompletedSaveAndClose(
     windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
   });
   act(() => listeners.forEach((listener) => listener()));
-  await screen.findByText(`Saved "${name}" and closed Window 1.`);
+  await screen.findByText(`Saved "${name}" and closed the original window.`);
   return { service, user };
 }
 
@@ -1637,6 +1637,7 @@ describe('ActiveWindowsPage', () => {
       name: 'Collapse Window 1',
     });
     const titleButton = within(header as HTMLElement).getByRole('button', { name: 'Window 1' });
+    const collapseState = heading.querySelector('.window-collapse-state');
     const sortButton = within(header as HTMLElement).getByRole('button', {
       name: 'Sort Window 1 by Title, A to Z',
     });
@@ -1644,6 +1645,7 @@ describe('ActiveWindowsPage', () => {
       name: 'Select all visible tabs in Window 1',
     });
     expect(collapseButton.parentElement).toBe(header);
+    expect(titleButton.nextElementSibling).toBe(collapseState);
     expect(collapseButton).not.toBe(titleButton);
     expect(collapseButton).not.toContainElement(selectAllCheckbox);
     expect(collapseButton).not.toContainElement(titleButton);
@@ -3491,9 +3493,11 @@ describe('ActiveWindowsPage', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Save window' })).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/Saved "Project work"\. .*closing Window 1/i),
+      screen.queryByText(/Saved "Project work"\. .*closing the original window/i),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Saved "Project work" and closed the original window.'),
+    ).not.toBeInTheDocument();
     const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(closingCard).toHaveClass('is-closing');
     expect(closingCard).toHaveAttribute('aria-busy', 'true');
@@ -3576,7 +3580,9 @@ describe('ActiveWindowsPage', () => {
     expect(
       within(closingCard as HTMLElement).queryByText('This window has no available tabs.'),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Saved "Project work" and closed the original window.'),
+    ).not.toBeInTheDocument();
 
     currentSnapshot = createActiveWindowsSnapshot({
       windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
@@ -3584,13 +3590,13 @@ describe('ActiveWindowsPage', () => {
     act(() => listeners.forEach((listener) => listener()));
 
     expect(
-      await screen.findByText('Saved "Project work" and closed Window 1.'),
+      await screen.findByText('Saved "Project work" and closed the original window.'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 tabs? remain(?:s)? open/i)).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
         screen.getByRole('button', {
-          name: 'Undo Save & close for Project work from Window 1',
+          name: 'Undo Save & close for Project work',
         }),
       ).toHaveFocus(),
     );
@@ -3637,7 +3643,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     );
 
@@ -3649,7 +3655,7 @@ describe('ActiveWindowsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     ).not.toBeInTheDocument();
   });
@@ -3674,7 +3680,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     );
 
@@ -3685,7 +3691,7 @@ describe('ActiveWindowsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     ).not.toBeInTheDocument();
     expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
@@ -3700,7 +3706,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     );
 
@@ -3710,7 +3716,7 @@ describe('ActiveWindowsPage', () => {
       ),
     ).toBeInTheDocument();
     const retryUndo = screen.getByRole('button', {
-      name: 'Undo Save & close for Project work from Window 1',
+      name: 'Undo Save & close for Project work',
     });
     expect(retryUndo).toBeEnabled();
     expect(retryUndo).toHaveFocus();
@@ -3737,7 +3743,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     );
 
@@ -3747,7 +3753,7 @@ describe('ActiveWindowsPage', () => {
       ),
     ).toBeInTheDocument();
     const retryUndo = screen.getByRole('button', {
-      name: 'Undo Save & close for Project work from Window 1',
+      name: 'Undo Save & close for Project work',
     });
     expect(retryUndo).toBeEnabled();
     expect(retryUndo).toHaveFocus();
@@ -3767,7 +3773,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     );
 
@@ -3778,7 +3784,7 @@ describe('ActiveWindowsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     ).not.toBeInTheDocument();
     expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
@@ -3873,7 +3879,9 @@ describe('ActiveWindowsPage', () => {
     act(() => listeners.forEach((listener) => listener()));
 
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Saved "Project work" and closed the original window.'),
+    ).not.toBeInTheDocument();
     const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(closingCard).toHaveClass('is-closing');
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
@@ -3885,7 +3893,7 @@ describe('ActiveWindowsPage', () => {
     });
 
     expect(
-      await screen.findByText('Saved "Project work" and closed Window 1.'),
+      await screen.findByText('Saved "Project work" and closed the original window.'),
     ).toBeInTheDocument();
   });
 
@@ -3907,7 +3915,7 @@ describe('ActiveWindowsPage', () => {
       Promise.resolve({
         completion: null,
         errorMessage:
-          'The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+          'The original window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
         status: 'partial' as const,
       }),
     );
@@ -3970,7 +3978,7 @@ describe('ActiveWindowsPage', () => {
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
     expect(
       await screen.findByText(
-        'Saved "Project work", but Window 1 did not finish closing. The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+        'Saved "Project work", but the original window did not finish closing. The original window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
       ),
     ).toBeInTheDocument();
     const restoredCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
@@ -4014,7 +4022,7 @@ describe('ActiveWindowsPage', () => {
 
     expect(
       await screen.findByText(
-        'Saved "Project work", but Window 1 did not finish closing. Tab is being dragged',
+        'Saved "Project work", but the original window did not finish closing. Tab is being dragged',
       ),
     ).toBeInTheDocument();
     expect(finish).not.toHaveBeenCalled();
@@ -4118,10 +4126,12 @@ describe('ActiveWindowsPage', () => {
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
     expect(
       await screen.findByText(
-        'Saved "Project work", but Window 1 did not finish closing. A saved tab moved to another browser window, so Weaver left it open.',
+        'Saved "Project work", but the original window did not finish closing. A saved tab moved to another browser window, so Weaver left it open.',
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Saved "Project work" and closed the original window.'),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled();
   });
 
@@ -4179,7 +4189,7 @@ describe('ActiveWindowsPage', () => {
     act(() => listeners.forEach((listener) => listener()));
 
     expect(
-      await screen.findByText('Saved "First project" and closed Window 1.'),
+      await screen.findByText('Saved "First project" and closed the original window.'),
     ).toBeInTheDocument();
     const remainingClosingCard = screen
       .getByRole('heading', { name: 'Window 2' })
@@ -4195,42 +4205,44 @@ describe('ActiveWindowsPage', () => {
     act(() => listeners.forEach((listener) => listener()));
 
     expect(
-      await screen.findByText('Saved "Second project" and closed Window 2.'),
+      await screen.findByText('Saved "Second project" and closed the original window.'),
     ).toBeInTheDocument();
     const firstCompletion = screen
-      .getByText('Saved "First project" and closed Window 1.')
+      .getByText('Saved "First project" and closed the original window.')
       .closest<HTMLElement>('.window-close-completion-notice');
     expect(firstCompletion).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Undo Save & close for/ })).toHaveLength(2);
     expect(
       screen.getByRole('button', {
-        name: 'Undo Save & close for First project from Window 1',
+        name: 'Undo Save & close for First project',
       }),
     ).toBeEnabled();
     expect(
       screen.getByRole('button', {
-        name: 'Dismiss Save & close result for Second project from Window 2',
+        name: 'Dismiss Save & close result for Second project',
       }),
     ).toBeEnabled();
     expect(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Second project from Window 2',
+        name: 'Undo Save & close for Second project',
       }),
     ).toHaveFocus();
 
     await user.click(
       within(firstCompletion as HTMLElement).getByRole('button', {
-        name: 'Dismiss Save & close result for First project from Window 1',
+        name: 'Dismiss Save & close result for First project',
       }),
     );
 
     expect(
-      screen.queryByText('Saved "First project" and closed Window 1.'),
+      screen.queryByText('Saved "First project" and closed the original window.'),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Saved "Second project" and closed Window 2.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Saved "Second project" and closed the original window.'),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Second project from Window 2',
+        name: 'Undo Save & close for Second project',
       }),
     ).toBeEnabled();
   });
@@ -4261,7 +4273,7 @@ describe('ActiveWindowsPage', () => {
     });
 
     expect(
-      screen.queryByText(/Saved "Project work"\. .*closing Window 1/i),
+      screen.queryByText(/Saved "Project work"\. .*closing the original window/i),
     ).not.toBeInTheDocument();
     const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
@@ -4276,7 +4288,7 @@ describe('ActiveWindowsPage', () => {
       vi.advanceTimersByTime(1);
     });
     const delayedNotice = screen.getByText(
-      'Saved "Project work". Still closing Window 1. A page may need extra time or confirmation.',
+      'Saved "Project work". Still closing the original window. A page may need extra time or confirmation.',
     );
     expect(delayedNotice).toBeInTheDocument();
     const closingStatus = within(closingCard as HTMLElement)
@@ -4302,7 +4314,7 @@ describe('ActiveWindowsPage', () => {
     expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
     expect(closingStatus).toHaveFocus();
     const focusWindowButton = screen.getByRole('button', { name: 'Focus window' });
-    expect(focusWindowButton).toHaveAttribute('title', 'Focus Window 1');
+    expect(focusWindowButton).toHaveAttribute('title', 'Focus the original window');
     await act(async () => {
       fireEvent.click(focusWindowButton);
       await Promise.resolve();
@@ -4332,10 +4344,12 @@ describe('ActiveWindowsPage', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Saved "Project work" and closed Window 1.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Saved "Project work" and closed the original window.'),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'Undo Save & close for Project work from Window 1',
+        name: 'Undo Save & close for Project work',
       }),
     ).toHaveFocus();
   });
@@ -4438,7 +4452,7 @@ describe('ActiveWindowsPage', () => {
     expect(sourceWindowClose.cancelFinalization).toHaveBeenCalledTimes(1);
     expect(
       screen.getByText(
-        'Saved "Project work", but your browser did not finish closing all saved tabs from Window 1. Weaver stopped before closing the final tab. Focus the window to check for a confirmation.',
+        'Saved "Project work", but your browser did not finish closing every saved tab in the original window. Weaver stopped before closing the final tab. Focus the original window to check for a confirmation.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
@@ -4491,7 +4505,7 @@ describe('ActiveWindowsPage', () => {
     expect(cancelFinalization).toHaveBeenCalledTimes(1);
     expect(
       screen.getByText(
-        'Saved "Solo work", but your browser is still waiting to close the final tab in Window 2. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.',
+        'Saved "Solo work", but your browser is still waiting to close the final tab in the original window. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
@@ -4543,7 +4557,7 @@ describe('ActiveWindowsPage', () => {
     expect(cancelFinalization).toHaveBeenCalledTimes(1);
     expect(
       screen.getByText(
-        'Saved "Solo work", but Weaver could not finish verifying the final tab in Window 2. Weaver stopped automatic closing and unlocked the window.',
+        'Saved "Solo work", but Weaver could not finish verifying the final tab in the original window. Weaver stopped automatic closing and unlocked the window.',
       ),
     ).toBeInTheDocument();
     expect(
@@ -4588,7 +4602,7 @@ describe('ActiveWindowsPage', () => {
 
     expect(
       await screen.findByText(
-        'Saved "Solo work", but Window 2 did not finish closing. The final saved tab could not be closed: The page canceled closing',
+        'Saved "Solo work", but the original window did not finish closing. The final saved tab could not be closed: The page canceled closing',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
@@ -4600,7 +4614,7 @@ describe('ActiveWindowsPage', () => {
     const savedWindowsService = createSavedWindowsService();
     vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(
       createSaveWindowResult('Project work', false, [
-        'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+        'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
       ]),
     );
     render(
@@ -4614,7 +4628,7 @@ describe('ActiveWindowsPage', () => {
 
     expect(
       screen.getByText(
-        'Saved "Project work". The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+        'Saved "Project work". Weaver could not safely verify every tab in the original window, so no tabs were closed.',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Closing…')).not.toBeInTheDocument();

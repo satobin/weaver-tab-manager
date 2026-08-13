@@ -342,7 +342,7 @@ describe('createChromeSavedWindowsService', () => {
     const result = await savePromise;
     expect(result.sourceWindowClose).toBeNull();
     expect(result.warnings).toContain(
-      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
     );
     expect(fake.api.tabs.remove).not.toHaveBeenCalled();
   });
@@ -481,7 +481,7 @@ describe('createChromeSavedWindowsService', () => {
     expect(result.sourceWindowClose).toBeNull();
     expect(fake.api.tabs.remove).not.toHaveBeenCalled();
     expect(result.warnings).toContain(
-      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
     );
   });
 
@@ -507,7 +507,7 @@ describe('createChromeSavedWindowsService', () => {
     expect(result.sourceWindowClose).toBeNull();
     expect(fake.api.tabs.remove).not.toHaveBeenCalled();
     expect(result.warnings).toContain(
-      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
     );
   });
 
@@ -527,7 +527,7 @@ describe('createChromeSavedWindowsService', () => {
     vi.mocked(fake.api.tabs.query).mockResolvedValue(fake.sourceWindow.tabs ?? []);
     await expect(result.sourceWindowClose.finish()).resolves.toEqual({
       completion: null,
-      errorMessage: '1 tab still needs attention before the source window can close.',
+      errorMessage: '1 tab still needs attention before the original window can close.',
       status: 'partial',
     });
     await expect(service.load()).resolves.toHaveLength(1);
@@ -557,7 +557,7 @@ describe('createChromeSavedWindowsService', () => {
     await expect(result.sourceWindowClose.finish()).resolves.toEqual({
       completion: null,
       errorMessage:
-        'The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+        'The original window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
       status: 'partial',
     });
     expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
@@ -640,7 +640,7 @@ describe('createChromeSavedWindowsService', () => {
     expect(fake.api.tabs.remove).not.toHaveBeenCalled();
     expect(result.warnings).toContain('A tab without an available URL was skipped.');
     expect(result.warnings).toContain(
-      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      'Weaver could not safely verify every tab in the original window, so no tabs were closed.',
     );
   });
 
@@ -651,7 +651,9 @@ describe('createChromeSavedWindowsService', () => {
       throw new Error('Missing restored tab fixture');
     }
     delete restoredTab.title;
-    delete restoredTab.url;
+    restoredTab.pendingUrl = 'https://docs.example.com/restored-plan';
+    restoredTab.status = 'loading';
+    restoredTab.url = 'about:blank';
     const restoredTabMetadataService: RestoredTabMetadataService = {
       register: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
@@ -689,6 +691,7 @@ describe('createChromeSavedWindowsService', () => {
     expect(restoredTabMetadataService.resolve).toHaveBeenCalledWith(fake.sourceWindow.tabs, {
       pruneMissing: false,
     });
+    expect(restoredTab.pendingUrl).toBe('https://docs.example.com/restored-plan');
   });
 
   it('never closes the source when persistence fails', async () => {
@@ -709,7 +712,7 @@ describe('createChromeSavedWindowsService', () => {
 
     expect(result.sourceWindowClose).toBeNull();
     expect(result.warnings).toEqual([
-      'The window was saved, but its tabs could not be prepared for closing: Tabs unavailable',
+      "Weaver could not prepare the original window's tabs for closing: Tabs unavailable",
     ]);
     await expect(service.load()).resolves.toHaveLength(1);
   });

@@ -128,7 +128,6 @@ interface WindowCloseCompletionNotice {
   message: string;
   savedWindowId: string;
   savedWindowName: string;
-  windowLabel: string;
 }
 interface PendingWindowCloseFocus {
   savedWindowId: string;
@@ -212,18 +211,18 @@ function getPendingWindowCloseProgress(
 }
 
 function getPendingWindowCloseNotice(pendingClose: PendingWindowClose): string {
-  return `Saved "${pendingClose.savedWindowName}". Still closing ${pendingClose.windowLabel}. A page may need extra time or confirmation.${pendingClose.warningText}`;
+  return `Saved "${pendingClose.savedWindowName}". Still closing the original window. A page may need extra time or confirmation.${pendingClose.warningText}`;
 }
 
 function getCompletedWindowCloseNotice(pendingClose: PendingWindowClose): string {
-  return `Saved "${pendingClose.savedWindowName}" and closed ${pendingClose.windowLabel}.${pendingClose.warningText}`;
+  return `Saved "${pendingClose.savedWindowName}" and closed the original window.${pendingClose.warningText}`;
 }
 
 function getFailedWindowCloseMessage(
   pendingClose: PendingWindowClose,
   errorMessage: string,
 ): string {
-  return `Saved "${pendingClose.savedWindowName}", but ${pendingClose.windowLabel} did not finish closing. ${errorMessage}`;
+  return `Saved "${pendingClose.savedWindowName}", but the original window did not finish closing. ${errorMessage}`;
 }
 
 function appendOperationError(current: string | null, next: string): string {
@@ -833,10 +832,10 @@ export function ActiveWindowsPage({
         });
         setDuplicateUndoTabs(null);
         const timeoutMessage = finalCloseRequested
-          ? `Saved "${pendingClose.savedWindowName}", but your browser is still waiting to close the final tab in ${pendingClose.windowLabel}. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.`
+          ? `Saved "${pendingClose.savedWindowName}", but your browser is still waiting to close the final tab in the original window. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.`
           : finalizationVerificationPending
-            ? `Saved "${pendingClose.savedWindowName}", but Weaver could not finish verifying the final tab in ${pendingClose.windowLabel}. Weaver stopped automatic closing and unlocked the window.`
-            : `Saved "${pendingClose.savedWindowName}", but your browser did not finish closing all saved tabs from ${pendingClose.windowLabel}. Weaver stopped before closing the final tab. Focus the window to check for a confirmation.`;
+            ? `Saved "${pendingClose.savedWindowName}", but Weaver could not finish verifying the final tab in the original window. Weaver stopped automatic closing and unlocked the window.`
+            : `Saved "${pendingClose.savedWindowName}", but your browser did not finish closing every saved tab in the original window. Weaver stopped before closing the final tab. Focus the original window to check for a confirmation.`;
         setOperationError((current) => appendOperationError(current, timeoutMessage));
       }, WINDOW_CLOSE_TIMEOUT_MS);
       pendingWindowCloseTimersRef.current.set(pendingClose.windowId, {
@@ -887,7 +886,8 @@ export function ActiveWindowsPage({
               finalizationState: 'accepted',
               terminalErrorMessage:
                 result.status === 'partial'
-                  ? (result.errorMessage ?? 'Your browser left part of the source window open.')
+                  ? (result.errorMessage ??
+                    'Your browser left some tabs open in the original window.')
                   : null,
             });
             return next;
@@ -931,7 +931,7 @@ export function ActiveWindowsPage({
               terminalErrorMessage:
                 error instanceof Error && error.message.trim()
                   ? error.message
-                  : 'Your browser could not finish closing the source window.',
+                  : 'Your browser could not finish closing the original window.',
             });
             return next;
           });
@@ -1010,7 +1010,6 @@ export function ActiveWindowsPage({
         message: getCompletedWindowCloseNotice(pendingClose),
         savedWindowId: pendingClose.savedWindowId,
         savedWindowName: pendingClose.savedWindowName,
-        windowLabel: pendingClose.windowLabel,
       }));
       if (completionNotices.length > 0) {
         setWindowCloseCompletionNotices((current) => {
@@ -1027,7 +1026,7 @@ export function ActiveWindowsPage({
             pendingClose,
             pendingClose.terminalErrorMessage ??
               pendingClose.batchErrorMessage ??
-              'Your browser left part of the source window open.',
+              'Your browser left some tabs open in the original window.',
           ),
         )
         .join(' ');
@@ -2414,7 +2413,7 @@ export function ActiveWindowsPage({
           <div className="inline-notice-actions">
             <button
               type="button"
-              title={`Focus ${visiblePendingWindowClose.windowLabel}`}
+              title="Focus the original window"
               onClick={() => void focusWindow(visiblePendingWindowClose.windowId)}
             >
               Focus window
@@ -2443,7 +2442,7 @@ export function ActiveWindowsPage({
             <button
               className="notice-undo-button"
               type="button"
-              aria-label={`Undo Save & close for ${notice.savedWindowName} from ${notice.windowLabel}`}
+              aria-label={`Undo Save & close for ${notice.savedWindowName}`}
               title="Undo Save & close"
               disabled={operationLabel !== null}
               onClick={() => void undoCompletedSaveAndClose(notice)}
@@ -2452,7 +2451,7 @@ export function ActiveWindowsPage({
             </button>
             <button
               type="button"
-              aria-label={`Dismiss Save & close result for ${notice.savedWindowName} from ${notice.windowLabel}`}
+              aria-label={`Dismiss Save & close result for ${notice.savedWindowName}`}
               title="Dismiss notification"
               disabled={operationLabel !== null}
               onClick={() => dismissWindowCloseCompletionNotice(notice.savedWindowId)}

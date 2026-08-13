@@ -294,21 +294,21 @@ export function WindowCard({
                   {window.label}
                 </button>
               )}
+              {!closing ? (
+                <span className="window-collapse-state" aria-hidden="true">
+                  {collapsed ? (
+                    <ChevronRight className="window-heading-chevron" size={15} />
+                  ) : (
+                    <ChevronDown className="window-heading-chevron" size={15} />
+                  )}
+                </span>
+              ) : null}
             </h3>
             <span className="window-heading-summary">
               {pluralizeTabs(window.tabs.length)}
               {!closing && selectedCount > 0 ? ` (${selectedCount} selected)` : ''}
             </span>
           </div>
-          {!closing ? (
-            <span className="window-collapse-state" aria-hidden="true">
-              {collapsed ? (
-                <ChevronRight className="window-heading-chevron" size={15} />
-              ) : (
-                <ChevronDown className="window-heading-chevron" size={15} />
-              )}
-            </span>
-          ) : null}
         </div>
 
         {!closing ? (

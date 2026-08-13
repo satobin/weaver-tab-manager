@@ -22,7 +22,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getMergeDialogHorizontalOffset } from '../features/active-windows/mergeDialogPosition';
@@ -169,6 +169,7 @@ function SavedWindowPreview({
   removingTabKey,
   savedWindow,
   selectedTabKeys,
+  showTabUrls,
 }: {
   actionsDisabled: boolean;
   duplicatePreviewOutcomes?: ReadonlyMap<number, SavedDuplicatePreviewOutcome>;
@@ -188,6 +189,7 @@ function SavedWindowPreview({
   savedWindow: SavedWindow;
   removingTabKey?: string | null | undefined;
   selectedTabKeys?: ReadonlySet<string> | undefined;
+  showTabUrls: boolean;
 }) {
   const groupsByKey = new Map(savedWindow.groups.map((group) => [group.key, group]));
   const orderedTabKeys = savedWindow.tabs.map((tab) =>
@@ -195,7 +197,7 @@ function SavedWindowPreview({
   );
 
   return (
-    <ul className={`saved-tab-list${onToggleTab ? ' has-selection-controls' : ''}`}>
+    <ul className={`tab-list saved-tab-list${onToggleTab ? ' has-selection-controls' : ''}`}>
       {savedWindow.tabs.map((tab, index) => {
         const group = tab.groupKey ? groupsByKey.get(tab.groupKey) : undefined;
         const beginsGroup = group && savedWindow.tabs[index - 1]?.groupKey !== group.key;
@@ -211,29 +213,42 @@ function SavedWindowPreview({
         const selected = selectedTabKeys?.has(selectionKey) ?? false;
         const rowActionsDisabled = actionsDisabled || Boolean(selectedTabKeys?.size);
         const removing = removingTabKey === selectionKey;
+        const rowClassName = [
+          'tab-row',
+          'saved-tab-row',
+          onToggleTab ? 'has-selection-control' : '',
+          selected ? 'is-selected' : '',
+          duplicatePreviewState === 'close' ? 'is-duplicate-preview-close' : '',
+          duplicatePreviewState === 'keep' ? 'is-duplicate-preview-keep' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
         return (
-          <Fragment key={`${tab.order}-${tab.url}`}>
+          <li
+            className={[
+              'tab-list-item',
+              selected ? 'is-selected' : '',
+              duplicatePreviewState === 'close' ? 'is-duplicate-preview-close' : '',
+              duplicatePreviewState === 'keep' ? 'is-duplicate-preview-keep' : '',
+              group ? `group-color-${group.color}` : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            key={`${tab.order}-${tab.url}`}
+          >
             {beginsGroup ? (
-              <li className="saved-group-heading">
-                <span
-                  className={`saved-group-color group-color-${group.color}`}
-                  aria-hidden="true"
-                />
-                <span>{group.title || 'Untitled group'}</span>
-                {group.collapsed ? <small>Collapsed</small> : null}
-              </li>
+              <div
+                className={`tab-group-heading saved-group-heading${onToggleTab ? ' has-selection-control' : ''}`}
+              >
+                {onToggleTab ? <span aria-hidden="true" /> : null}
+                <div className="saved-group-copy">
+                  <span className="tab-group-color-dot saved-group-color" aria-hidden="true" />
+                  <span>{group.title || 'Untitled group'}</span>
+                  {group.collapsed ? <small>Collapsed</small> : null}
+                </div>
+              </div>
             ) : null}
-            <li
-              className={[
-                'saved-tab-row',
-                onToggleTab ? 'has-selection-control' : '',
-                selected ? 'is-selected' : '',
-                duplicatePreviewState === 'close' ? 'is-duplicate-preview-close' : '',
-                duplicatePreviewState === 'keep' ? 'is-duplicate-preview-keep' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
+            <div className={rowClassName}>
               {onToggleTab ? (
                 <SelectionCheckbox
                   ariaLabel={`Select ${tab.title} in ${savedWindow.name}`}
@@ -244,11 +259,10 @@ function SavedWindowPreview({
                   }
                 />
               ) : null}
-              <span className="saved-tab-order">{tab.order + 1}</span>
               <div className="saved-tab-content">
                 <div className="saved-tab-open-area">
                   <button
-                    className={`saved-tab-open-button${onRemoveTab ? ' has-remove-action' : ''}`}
+                    className={`tab-focus-button saved-tab-open-button${onRemoveTab ? ' has-remove-action' : ''}`}
                     type="button"
                     aria-label={`Open ${tab.title} in a new${tab.pinned ? ' pinned' : ''} tab`}
                     aria-describedby={
@@ -258,9 +272,13 @@ function SavedWindowPreview({
                     disabled={rowActionsDisabled}
                     onClick={() => onOpenTab({ pinned: tab.pinned, url: tab.url })}
                   >
-                    <span className="saved-tab-copy">
-                      <strong>{tab.title}</strong>
-                      <span title={tab.url}>{formatTabLocation(tab.url)}</span>
+                    <span className="tab-copy saved-tab-copy">
+                      <strong className="tab-title">{tab.title}</strong>
+                      {showTabUrls ? (
+                        <span className="tab-location" title={tab.url}>
+                          {formatTabLocation(tab.url)}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="saved-tab-meta">
                       {duplicatePreviewOutcome ? (
@@ -277,7 +295,7 @@ function SavedWindowPreview({
                   </button>
                   {onRemoveTab ? (
                     <button
-                      className="saved-tab-remove-button"
+                      className="tab-close-button saved-tab-remove-button"
                       type="button"
                       aria-label={`Remove ${tab.title} from ${savedWindow.name}, saved tab ${tab.order + 1}`}
                       aria-busy={removing || undefined}
@@ -302,8 +320,8 @@ function SavedWindowPreview({
                   </button>
                 ) : null}
               </div>
-            </li>
-          </Fragment>
+            </div>
+          </li>
         );
       })}
     </ul>
@@ -330,6 +348,9 @@ export function SavedWindowsPage({
     settings,
   } = useSettings(settingsService);
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsedFilterIds, setCollapsedFilterIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -696,6 +717,9 @@ export function SavedWindowsPage({
 
   const updateQuery = (nextQuery: string) => {
     setQuery(nextQuery);
+    if (!nextQuery.trim()) {
+      setCollapsedFilterIds(new Set());
+    }
   };
 
   const toggleFilteredSelection = () => {
@@ -885,6 +909,18 @@ export function SavedWindowsPage({
   };
 
   const toggleExpanded = (id: string) => {
+    if (hasFilter) {
+      setCollapsedFilterIds((current) => {
+        const next = new Set(current);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+      return;
+    }
     setExpandedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) {
@@ -1375,7 +1411,7 @@ export function SavedWindowsPage({
               closeMergeDialog(false);
               closeMoveDialog(false);
               clearTabSelection();
-              setQuery('');
+              updateQuery('');
               setDeletingId(null);
               setRenamingId(null);
               setDuplicatePreviewMode(true);
@@ -1788,7 +1824,11 @@ export function SavedWindowsPage({
           {displayedWindows.map((savedWindow) => {
             const sourceSavedWindow =
               windows.find((candidate) => candidate.id === savedWindow.id) ?? savedWindow;
-            const expanded = duplicatePreviewMode || hasFilter || expandedIds.has(savedWindow.id);
+            const expanded = duplicatePreviewMode
+              ? true
+              : hasFilter
+                ? !collapsedFilterIds.has(savedWindow.id)
+                : expandedIds.has(savedWindow.id);
             const isRenaming = renamingId === savedWindow.id;
             const isDeleting = deletingId === savedWindow.id;
             const currentOperation = operation?.id === savedWindow.id ? operation.type : null;
@@ -1825,12 +1865,22 @@ export function SavedWindowsPage({
 
             return (
               <article
-                className={`saved-window-card${mergeDialogOpen && visibleMergeWindowIds.has(savedWindow.id) ? ' is-merge-selected' : ''}`}
+                className={[
+                  'window-card',
+                  'saved-window-card',
+                  settings.showTabUrls ? '' : 'is-compact-tabs',
+                  expanded ? '' : 'is-collapsed',
+                  mergeDialogOpen && visibleMergeWindowIds.has(savedWindow.id)
+                    ? 'is-merge-selected'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 aria-labelledby={`saved-window-${savedWindow.id}-title`}
                 key={savedWindow.id}
               >
-                <header>
-                  <div className="saved-window-identity">
+                <header className="window-card-header">
+                  <div className="window-identity saved-window-identity">
                     {!duplicatePreviewMode ? (
                       <SelectionCheckbox
                         ariaLabel={`Select all visible tabs in ${savedWindow.name}`}
@@ -1846,56 +1896,45 @@ export function SavedWindowsPage({
                         onChange={(checked) => setVisibleWindowSelection(savedWindow, checked)}
                       />
                     ) : null}
-                    {duplicatePreviewMode || hasFilter ? (
-                      <div className="saved-window-expand is-static">
-                        <span className="saved-window-copy">
-                          <strong id={`saved-window-${savedWindow.id}-title`}>
-                            {savedWindow.name}
-                          </strong>
-                          <span>
-                            {duplicatePreviewMode
-                              ? pluralize(savedWindow.tabs.length, 'matching tab')
-                              : `${pluralize(savedWindow.tabs.length, 'matching tab')} of ${pluralize(sourceSavedWindow.tabs.length, 'tab')}`}
-                            {selectedInWindowCount > 0
-                              ? ` (${selectedInWindowCount} selected)`
-                              : ''}{' '}
-                            · Saved {formatSavedTime(savedWindow.createdAt)}
+                    <div className="window-heading-copy saved-window-copy">
+                      <h3 id={`saved-window-${savedWindow.id}-title`}>
+                        <span className="window-heading-static">{savedWindow.name}</span>
+                        {!duplicatePreviewMode ? (
+                          <span className="window-collapse-state" aria-hidden="true">
+                            {expanded ? (
+                              <ChevronDown className="window-heading-chevron" size={15} />
+                            ) : (
+                              <ChevronRight className="window-heading-chevron" size={15} />
+                            )}
                           </span>
-                        </span>
-                      </div>
-                    ) : (
-                      <button
-                        className="saved-window-expand"
-                        type="button"
-                        aria-label={`${expanded ? 'Hide' : 'Show'} preview for ${savedWindow.name}`}
-                        aria-expanded={expanded}
-                        aria-controls={`saved-window-${savedWindow.id}-preview`}
-                        onClick={() => toggleExpanded(savedWindow.id)}
-                      >
-                        {expanded ? (
-                          <ChevronDown aria-hidden="true" size={18} />
-                        ) : (
-                          <ChevronRight aria-hidden="true" size={18} />
-                        )}
-                        <span className="saved-window-copy">
-                          <strong id={`saved-window-${savedWindow.id}-title`}>
-                            {savedWindow.name}
-                          </strong>
-                          <span>
-                            {pluralize(sourceSavedWindow.tabs.length, 'tab')}
-                            {selectedInWindowCount > 0
-                              ? ` (${selectedInWindowCount} selected)`
-                              : ''}{' '}
-                            · {pluralize(sourceSavedWindow.groups.length, 'group')} · Saved{' '}
-                            {formatSavedTime(savedWindow.createdAt)}
-                          </span>
-                        </span>
-                      </button>
-                    )}
+                        ) : null}
+                      </h3>
+                      <span className="window-heading-summary">
+                        {duplicatePreviewMode
+                          ? pluralize(savedWindow.tabs.length, 'matching tab')
+                          : hasFilter
+                            ? `${pluralize(savedWindow.tabs.length, 'matching tab')} of ${pluralize(sourceSavedWindow.tabs.length, 'tab')}`
+                            : `${pluralize(sourceSavedWindow.tabs.length, 'tab')} · ${pluralize(sourceSavedWindow.groups.length, 'group')}`}
+                        {selectedInWindowCount > 0 ? ` (${selectedInWindowCount} selected)` : ''} ·
+                        Saved {formatSavedTime(savedWindow.createdAt)}
+                      </span>
+                    </div>
                   </div>
 
                   {!duplicatePreviewMode ? (
-                    <div className="saved-window-actions">
+                    <button
+                      className="window-collapse-button"
+                      type="button"
+                      aria-label={`${expanded ? 'Collapse' : 'Expand'} ${savedWindow.name}`}
+                      aria-expanded={expanded}
+                      aria-controls={`saved-window-${savedWindow.id}-preview`}
+                      title={`${expanded ? 'Collapse' : 'Expand'} saved window`}
+                      onClick={() => toggleExpanded(savedWindow.id)}
+                    />
+                  ) : null}
+
+                  {!duplicatePreviewMode ? (
+                    <div className="window-card-actions saved-window-actions">
                       <div
                         className="window-sort-controls"
                         role="group"
@@ -1947,13 +1986,16 @@ export function SavedWindowsPage({
                         </button>
                       </div>
                       <button
-                        className="toolbar-button primary-button"
+                        className="toolbar-button primary-button saved-window-restore-button"
                         type="button"
+                        aria-busy={currentOperation === 'restore' || undefined}
+                        aria-label={`${currentOperation === 'restore' ? 'Restoring' : 'Restore'} ${savedWindow.name}`}
+                        title="Restore saved window"
                         disabled={disabled}
                         onClick={() => void restoreWindow(sourceSavedWindow)}
                       >
                         <ArchiveRestore aria-hidden="true" size={16} />
-                        <span>{currentOperation === 'restore' ? 'Restoring...' : 'Restore'}</span>
+                        <span>Restore</span>
                       </button>
                       <button
                         className="icon-button"
@@ -2041,8 +2083,8 @@ export function SavedWindowsPage({
                   </div>
                 ) : null}
 
-                {expanded ? (
-                  <div id={`saved-window-${savedWindow.id}-preview`}>
+                <div id={`saved-window-${savedWindow.id}-preview`} hidden={!expanded}>
+                  {expanded ? (
                     <SavedWindowPreview
                       actionsDisabled={operation !== null}
                       {...(duplicatePreviewMode
@@ -2072,9 +2114,10 @@ export function SavedWindowsPage({
                           }
                         : {})}
                       savedWindow={savedWindow}
+                      showTabUrls={settings.showTabUrls}
                     />
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </article>
             );
           })}

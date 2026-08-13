@@ -94,7 +94,10 @@ export function SettingsPage({
         <div className="settings-group">
           <div>
             <h3>Show tab URLs</h3>
-            <p>Show URLs below tab titles in Active Windows. Turn this off for denser cards.</p>
+            <p>
+              Show URLs below tab titles in Active and Saved Windows. Turn this off for denser
+              cards.
+            </p>
           </div>
           <SettingSwitch
             checked={settings.showTabUrls}
