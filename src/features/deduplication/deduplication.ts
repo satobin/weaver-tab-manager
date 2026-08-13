@@ -287,24 +287,53 @@ export function parseDedupeRules(value: unknown): DedupeRule[] | null {
   return rules;
 }
 
-function escapeRegularExpression(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+function matchesPathGlob(value: string, pattern: string): boolean {
+  let valueIndex = 0;
+  let patternIndex = 0;
+  let wildcardIndex = -1;
+  let wildcardValueIndex = -1;
+
+  while (valueIndex < value.length) {
+    if (patternIndex < pattern.length && pattern[patternIndex] === value[valueIndex]) {
+      valueIndex += 1;
+      patternIndex += 1;
+    } else if (patternIndex < pattern.length && pattern[patternIndex] === '*') {
+      wildcardIndex = patternIndex;
+      wildcardValueIndex = valueIndex;
+      patternIndex += 1;
+    } else if (wildcardIndex >= 0) {
+      wildcardValueIndex += 1;
+      valueIndex = wildcardValueIndex;
+      patternIndex = wildcardIndex + 1;
+    } else {
+      return false;
+    }
+  }
+
+  while (patternIndex < pattern.length && pattern[patternIndex] === '*') {
+    patternIndex += 1;
+  }
+  return patternIndex === pattern.length;
 }
 
-function compileGlob(glob: string): RegExp {
+function compileGlob(glob: string): (hostname: string, pathname: string) => boolean {
   const parsed = parseDedupePattern(glob);
   if (!parsed) {
     throw new Error('Cannot compile an invalid duplicate-rule pattern.');
   }
-  const hostnameSource = parsed.hostnameWildcard
-    ? `(?:[^./]+\\.)+${escapeRegularExpression(parsed.hostname)}`
-    : escapeRegularExpression(parsed.hostname);
-  const pathSource = parsed.path.split('*').map(escapeRegularExpression).join('.*');
-  return new RegExp(`^${hostnameSource}${pathSource}$`, 'u');
+  return (hostname, pathname) => {
+    let hostnameMatches = hostname === parsed.hostname;
+    if (parsed.hostnameWildcard) {
+      const suffix = `.${parsed.hostname}`;
+      const wildcardPrefix = hostname.endsWith(suffix) ? hostname.slice(0, -suffix.length) : '';
+      hostnameMatches = wildcardPrefix.length > 0 && wildcardPrefix.split('.').every(Boolean);
+    }
+    return hostnameMatches && matchesPathGlob(pathname, parsed.path);
+  };
 }
 
 interface CompiledRule {
-  expression: RegExp;
+  matches: (hostname: string, pathname: string) => boolean;
   rule: DedupeRule;
 }
 
@@ -314,7 +343,7 @@ function compileRules(rules: readonly DedupeRule[]): CompiledRule[] {
       return [];
     }
     const aliases = isBuiltInDedupeRule(rule) ? (BUILT_IN_RULE_GLOB_ALIASES[rule.id] ?? []) : [];
-    return [rule.glob, ...aliases].map((glob) => ({ expression: compileGlob(glob), rule }));
+    return [rule.glob, ...aliases].map((glob) => ({ matches: compileGlob(glob), rule }));
   });
 }
 
@@ -335,8 +364,7 @@ function canonicalizeWithRules(
 
   const hostname = url.hostname.toLowerCase();
   const pathname = url.pathname || '/';
-  const target = `${hostname}${pathname}`;
-  const compiledRule = rules.find(({ expression }) => expression.test(target));
+  const compiledRule = rules.find(({ matches }) => matches(hostname, pathname));
   if (!compiledRule) {
     return { key: `exact:${rawUrl}`, matchType: 'exact', ruleId: null };
   }

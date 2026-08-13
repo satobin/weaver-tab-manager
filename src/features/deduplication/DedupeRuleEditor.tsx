@@ -3,14 +3,16 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  Download,
   Eye,
   Plus,
   RotateCcw,
   Save,
   Trash2,
   Undo2,
+  Upload,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SettingSwitch } from '../settings/SettingSwitch';
 import {
@@ -37,6 +39,14 @@ import {
 } from './dedupeRulePresentation';
 import { DedupePresetFormatsTooltip } from './DedupePresetFormatsTooltip';
 import { DedupeRuleHelpPopover } from './DedupeRuleHelpPopover';
+import {
+  CUSTOM_RULE_TRANSFER_FILENAME,
+  MAX_CUSTOM_RULE_TRANSFER_BYTES,
+  MAX_IMPORTED_CUSTOM_RULES,
+  materializeImportedCustomRules,
+  parseCustomRuleTransfer,
+  serializeCustomRuleTransfer,
+} from './customRuleTransfer';
 
 interface DedupeRulePreviewInput {
   errorMessage: string | null;
@@ -61,6 +71,11 @@ const EMPTY_PREVIEW: DedupeRulePreviewInput = {
   keeperPreference: {},
   tabs: [],
 };
+
+interface RuleTransferNotice {
+  kind: 'error' | 'status';
+  message: string;
+}
 
 let fallbackRuleId = 0;
 
@@ -107,6 +122,21 @@ function getPatternHelp(comparisonMode: DedupeRule['comparisonMode']): string {
   }
 }
 
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('The selected file could not be read as text.'));
+      }
+    });
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('File read failed.')));
+    reader.readAsText(file);
+  });
+}
+
 export function DedupeRuleEditor({
   advancedDuplicateMatchingEnabled = false,
   advancedDuplicateMatchingToggleDisabled = false,
@@ -131,8 +161,16 @@ export function DedupeRuleEditor({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [resetRequested, setResetRequested] = useState(false);
   const [activePresetFormatsId, setActivePresetFormatsId] = useState<string | null>(null);
+  const [pendingImportedRules, setPendingImportedRules] = useState<DedupeRule[] | null>(null);
+  const [transferNotice, setTransferNotice] = useState<RuleTransferNotice | null>(null);
+  const customDirtyRef = useRef(false);
+  const importButtonRef = useRef<HTMLButtonElement | null>(null);
+  const importCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const importRequestIdRef = useRef(0);
   const customRules = customDraft ?? persistedCustomRules;
   const customDirty = customDraft !== null;
+  const interactionDisabled = disabled || pendingImportedRules !== null;
   const draftRules = useMemo(
     () => orderBuiltInDedupeRulesFirst([...persistedBuiltInRules, ...customRules]),
     [customRules, persistedBuiltInRules],
@@ -160,8 +198,19 @@ export function DedupeRuleEditor({
     0,
   );
 
+  useEffect(() => {
+    if (!pendingImportedRules) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => importCancelButtonRef.current?.focus(), 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [pendingImportedRules]);
+
   const updateCustomRules = (update: (current: DedupeRule[]) => DedupeRule[]) => {
+    customDirtyRef.current = true;
     setCustomDraft((current) => update(current ?? persistedCustomRules));
+    setPendingImportedRules(null);
+    setTransferNotice(null);
     setResetRequested(false);
   };
 
@@ -218,9 +267,109 @@ export function DedupeRuleEditor({
     setCustomOpen(true);
   };
 
+  const restoreImportButtonFocus = () => {
+    window.setTimeout(() => importButtonRef.current?.focus({ preventScroll: true }), 0);
+  };
+
+  const applyImportedRules = (importedRules: DedupeRule[]) => {
+    customDirtyRef.current = true;
+    setCustomDraft(importedRules);
+    setCustomOpen(true);
+    setPendingImportedRules(null);
+    setResetRequested(false);
+    setTransferNotice({
+      kind: 'status',
+      message:
+        importedRules.length === 0
+          ? 'Imported a file with no custom rules. Save to remove all custom rules.'
+          : `Imported ${pluralize(importedRules.length, 'custom rule')}. Review them, then save your changes.`,
+    });
+  };
+
+  const importCustomRules = async (file: File) => {
+    const requestId = ++importRequestIdRef.current;
+    setTransferNotice(null);
+    setPendingImportedRules(null);
+    setResetRequested(false);
+    setCustomOpen(true);
+    if (file.size > MAX_CUSTOM_RULE_TRANSFER_BYTES) {
+      setTransferNotice({
+        kind: 'error',
+        message: 'The file is too large. Custom rule files must be 1 MB or smaller.',
+      });
+      return;
+    }
+
+    let text: string;
+    try {
+      text = await readFileAsText(file);
+    } catch {
+      if (requestId !== importRequestIdRef.current) {
+        return;
+      }
+      setTransferNotice({
+        kind: 'error',
+        message: 'That file could not be read. Choose a Weaver custom rules file.',
+      });
+      return;
+    }
+    if (requestId !== importRequestIdRef.current) {
+      return;
+    }
+    const result = parseCustomRuleTransfer(text);
+    if (!result.ok) {
+      setTransferNotice({ kind: 'error', message: result.error });
+      return;
+    }
+    const importedRules = materializeImportedCustomRules(result.rules, createRuleId);
+    setResetRequested(false);
+    if (customDirtyRef.current) {
+      setPendingImportedRules(importedRules);
+      return;
+    }
+    applyImportedRules(importedRules);
+  };
+
+  const exportCustomRules = () => {
+    try {
+      const blob = new Blob([serializeCustomRuleTransfer(customRules)], {
+        type: 'application/json',
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = CUSTOM_RULE_TRANSFER_FILENAME;
+      link.hidden = true;
+      document.body.append(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      }
+      setTransferNotice({
+        kind: 'status',
+        message: `Exported ${pluralize(customRules.length, 'custom rule')}.`,
+      });
+    } catch {
+      const message =
+        customRules.length > MAX_IMPORTED_CUSTOM_RULES
+          ? `Export is limited to ${MAX_IMPORTED_CUSTOM_RULES} custom rules.`
+          : 'Custom rules could not be exported. Try again.';
+      setTransferNotice({
+        kind: 'error',
+        message,
+      });
+    }
+  };
+
   const discardCustomChanges = () => {
+    importRequestIdRef.current += 1;
+    customDirtyRef.current = false;
     setCustomDraft(null);
     setCustomOpen(persistedCustomRules.length > 0);
+    setPendingImportedRules(null);
+    setTransferNotice(null);
     setResetRequested(false);
   };
 
@@ -229,7 +378,11 @@ export function DedupeRuleEditor({
       return;
     }
     if (await onSave(orderBuiltInDedupeRulesFirst([...persistedBuiltInRules, ...customRules]))) {
+      importRequestIdRef.current += 1;
+      customDirtyRef.current = false;
       setCustomDraft(null);
+      setPendingImportedRules(null);
+      setTransferNotice(null);
       setResetRequested(false);
     }
   };
@@ -239,8 +392,12 @@ export function DedupeRuleEditor({
       return;
     }
     if (await onSave(cloneDedupeRules(DEFAULT_DEDUPLICATION_RULES))) {
+      importRequestIdRef.current += 1;
+      customDirtyRef.current = false;
       setCustomDraft(null);
       setCustomOpen(false);
+      setPendingImportedRules(null);
+      setTransferNotice(null);
       setResetRequested(false);
     }
   };
@@ -258,17 +415,22 @@ export function DedupeRuleEditor({
         </div>
         <div className="settings-rule-heading-actions">
           {advancedDuplicateMatchingEnabled ? (
-            <button type="button" disabled={disabled} onClick={() => setResetRequested(true)}>
+            <button
+              type="button"
+              disabled={interactionDisabled}
+              onClick={() => setResetRequested(true)}
+            >
               <RotateCcw aria-hidden="true" size={15} />
               <span>Reset</span>
             </button>
           ) : null}
           <SettingSwitch
             checked={advancedDuplicateMatchingEnabled}
-            disabled={advancedDuplicateMatchingToggleDisabled}
+            disabled={advancedDuplicateMatchingToggleDisabled || pendingImportedRules !== null}
             label="Advanced duplicate matching"
             onChange={(enabled) => {
               if (!enabled) {
+                importRequestIdRef.current += 1;
                 setResetRequested(false);
               }
               void onAdvancedDuplicateMatchingEnabledChange(enabled);
@@ -282,7 +444,11 @@ export function DedupeRuleEditor({
           {resetRequested ? (
             <div className="rule-reset-confirmation" role="alert">
               <span>Turn off Google and Notion matching and remove all custom rules?</span>
-              <button type="button" disabled={disabled} onClick={() => void resetRules()}>
+              <button
+                type="button"
+                disabled={interactionDisabled}
+                onClick={() => void resetRules()}
+              >
                 Reset rules
               </button>
               <button type="button" onClick={() => setResetRequested(false)}>
@@ -319,7 +485,7 @@ export function DedupeRuleEditor({
                   </div>
                   <SettingSwitch
                     checked={state.allEnabled}
-                    disabled={disabled}
+                    disabled={interactionDisabled}
                     label={`${preset.name} preset`}
                     onChange={() => void togglePreset(preset)}
                   />
@@ -337,27 +503,107 @@ export function DedupeRuleEditor({
                 aria-controls="dedupe-custom-rules"
                 onClick={() => setCustomOpen((current) => !current)}
               >
-                <ChevronDown aria-hidden="true" size={16} />
-                <span>
-                  <strong>Custom rules</strong>
+                <span className="dedupe-custom-toggle-copy">
+                  <span className="dedupe-custom-toggle-title">
+                    <strong>Custom rules</strong>
+                    <ChevronDown aria-hidden="true" size={16} />
+                  </span>
                   <small>Define matching for another site.</small>
                 </span>
-                <span>{pluralize(customRules.length, 'rule')}</span>
+                <span className="dedupe-custom-rule-count">
+                  {pluralize(customRules.length, 'rule')}
+                </span>
               </button>
               <div className="dedupe-custom-heading-actions">
                 <DedupeRuleHelpPopover />
-                <button type="button" disabled={disabled} onClick={addRule}>
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (file) {
+                      void importCustomRules(file);
+                    }
+                  }}
+                />
+                <button
+                  ref={importButtonRef}
+                  type="button"
+                  aria-label="Import custom rules"
+                  title="Import custom rules"
+                  disabled={interactionDisabled}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  <Upload aria-hidden="true" size={15} />
+                  <span>Import</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Export custom rules"
+                  title={
+                    customRules.length === 0
+                      ? 'Add a custom rule before exporting.'
+                      : hasErrors
+                        ? 'Fix custom rule errors before exporting.'
+                        : 'Export custom rules'
+                  }
+                  disabled={interactionDisabled || customRules.length === 0 || hasErrors}
+                  onClick={exportCustomRules}
+                >
+                  <Download aria-hidden="true" size={15} />
+                  <span>Export</span>
+                </button>
+                <button type="button" disabled={interactionDisabled} onClick={addRule}>
                   <Plus aria-hidden="true" size={15} />
                   <span>Add custom rule</span>
                 </button>
               </div>
             </div>
 
+            {pendingImportedRules ? (
+              <div className="dedupe-import-confirmation" role="alert">
+                <span>
+                  Replace your unsaved changes with{' '}
+                  {pluralize(pendingImportedRules.length, 'imported rule')}?
+                </span>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    applyImportedRules(pendingImportedRules);
+                    restoreImportButtonFocus();
+                  }}
+                >
+                  Import and replace
+                </button>
+                <button
+                  ref={importCancelButtonRef}
+                  type="button"
+                  onClick={() => {
+                    setPendingImportedRules(null);
+                    restoreImportButtonFocus();
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : transferNotice ? (
+              <p
+                className={`dedupe-rule-transfer-message${transferNotice.kind === 'error' ? ' is-error' : ''}`}
+                role={transferNotice.kind === 'error' ? 'alert' : 'status'}
+              >
+                {transferNotice.message}
+              </p>
+            ) : null}
+
             {customOpen ? (
               <div id="dedupe-custom-rules" role="region" aria-label="Custom rules">
                 <p className="dedupe-custom-order-note">
-                  Built-in presets run first. Custom rules run top to bottom; the first match
-                  decides.
+                  Built-in presets run first and stay unchanged. Custom rules run top to bottom; the
+                  first match decides. Import replaces this custom-rule draft.
                 </p>
                 {customRules.length > 0 ? (
                   <div className="dedupe-rule-list" aria-label="Custom duplicate matching rules">
@@ -386,7 +632,7 @@ export function DedupeRuleEditor({
                                 type="button"
                                 aria-label={`Move custom rule ${index + 1} up`}
                                 title="Move up"
-                                disabled={disabled || index === 0}
+                                disabled={interactionDisabled || index === 0}
                                 onClick={() => moveCustomRule(index, -1)}
                               >
                                 <ArrowUp aria-hidden="true" size={15} />
@@ -396,7 +642,7 @@ export function DedupeRuleEditor({
                                 type="button"
                                 aria-label={`Move custom rule ${index + 1} down`}
                                 title="Move down"
-                                disabled={disabled || index === customRules.length - 1}
+                                disabled={interactionDisabled || index === customRules.length - 1}
                                 onClick={() => moveCustomRule(index, 1)}
                               >
                                 <ArrowDown aria-hidden="true" size={15} />
@@ -406,7 +652,7 @@ export function DedupeRuleEditor({
                                 type="button"
                                 aria-label={`Delete custom rule ${index + 1}`}
                                 title="Delete custom rule"
-                                disabled={disabled}
+                                disabled={interactionDisabled}
                                 onClick={() => {
                                   updateCustomRules((current) =>
                                     current.filter((candidate) => candidate.id !== rule.id),
@@ -417,7 +663,7 @@ export function DedupeRuleEditor({
                               </button>
                               <SettingSwitch
                                 checked={rule.enabled}
-                                disabled={disabled}
+                                disabled={interactionDisabled}
                                 label={`Enable custom rule ${index + 1}`}
                                 onChange={(enabled) =>
                                   replaceCustomRule(rule.id, {
@@ -439,7 +685,7 @@ export function DedupeRuleEditor({
                                 placeholder="app.example.com/items/*"
                                 aria-invalid={validation?.glob ? true : undefined}
                                 aria-describedby={validation?.glob ? patternErrorId : undefined}
-                                disabled={disabled}
+                                disabled={interactionDisabled}
                                 onChange={(event) => {
                                   const glob = event.target.value;
                                   replaceCustomRule(
@@ -470,7 +716,7 @@ export function DedupeRuleEditor({
                               <select
                                 aria-label="Matching behavior"
                                 value={rule.comparisonMode}
-                                disabled={disabled}
+                                disabled={interactionDisabled}
                                 onChange={(event) => {
                                   const comparisonMode = event.target
                                     .value as DedupeRule['comparisonMode'];
@@ -551,7 +797,7 @@ export function DedupeRuleEditor({
                   </span>
                   <button
                     type="button"
-                    disabled={disabled || !customDirty}
+                    disabled={interactionDisabled || !customDirty}
                     onClick={discardCustomChanges}
                   >
                     <Undo2 aria-hidden="true" size={15} />
@@ -560,7 +806,7 @@ export function DedupeRuleEditor({
                   <button
                     className="save-rules-button"
                     type="button"
-                    disabled={disabled || !customDirty || hasErrors}
+                    disabled={interactionDisabled || !customDirty || hasErrors}
                     onClick={() => void saveCustomChanges()}
                   >
                     <Save aria-hidden="true" size={15} />
@@ -579,14 +825,22 @@ export function DedupeRuleEditor({
               aria-controls="dedupe-preview-panel"
               onClick={() => setPreviewOpen((current) => !current)}
             >
-              <Eye aria-hidden="true" size={16} />
-              <span>Preview matches</span>
-              <small>
-                {preview.isLoading
-                  ? 'Checking open tabs'
-                  : `${pluralize(previewCloseCount, 'tab')} to close`}
-              </small>
-              <ChevronDown aria-hidden="true" size={15} />
+              <span className="dedupe-preview-toggle-copy">
+                <span className="dedupe-preview-toggle-title">
+                  <strong>Preview matches</strong>
+                  <Eye className="dedupe-preview-toggle-eye" aria-hidden="true" size={16} />
+                  <ChevronDown
+                    className="dedupe-preview-toggle-chevron"
+                    aria-hidden="true"
+                    size={15}
+                  />
+                </span>
+                <small>
+                  {preview.isLoading
+                    ? 'Checking open tabs'
+                    : `${pluralize(previewCloseCount, 'tab')} to close`}
+                </small>
+              </span>
             </button>
 
             {previewOpen ? (

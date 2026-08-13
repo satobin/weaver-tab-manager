@@ -132,8 +132,22 @@ describe('canonicalizeTabUrl', () => {
       'subdomains',
     );
     expect(canonicalizeTabUrl('https://example.com/path', [wildcard]).matchType).toBe('exact');
+    expect(canonicalizeTabUrl('https://.example.com/path', [wildcard]).matchType).toBe('exact');
+    expect(canonicalizeTabUrl('https://foo..example.com/path', [wildcard]).matchType).toBe('exact');
     expect(canonicalizeTabUrl('https://not-example.invalid/path', [wildcard]).matchType).toBe(
       'exact',
+    );
+  });
+
+  it('matches wildcard-heavy paths without regular-expression backtracking', () => {
+    const pattern = `example.com/${'*a'.repeat(100)}z`;
+    const rule = createRule({ glob: pattern });
+
+    expect(canonicalizeTabUrl(`https://example.com/${'a'.repeat(100)}y`, [rule]).matchType).toBe(
+      'exact',
+    );
+    expect(canonicalizeTabUrl(`https://example.com/${'a'.repeat(100)}z`, [rule]).ruleId).toBe(
+      'rule-1',
     );
   });
 
