@@ -169,7 +169,6 @@ function SavedWindowPreview({
   removingTabKey,
   savedWindow,
   selectedTabKeys,
-  showTabUrls,
 }: {
   actionsDisabled: boolean;
   duplicatePreviewOutcomes?: ReadonlyMap<number, SavedDuplicatePreviewOutcome>;
@@ -189,7 +188,6 @@ function SavedWindowPreview({
   savedWindow: SavedWindow;
   removingTabKey?: string | null | undefined;
   selectedTabKeys?: ReadonlySet<string> | undefined;
-  showTabUrls: boolean;
 }) {
   const groupsByKey = new Map(savedWindow.groups.map((group) => [group.key, group]));
   const orderedTabKeys = savedWindow.tabs.map((tab) =>
@@ -274,11 +272,9 @@ function SavedWindowPreview({
                   >
                     <span className="tab-copy saved-tab-copy">
                       <strong className="tab-title">{tab.title}</strong>
-                      {showTabUrls ? (
-                        <span className="tab-location" title={tab.url}>
-                          {formatTabLocation(tab.url)}
-                        </span>
-                      ) : null}
+                      <span className="tab-location" title={tab.url}>
+                        {formatTabLocation(tab.url)}
+                      </span>
                     </span>
                     <span className="saved-tab-meta">
                       {duplicatePreviewOutcome ? (
@@ -1868,7 +1864,6 @@ export function SavedWindowsPage({
                 className={[
                   'window-card',
                   'saved-window-card',
-                  settings.showTabUrls ? '' : 'is-compact-tabs',
                   expanded ? '' : 'is-collapsed',
                   mergeDialogOpen && visibleMergeWindowIds.has(savedWindow.id)
                     ? 'is-merge-selected'
@@ -2114,7 +2109,6 @@ export function SavedWindowsPage({
                           }
                         : {})}
                       savedWindow={savedWindow}
-                      showTabUrls={settings.showTabUrls}
                     />
                   ) : null}
                 </div>

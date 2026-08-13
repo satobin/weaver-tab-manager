@@ -169,7 +169,7 @@ describe('SettingsPage', () => {
     ]);
     expect(
       within(showUrlsGroup as HTMLElement).getByText(
-        'Show URLs below tab titles in Active and Saved Windows. Turn this off for denser cards.',
+        'Show URLs below tab titles in Active Windows. Turn this off for denser cards.',
       ),
     ).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Tab behavior' })).not.toBeInTheDocument();

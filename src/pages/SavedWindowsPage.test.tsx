@@ -426,7 +426,8 @@ describe('SavedWindowsPage', () => {
 
     const card = await screen.findByRole('article', { name: 'Research' });
     const preview = document.getElementById('saved-window-saved-1-preview');
-    expect(card).toHaveClass('is-collapsed', 'is-compact-tabs');
+    expect(card).toHaveClass('is-collapsed');
+    expect(card).not.toHaveClass('is-compact-tabs');
     expect(preview).toHaveAttribute('hidden');
 
     const search = screen.getByRole('searchbox', {
@@ -462,7 +463,7 @@ describe('SavedWindowsPage', () => {
     render(
       <SavedWindowsPage
         service={createService()}
-        settingsService={createSettingsService({ showTabUrls: true })}
+        settingsService={createSettingsService({ showTabUrls: false })}
       />,
     );
 
@@ -1508,7 +1509,7 @@ describe('SavedWindowsPage', () => {
     render(
       <SavedWindowsPage
         service={service}
-        settingsService={createSettingsService({ showTabUrls: true })}
+        settingsService={createSettingsService({ showTabUrls: false })}
       />,
     );
 
