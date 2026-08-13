@@ -21,24 +21,69 @@ function createTab(id: number, title: string, url: string): DedupePreviewTab {
 
 describe('DedupePreviewGroups', () => {
   it('consolidates Google and Notion matches under their built-in preset headings', () => {
+    const notionPageId = '00000000000000000000000000000000';
     const rules: DedupeRule[] = DEFAULT_DEDUPLICATION_RULES.map((rule) => ({
       ...rule,
       enabled: true,
     }));
     const groups = buildDedupePreview(
       [
-        createTab(1, 'Roadmap', 'https://docs.google.com/document/d/doc-1/edit?usp=sharing'),
-        createTab(2, 'Roadmap copy', 'https://docs.google.com/document/d/doc-1/preview'),
-        createTab(3, 'Budget', 'https://docs.google.com/spreadsheets/d/sheet-1/edit#gid=0'),
-        createTab(4, 'Budget copy', 'https://docs.google.com/spreadsheets/d/sheet-1/preview'),
-        createTab(5, 'Notion roadmap', 'https://notion.so/roadmap?view=timeline'),
-        createTab(6, 'Notion roadmap copy', 'https://notion.so/roadmap?view=table'),
-        createTab(7, 'Notion tasks', 'https://notion.com/tasks?view=board'),
-        createTab(8, 'Notion tasks copy', 'https://notion.com/tasks?view=list'),
-        createTab(9, 'Launch deck', 'https://docs.google.com/presentation/d/deck-1/edit'),
-        createTab(10, 'Launch deck copy', 'https://docs.google.com/presentation/d/deck-1/present'),
-        createTab(11, 'Notion backlog', 'https://acme.notion.so/backlog?view=board'),
-        createTab(12, 'Notion backlog copy', 'https://acme.notion.so/backlog?view=list'),
+        createTab(
+          1,
+          'Roadmap',
+          'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/edit?usp=sharing',
+        ),
+        createTab(
+          2,
+          'Roadmap copy',
+          'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/preview',
+        ),
+        createTab(
+          3,
+          'Budget',
+          'https://docs.google.com/spreadsheets/d/1ExampleSpreadsheetId_0123456789AbCd/edit#gid=0',
+        ),
+        createTab(
+          4,
+          'Budget copy',
+          'https://docs.google.com/spreadsheets/d/1ExampleSpreadsheetId_0123456789AbCd/preview',
+        ),
+        createTab(
+          5,
+          'Notion roadmap',
+          `https://notion.so/acme/Roadmap-${notionPageId}?view=timeline`,
+        ),
+        createTab(
+          6,
+          'Notion roadmap copy',
+          `https://notion.so/acme/Roadmap-${notionPageId}?view=table`,
+        ),
+        createTab(7, 'Notion tasks', `https://notion.com/p/acme/Tasks-${notionPageId}?view=board`),
+        createTab(
+          8,
+          'Notion tasks copy',
+          `https://notion.com/p/acme/Tasks-${notionPageId}?view=list`,
+        ),
+        createTab(
+          9,
+          'Launch deck',
+          'https://docs.google.com/presentation/d/1ExamplePresentationId_0123456789AbCd/edit',
+        ),
+        createTab(
+          10,
+          'Launch deck copy',
+          'https://docs.google.com/presentation/d/1ExamplePresentationId_0123456789AbCd/present',
+        ),
+        createTab(
+          11,
+          'Notion backlog',
+          `https://acme.notion.so/Backlog-${notionPageId}?view=board`,
+        ),
+        createTab(
+          12,
+          'Notion backlog copy',
+          `https://acme.notion.so/Backlog-${notionPageId}?view=list`,
+        ),
       ],
       rules,
       {},
@@ -54,14 +99,14 @@ describe('DedupePreviewGroups', () => {
       .closest('section');
     expect(googleSection).not.toBeNull();
     expect(
-      within(googleSection as HTMLElement).getByText(/3 matches .* 3 tabs would close/),
+      within(googleSection as HTMLElement).getByText(/3 matches .* 3 tabs to close/),
     ).toBeInTheDocument();
 
     expect(screen.getAllByRole('heading', { name: 'Notion' })).toHaveLength(1);
     const notionSection = screen.getByRole('heading', { name: 'Notion' }).closest('section');
     expect(notionSection).not.toBeNull();
     expect(
-      within(notionSection as HTMLElement).getByText(/3 matches .* 3 tabs would close/),
+      within(notionSection as HTMLElement).getByText(/3 matches .* 3 tabs to close/),
     ).toBeInTheDocument();
   });
 
@@ -104,7 +149,7 @@ describe('DedupePreviewGroups', () => {
       .closest('section');
     expect(exactSection).not.toBeNull();
     expect(
-      within(exactSection as HTMLElement).getByText(/2 matches .* 2 tabs would close/),
+      within(exactSection as HTMLElement).getByText(/2 matches .* 2 tabs to close/),
     ).toBeInTheDocument();
     expect(screen.getByText('alpha.example.com - Same page')).toBeInTheDocument();
     expect(screen.getByText('beta.example.com - Same page')).toBeInTheDocument();

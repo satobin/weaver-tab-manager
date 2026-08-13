@@ -106,6 +106,11 @@ export const DEFAULT_DEDUPLICATION_RULES: readonly DedupeRule[] = Object.freeze(
 
 const DEFAULT_RULES_BY_ID = new Map(DEFAULT_DEDUPLICATION_RULES.map((rule) => [rule.id, rule]));
 
+const BUILT_IN_RULE_GLOB_ALIASES: Readonly<Partial<Record<string, readonly string[]>>> =
+  Object.freeze({
+    [NOTION_DEDUPE_RULE_IDS[2]]: Object.freeze(['app.notion.com/*']),
+  });
+
 export function cloneDedupeRules(rules: readonly DedupeRule[]): DedupeRule[] {
   return rules.map((rule) => ({ ...rule }));
 }
@@ -304,9 +309,13 @@ interface CompiledRule {
 }
 
 function compileRules(rules: readonly DedupeRule[]): CompiledRule[] {
-  return rules.flatMap((rule) =>
-    rule.enabled && isDedupeRuleValid(rule) ? [{ expression: compileGlob(rule.glob), rule }] : [],
-  );
+  return rules.flatMap((rule) => {
+    if (!rule.enabled || !isDedupeRuleValid(rule)) {
+      return [];
+    }
+    const aliases = isBuiltInDedupeRule(rule) ? (BUILT_IN_RULE_GLOB_ALIASES[rule.id] ?? []) : [];
+    return [rule.glob, ...aliases].map((glob) => ({ expression: compileGlob(glob), rule }));
+  });
 }
 
 function canonicalizeWithRules(
@@ -359,7 +368,14 @@ export function canonicalizeTabUrl(
   rawUrl: string,
   rules: readonly DedupeRule[],
 ): CanonicalizedTabUrl {
-  return canonicalizeWithRules(rawUrl, compileRules(rules));
+  return createTabUrlCanonicalizer(rules)(rawUrl);
+}
+
+export function createTabUrlCanonicalizer(
+  rules: readonly DedupeRule[],
+): (rawUrl: string) => CanonicalizedTabUrl {
+  const compiledRules = compileRules(rules);
+  return (rawUrl) => canonicalizeWithRules(rawUrl, compiledRules);
 }
 
 export function planDuplicateTabs(

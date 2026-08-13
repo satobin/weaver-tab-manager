@@ -7,11 +7,15 @@ export interface SavedWindowsState {
   cleanupNotice: string | null;
   dismissCleanupNotice: () => Promise<void>;
   errorMessage: string | null;
-  isRefreshing: boolean;
   refresh: () => Promise<void>;
   status: 'error' | 'loading' | 'ready';
   windows: SavedWindow[];
 }
+
+export type SavedWindowsReadService = Pick<
+  SavedWindowsService,
+  'dismissCleanupNotice' | 'load' | 'loadCleanupNotice' | 'subscribe'
+>;
 
 function describeLoadError(error: unknown): string {
   return error instanceof Error && error.message.trim()
@@ -19,13 +23,12 @@ function describeLoadError(error: unknown): string {
     : 'The browser could not load saved windows.';
 }
 
-export function useSavedWindows(service: SavedWindowsService): SavedWindowsState {
+export function useSavedWindows(service: SavedWindowsReadService): SavedWindowsState {
   const mountedRef = useRef(false);
   const requestIdRef = useRef(0);
   const [state, setState] = useState<Omit<SavedWindowsState, 'dismissCleanupNotice' | 'refresh'>>({
     cleanupNotice: null,
     errorMessage: null,
-    isRefreshing: true,
     status: 'loading',
     windows: [],
   });
@@ -35,23 +38,28 @@ export function useSavedWindows(service: SavedWindowsService): SavedWindowsState
     setState((current) => ({
       ...current,
       errorMessage: null,
-      isRefreshing: true,
       status: current.status === 'ready' ? 'ready' : 'loading',
     }));
 
     try {
       const windows = await service.load();
-      const cleanupNotice = (await service.loadCleanupNotice?.()) ?? null;
+      let cleanupNotice: string | null | undefined = null;
+      if (service.loadCleanupNotice) {
+        try {
+          cleanupNotice = await service.loadCleanupNotice();
+        } catch {
+          cleanupNotice = undefined;
+        }
+      }
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return;
       }
-      setState({
-        cleanupNotice,
+      setState((current) => ({
+        cleanupNotice: cleanupNotice === undefined ? current.cleanupNotice : cleanupNotice,
         errorMessage: null,
-        isRefreshing: false,
         status: 'ready',
         windows,
-      });
+      }));
     } catch (error) {
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return;
@@ -59,7 +67,6 @@ export function useSavedWindows(service: SavedWindowsService): SavedWindowsState
       setState((current) => ({
         ...current,
         errorMessage: describeLoadError(error),
-        isRefreshing: false,
         status: current.status === 'ready' ? 'ready' : 'error',
       }));
     }

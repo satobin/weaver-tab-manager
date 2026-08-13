@@ -43,7 +43,7 @@ export const BUILT_IN_DEDUPE_PRESETS: readonly BuiltInDedupePreset[] = Object.fr
   }),
   Object.freeze({
     description:
-      'Treat tabs with the same page path as duplicates. Ignores query parameters and page sections on notion.so, its subdomains, and notion.com.',
+      'Treat tabs with the same page path as duplicates. Ignores query parameters and page sections on notion.so, its subdomains, notion.com, and app.notion.com.',
     id: 'notion',
     name: 'Notion',
     ruleIds: NOTION_DEDUPE_RULE_IDS,
@@ -52,6 +52,7 @@ export const BUILT_IN_DEDUPE_PRESETS: readonly BuiltInDedupePreset[] = Object.fr
       Object.freeze({ pattern: 'notion.so/PAGE_PATH' }),
       Object.freeze({ pattern: 'WORKSPACE.notion.so/PAGE_PATH' }),
       Object.freeze({ pattern: 'notion.com/PAGE_PATH' }),
+      Object.freeze({ pattern: 'app.notion.com/PAGE_PATH' }),
     ]),
   }),
 ]);

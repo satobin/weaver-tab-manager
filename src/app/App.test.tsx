@@ -131,11 +131,23 @@ function createSavedService(windowCount: number): SavedWindowsService {
   );
   const countListeners = new Set<() => void>();
   return {
+    deduplicateTabs: vi.fn(() =>
+      Promise.resolve({
+        duplicateGroupCount: 0,
+        removedTabCount: 0,
+        removedWindowIds: [],
+        undo: null,
+        updatedWindowIds: [],
+      }),
+    ),
     deleteWindow: vi.fn(() => Promise.resolve()),
     keepWindow: vi.fn((savedWindow: SavedWindow) => Promise.resolve(savedWindow)),
     load: vi.fn(() => Promise.resolve(windows)),
     loadCount: vi.fn(() => Promise.resolve(windows.length)),
+    mergeWindows: vi.fn(() => Promise.reject(new Error('Not used'))),
+    moveSelectedTabsToNewWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     openTab: vi.fn(() => Promise.resolve(42)),
+    removeSelectedTabs: vi.fn(() => Promise.reject(new Error('Not used'))),
     renameWindow: vi.fn((_savedWindowId: string, name: string) =>
       Promise.resolve({ ...windows[0]!, name }),
     ),
@@ -149,11 +161,14 @@ function createSavedService(windowCount: number): SavedWindowsService {
       }),
     ),
     saveWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
+    sortAllWindows: vi.fn(() => Promise.resolve({ sortedWindowIds: [], undo: null })),
+    sortWindow: vi.fn(() => Promise.resolve({ sortedWindowIds: [], undo: null })),
     subscribe: vi.fn(() => () => undefined),
     subscribeCount: vi.fn((listener: () => void) => {
       countListeners.add(listener);
       return () => countListeners.delete(listener);
     }),
+    undoMutation: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -306,7 +321,7 @@ describe('App', () => {
   it('places Close duplicate tabs before Merge windows in the shared top bar', async () => {
     const { container } = render(<App activeWindowsService={createService()} />);
     const removeDuplicates = await screen.findByRole('button', {
-      name: 'Close duplicate tabs 0',
+      name: 'Close duplicate tabs: 0 tabs',
     });
     const topbar = removeDuplicates.closest('header') as HTMLElement;
     const merge = await within(topbar).findByRole('button', { name: 'Merge windows' });
@@ -326,7 +341,7 @@ describe('App', () => {
     const toolbar = within(container.querySelector('.active-windows-toolbar') as HTMLElement);
     expect(toolbar.queryByRole('button', { name: 'Merge windows' })).not.toBeInTheDocument();
     expect(
-      toolbar.queryByRole('button', { name: 'Close duplicate tabs 0' }),
+      toolbar.queryByRole('button', { name: 'Close duplicate tabs: 0 tabs' }),
     ).not.toBeInTheDocument();
   });
 
@@ -338,6 +353,12 @@ describe('App', () => {
     const topbar = heading.closest('header') as HTMLElement;
     expect(await screen.findByText('No saved windows')).toBeInTheDocument();
     expect(await within(topbar).findByText('0 saved windows · 0 tabs')).toBeInTheDocument();
+    expect(
+      await within(topbar).findByRole('button', {
+        name: 'Remove duplicate tabs from Saved Windows: 0 tabs',
+      }),
+    ).toBeDisabled();
+    expect(within(topbar).getByRole('button', { name: 'Merge saved windows' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Refresh saved windows' })).not.toBeInTheDocument();
     expect(container.querySelector('.saved-windows-toolbar')).not.toBeInTheDocument();
   });

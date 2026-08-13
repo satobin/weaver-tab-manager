@@ -742,6 +742,8 @@ describe('createChromeActiveWindowsService', () => {
         url: groupedCandidateUrl,
         windowId: 2,
       }),
+      pinnedKeeper,
+      groupedKeeper,
     ]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       if (tabId === 11) {
@@ -847,7 +849,12 @@ describe('createChromeActiveWindowsService', () => {
       url: 'https://example.com/same',
       windowId: 1,
     });
-    vi.mocked(api.tabs.query).mockResolvedValue([codexExtensionTab, claudeTab, ordinaryTab]);
+    vi.mocked(api.tabs.query).mockResolvedValue([
+      codexExtensionTab,
+      claudeTab,
+      ordinaryTab,
+      keeperTab,
+    ]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       const tab = [codexExtensionTab, claudeTab, ordinaryTab, keeperTab].find(
         (candidate) => candidate.id === tabId,
@@ -898,7 +905,7 @@ describe('createChromeActiveWindowsService', () => {
       windowId: 2,
     });
     const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
-    vi.mocked(api.tabs.query).mockResolvedValue([codexTab, claudeTab]);
+    vi.mocked(api.tabs.query).mockResolvedValue([codexTab, claudeTab, keeper]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       const tab = [codexTab, claudeTab, keeper].find((candidate) => candidate.id === tabId);
       return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
@@ -939,7 +946,7 @@ describe('createChromeActiveWindowsService', () => {
     });
     const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
     let candidateReadCount = 0;
-    vi.mocked(api.tabs.query).mockResolvedValue([finishedTab]);
+    vi.mocked(api.tabs.query).mockResolvedValue([finishedTab, keeper]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       if (tabId === 91) {
         return Promise.resolve(keeper);
@@ -981,7 +988,7 @@ describe('createChromeActiveWindowsService', () => {
     });
     const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
     let groupReadCount = 0;
-    vi.mocked(api.tabs.query).mockResolvedValue([candidate]);
+    vi.mocked(api.tabs.query).mockResolvedValue([candidate, keeper]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) =>
       Promise.resolve(tabId === 91 ? keeper : candidate),
     );
@@ -1042,13 +1049,16 @@ describe('createChromeActiveWindowsService', () => {
     expect(api.tabs.remove).not.toHaveBeenCalled();
   });
 
-  it('leaves stale or loading duplicate relationships open', async () => {
+  it('closes unchanged loading duplicate relationships while leaving stale ones open', async () => {
     const { api } = createApi();
     const duplicateUrl = 'https://example.com/same';
     const candidateTabs = [11, 12, 13, 14, 15, 16, 17].map((id) =>
       createChromeTab({ id, url: duplicateUrl, windowId: 1 }),
     );
-    vi.mocked(api.tabs.query).mockResolvedValue(candidateTabs);
+    const keeperTabs = [91, 92, 93, 94, 95, 96].map((id) =>
+      createChromeTab({ id, url: duplicateUrl, windowId: 1 }),
+    );
+    vi.mocked(api.tabs.query).mockResolvedValue([...candidateTabs, ...keeperTabs]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       if (tabId === 11) {
         return Promise.resolve(
@@ -1119,14 +1129,193 @@ describe('createChromeActiveWindowsService', () => {
         ),
       ),
     ).resolves.toEqual({
-      closedTabIds: [],
-      closedTabs: [],
+      closedTabIds: [12, 14],
+      closedTabs: [
+        {
+          group: null,
+          index: 0,
+          originalTabId: 12,
+          pinned: false,
+          title: '',
+          url: duplicateUrl,
+          windowId: 1,
+        },
+        {
+          group: null,
+          index: 0,
+          originalTabId: 14,
+          pinned: false,
+          title: '',
+          url: duplicateUrl,
+          windowId: 1,
+        },
+      ],
       failures: [],
       skippedAgentAssociatedTabIds: [],
-      skippedChangedTabIds: [11, 12, 13, 14, 15, 16, 17],
+      skippedChangedTabIds: [11, 13, 15, 16, 17],
       skippedPinnedTabIds: [],
     });
+    expect(api.tabs.remove).toHaveBeenCalledTimes(2);
+    expect(api.tabs.remove).toHaveBeenNthCalledWith(1, 12);
+    expect(api.tabs.remove).toHaveBeenNthCalledWith(2, 14);
+  });
+
+  it('closes loading duplicates whose candidate and keeper share the same pending URL', async () => {
+    const { api } = createApi();
+    const pendingUrl = 'https://example.com/restoring';
+    const candidate = createChromeTab({
+      id: 11,
+      index: 3,
+      pendingUrl,
+      status: 'loading',
+      title: 'Restoring duplicate',
+      url: 'about:blank',
+      windowId: 1,
+    });
+    const keeper = createChromeTab({
+      id: 91,
+      pendingUrl,
+      status: 'loading',
+      url: 'about:blank',
+      windowId: 1,
+    });
+    vi.mocked(api.tabs.query).mockResolvedValue([candidate, keeper]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) =>
+      Promise.resolve(tabId === 11 ? candidate : keeper),
+    );
+    const service = createChromeActiveWindowsService(api);
+
+    await expect(
+      service.closeDuplicateTabs(
+        createCloseDuplicateTabsRequest([11], [createDuplicateGroup([11], [91], pendingUrl)]),
+      ),
+    ).resolves.toEqual({
+      closedTabIds: [11],
+      closedTabs: [
+        {
+          group: null,
+          index: 3,
+          originalTabId: 11,
+          pinned: false,
+          title: 'Restoring duplicate',
+          url: pendingUrl,
+          windowId: 1,
+        },
+      ],
+      failures: [],
+      skippedAgentAssociatedTabIds: [],
+      skippedChangedTabIds: [],
+      skippedPinnedTabIds: [],
+    });
+    expect(api.tabs.remove).toHaveBeenCalledWith(11);
+  });
+
+  it.each(['candidate', 'keeper'] as const)(
+    'leaves a duplicate open when the %s moved to another window',
+    async (movedRole) => {
+      const { api } = createApi();
+      const duplicateUrl = 'https://example.com/moved';
+      const candidate = createChromeTab({ id: 11, url: duplicateUrl, windowId: 1 });
+      const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+      const movedId = movedRole === 'candidate' ? 11 : 91;
+      vi.mocked(api.tabs.query).mockResolvedValue([candidate, keeper]);
+      vi.mocked(api.tabs.get).mockImplementation((tabId) =>
+        Promise.resolve(
+          createChromeTab({
+            id: tabId,
+            url: duplicateUrl,
+            windowId: tabId === movedId ? 2 : 1,
+          }),
+        ),
+      );
+      const service = createChromeActiveWindowsService(api);
+
+      await expect(
+        service.closeDuplicateTabs(
+          createCloseDuplicateTabsRequest([11], [createDuplicateGroup([11], [91], duplicateUrl)]),
+        ),
+      ).resolves.toEqual({
+        closedTabIds: [],
+        closedTabs: [],
+        failures: [],
+        skippedAgentAssociatedTabIds: [],
+        skippedChangedTabIds: [11],
+        skippedPinnedTabIds: [],
+      });
+      expect(api.tabs.remove).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves a duplicate open when the candidate moves after its keeper is verified', async () => {
+    const { api } = createApi();
+    const duplicateUrl = 'https://example.com/moved-late';
+    const candidate = createChromeTab({ id: 11, url: duplicateUrl, windowId: 1 });
+    const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+    let candidateReadCount = 0;
+    vi.mocked(api.tabs.query).mockResolvedValue([candidate, keeper]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      if (tabId === 91) {
+        return Promise.resolve(keeper);
+      }
+      candidateReadCount += 1;
+      return Promise.resolve(
+        createChromeTab({
+          ...candidate,
+          windowId: candidateReadCount === 1 ? 1 : 2,
+        }),
+      );
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs(
+      createCloseDuplicateTabsRequest([11], [createDuplicateGroup([11], [91], duplicateUrl)]),
+    );
+
+    expect(result.closedTabIds).toEqual([]);
+    expect(result.skippedChangedTabIds).toEqual([11]);
+    expect(candidateReadCount).toBe(2);
     expect(api.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('closes a large set of unchanged loading duplicates in request order', async () => {
+    const { api } = createApi();
+    const duplicateUrl = 'https://example.com/large-restored-set';
+    const candidateIds = Array.from({ length: 29 }, (_, index) => 100 + index);
+    const candidates = candidateIds.map((id, index) =>
+      createChromeTab({
+        id,
+        index,
+        status: index < 4 ? 'complete' : 'loading',
+        title: `Duplicate ${index + 1}`,
+        url: duplicateUrl,
+        windowId: 1,
+      }),
+    );
+    const keeper = createChromeTab({ id: 91, url: duplicateUrl, windowId: 1 });
+    const tabsById = new Map(
+      [...candidates, keeper].flatMap((tab) =>
+        tab.id === undefined ? [] : [[tab.id, tab] as const],
+      ),
+    );
+    vi.mocked(api.tabs.query).mockResolvedValue([...candidates, keeper]);
+    vi.mocked(api.tabs.get).mockImplementation((tabId) => {
+      const tab = tabsById.get(tabId);
+      return tab ? Promise.resolve(tab) : Promise.reject(new Error('Tab no longer exists'));
+    });
+    const service = createChromeActiveWindowsService(api);
+
+    const result = await service.closeDuplicateTabs(
+      createCloseDuplicateTabsRequest(candidateIds, [
+        createDuplicateGroup(candidateIds, [91], duplicateUrl),
+      ]),
+    );
+
+    expect(result.closedTabIds).toEqual(candidateIds);
+    expect(result.closedTabs).toHaveLength(29);
+    expect(result.skippedChangedTabIds).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(api.tabs.remove).toHaveBeenCalledTimes(29);
+    expect(vi.mocked(api.tabs.remove).mock.calls.map(([tabId]) => tabId)).toEqual(candidateIds);
   });
 
   it('uses restored metadata in duplicate undo records when Chrome metadata is missing', async () => {
@@ -1134,12 +1323,13 @@ describe('createChromeActiveWindowsService', () => {
     const restoredTab = createChromeTab({ id: 12, index: 2, windowId: 1 });
     delete restoredTab.title;
     delete restoredTab.url;
-    vi.mocked(api.tabs.query).mockResolvedValue([restoredTab]);
     const recoveredUrl = 'https://example.com/recovered';
+    const keeper = createChromeTab({ id: 91, url: recoveredUrl, windowId: 1 });
+    vi.mocked(api.tabs.query).mockResolvedValue([restoredTab, keeper]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) =>
       Promise.resolve(
         tabId === 91
-          ? createChromeTab({ id: 91, url: recoveredUrl, windowId: 1 })
+          ? keeper
           : createChromeTab({ ...restoredTab, title: 'Recovered title', url: recoveredUrl }),
       ),
     );
@@ -1177,7 +1367,7 @@ describe('createChromeActiveWindowsService', () => {
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
     });
-    expect(restoredMetadataService.resolve).toHaveBeenCalledWith([restoredTab], {
+    expect(restoredMetadataService.resolve).toHaveBeenCalledWith([restoredTab, keeper], {
       pruneMissing: false,
     });
   });
@@ -1198,15 +1388,15 @@ describe('createChromeActiveWindowsService', () => {
       url: 'https://example.com/duplicate',
       windowId: 1,
     });
-    vi.mocked(api.tabs.query).mockResolvedValue([firstTab, secondTab]);
-    let resolveSecondGet: ((tab: chrome.tabs.Tab) => void) | undefined;
-    const secondGet = new Promise<chrome.tabs.Tab>((resolve) => {
-      resolveSecondGet = resolve;
-    });
     const keeperTab = createChromeTab({
       id: 91,
       url: 'https://example.com/duplicate',
       windowId: 1,
+    });
+    vi.mocked(api.tabs.query).mockResolvedValue([firstTab, secondTab, keeperTab]);
+    let resolveSecondGet: ((tab: chrome.tabs.Tab) => void) | undefined;
+    const secondGet = new Promise<chrome.tabs.Tab>((resolve) => {
+      resolveSecondGet = resolve;
     });
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       if (tabId === 11) {
@@ -1244,15 +1434,14 @@ describe('createChromeActiveWindowsService', () => {
       createChromeTab({ id: 12, index: 1, title: 'Missing', url: 'https://example.com/same' }),
       createChromeTab({ id: 13, index: 2, title: 'Locked', url: 'https://example.com/same' }),
     ];
-    vi.mocked(api.tabs.query).mockResolvedValue(snapshotTabs);
+    const keeper = createChromeTab({ id: 91, url: 'https://example.com/same', windowId: 1 });
+    vi.mocked(api.tabs.query).mockResolvedValue([...snapshotTabs, keeper]);
     vi.mocked(api.tabs.get).mockImplementation((tabId) => {
       if (tabId === 12) {
         return Promise.reject(new Error('Tab no longer exists'));
       }
       if (tabId === 91) {
-        return Promise.resolve(
-          createChromeTab({ id: 91, url: 'https://example.com/same', windowId: 1 }),
-        );
+        return Promise.resolve(keeper);
       }
       const tab = snapshotTabs.find((candidate) => candidate.id === tabId);
       return tab ? Promise.resolve(tab) : Promise.reject(new Error('Unexpected tab'));

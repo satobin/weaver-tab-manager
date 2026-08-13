@@ -258,8 +258,8 @@ export function DedupeRuleHelpPopover() {
                     first match decides. Unmatched tabs require an exact full-URL match.
                   </p>
                   <p>
-                    Use <strong>Preview matches</strong> before saving to see which tab Weaver will
-                    keep and which copies it would close.
+                    Use <strong>Preview matches</strong> before saving to see which tab Weaver keeps
+                    and which copies it closes.
                   </p>
                 </section>
               </div>

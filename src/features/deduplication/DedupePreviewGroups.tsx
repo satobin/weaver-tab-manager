@@ -99,7 +99,7 @@ export function DedupePreviewGroups({ groups }: DedupePreviewGroupsProps) {
             <h4>{section.name}</h4>
             <span>
               {pluralize(section.groups.length, 'match', 'matches')} &middot;{' '}
-              {pluralize(section.closeCount, 'tab')} would close
+              {pluralize(section.closeCount, 'tab')} to close
             </span>
           </header>
           <ul className="dedupe-preview-match-list">

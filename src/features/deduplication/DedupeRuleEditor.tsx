@@ -584,7 +584,7 @@ export function DedupeRuleEditor({
               <small>
                 {preview.isLoading
                   ? 'Checking open tabs'
-                  : `${pluralize(previewCloseCount, 'tab')} would close`}
+                  : `${pluralize(previewCloseCount, 'tab')} to close`}
               </small>
               <ChevronDown aria-hidden="true" size={15} />
             </button>
@@ -605,7 +605,7 @@ export function DedupeRuleEditor({
                   <p className="dedupe-preview-message">Checking open tabs...</p>
                 ) : previewGroups.length === 0 ? (
                   <p className="dedupe-preview-message">
-                    No open tabs would close with the current draft.
+                    No open tabs to close with the current draft.
                   </p>
                 ) : (
                   <DedupePreviewGroups groups={previewGroups} />

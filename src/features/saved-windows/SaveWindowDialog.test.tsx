@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -22,7 +22,7 @@ const result: SaveWindowResult = {
     ],
     updatedAt: '2026-07-10T20:00:00.000Z',
   },
-  sourceWindowClosed: false,
+  sourceWindowClose: null,
   warnings: [],
 };
 
@@ -58,21 +58,28 @@ describe('SaveWindowDialog', () => {
     );
 
     const saveButton = screen.getByRole('button', { name: 'Save' });
+    const saveAndCloseButton = screen.getByRole('button', { name: 'Save & close' });
     const closeButton = screen.getByRole('button', { name: 'Close save window' });
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute(
-      'title',
-      'Cancel saving this window',
-    );
-    expect(screen.getByRole('button', { name: 'Save & close' })).toHaveAttribute(
-      'title',
-      'Save this window and close it',
-    );
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancelButton).toHaveAttribute('title', 'Cancel saving this window');
+    expect(saveAndCloseButton).toHaveAttribute('title', 'Save this window and close it');
+    expect(saveAndCloseButton).toHaveClass('primary-button');
+    expect(saveAndCloseButton.querySelector('svg')).toHaveClass('lucide-panel-top-close');
+    expect(saveButton).toHaveClass('save-window-secondary-button');
+    expect(saveButton).not.toHaveClass('primary-button');
     expect(saveButton).toHaveAttribute('title', 'Save this window');
-    saveButton.focus();
+    const footer = saveButton.closest('footer');
+    expect(footer).not.toBeNull();
+    expect(within(footer as HTMLElement).getAllByRole('button')).toEqual([
+      cancelButton,
+      saveButton,
+      saveAndCloseButton,
+    ]);
+    saveAndCloseButton.focus();
     await user.tab();
     expect(closeButton).toHaveFocus();
     await user.tab({ shift: true });
-    expect(saveButton).toHaveFocus();
+    expect(saveAndCloseButton).toHaveFocus();
   });
 
   it('blocks duplicate submission while a save is pending', async () => {
@@ -107,6 +114,27 @@ describe('SaveWindowDialog', () => {
       resolveSave?.(result);
       await Promise.resolve();
     });
+    expect(onComplete).toHaveBeenCalledWith(result);
+  });
+
+  it('uses Save & close as the Enter-key default', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(() => Promise.resolve(result));
+    const onComplete = vi.fn();
+    render(
+      <SaveWindowDialog
+        onClose={vi.fn()}
+        onComplete={onComplete}
+        onSave={onSave}
+        tabCount={4}
+        windowLabel="Current Window"
+      />,
+    );
+
+    await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Project work{Enter}');
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith('Project work', true);
     expect(onComplete).toHaveBeenCalledWith(result);
   });
 });

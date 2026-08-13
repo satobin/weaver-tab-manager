@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type RestoredTabMetadataService } from '../../platform/chrome/restoredTabMetadata';
 import { type SavedWindow, type SavedWindowsCollection } from './savedWindowModel';
+import { type SavedTabSelectionReference } from './savedWindowOperations';
 import {
   createChromeSavedWindowsService,
   SAVED_WINDOWS_CLEANUP_NOTICE_STORAGE_KEY,
   SAVED_WINDOWS_STORAGE_KEY,
+  SavedWindowsMutationConflictError,
   type SavedWindowsChromeApi,
 } from './savedWindowsService';
 
@@ -78,6 +80,19 @@ function createSavedWindow(overrides: Partial<SavedWindow> = {}): SavedWindow {
     ],
     updatedAt: '2026-07-10T20:00:00.000Z',
     ...overrides,
+  };
+}
+
+function selectSavedTab(savedWindow: SavedWindow, tabOrder: number): SavedTabSelectionReference {
+  const tab = savedWindow.tabs[tabOrder];
+  if (!tab) {
+    throw new Error('Missing fixture tab');
+  }
+  return {
+    expectedTab: { ...tab },
+    expectedWindowUpdatedAt: savedWindow.updatedAt,
+    tabOrder,
+    windowId: savedWindow.id,
   };
 }
 
@@ -161,7 +176,12 @@ function createApi(initialWindows: SavedWindow[] = []) {
         );
       }),
       group: vi.fn(() => Promise.resolve(70)),
-      query: vi.fn(() => Promise.resolve([createChromeTab({ active: true, id: 90, windowId: 9 })])),
+      query: vi.fn((queryInfo: chrome.tabs.QueryInfo) => {
+        if (queryInfo.windowId === 1) {
+          return Promise.resolve(sourceWindow.tabs ?? []);
+        }
+        return Promise.resolve([createChromeTab({ active: true, id: 90, windowId: 9 })]);
+      }),
       remove: vi.fn(() => {
         callOrder.push('remove-placeholder');
         return Promise.resolve();
@@ -181,10 +201,6 @@ function createApi(initialWindows: SavedWindow[] = []) {
         ),
       ),
       get: vi.fn(() => Promise.resolve(sourceWindow)),
-      remove: vi.fn(() => {
-        callOrder.push('close');
-        return Promise.resolve();
-      }),
       update: vi.fn((windowId: number) =>
         Promise.resolve(createChromeWindow({ focused: true, id: windowId })),
       ),
@@ -208,31 +224,424 @@ const environment = {
   now: () => '2026-07-10T21:00:00.000Z',
 };
 
+function createDeferred<T>() {
+  let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
+  let reject: ((reason?: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return {
+    promise,
+    reject: (reason?: unknown) => reject?.(reason),
+    resolve: (value: T) => resolve?.(value),
+  };
+}
+
 describe('createChromeSavedWindowsService', () => {
-  it('persists a fresh browser capture before optionally closing its source window', async () => {
+  it('starts one fast non-anchor close after persistence and returns before it settles', async () => {
     const fake = createApi();
+    const batch = createDeferred<void>();
+    vi.mocked(fake.api.tabs.remove).mockImplementation((tabIds) => {
+      fake.callOrder.push(`fast-close:${tabIds.join(',')}`);
+      return batch.promise;
+    });
     const service = createChromeSavedWindowsService(fake.api, environment);
 
-    const result = await service.saveWindow(1, '  Project work  ', true);
+    const result = await service.saveWindow(1, 'Project work', true);
 
-    expect(fake.api.windows.get).toHaveBeenCalledWith(1, { populate: true });
-    expect(fake.api.tabGroups.query).toHaveBeenCalledWith({ windowId: 1 });
-    expect(fake.callOrder).toEqual(['storage', 'close']);
-    expect(result).toMatchObject({
-      savedWindow: { id: 'saved-new', name: 'Project work' },
-      sourceWindowClosed: true,
-      warnings: [],
+    expect(fake.callOrder).toEqual(['storage', 'fast-close:2']);
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+    expect(result.sourceWindowClose).toMatchObject({
+      anchorTabId: 1,
+      nonAnchorTabIds: [2],
+      targetTabIds: [1, 2],
+      windowId: 1,
     });
-    await expect(service.load()).resolves.toMatchObject([
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+
+    const anchor = fake.sourceWindow.tabs?.[0];
+    if (!anchor) {
+      throw new Error('Missing anchor fixture');
+    }
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([anchor]);
+    batch.resolve(undefined);
+    await expect(result.sourceWindowClose.batchCompletion).resolves.toEqual({
+      errorMessage: null,
+    });
+    const finishResult = await result.sourceWindowClose.finish();
+    expect(finishResult).toMatchObject({ errorMessage: null, status: 'close-requested' });
+    await expect(finishResult.completion).resolves.toEqual({ errorMessage: null });
+    await expect(result.sourceWindowClose.finish()).resolves.toBe(finishResult);
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(2);
+    expect(fake.api.tabs.remove).toHaveBeenNthCalledWith(2, [1]);
+  });
+
+  it('uses the exact final gate without an empty batch for a one-tab fast close', async () => {
+    const fake = createApi();
+    const anchor = fake.sourceWindow.tabs?.[0];
+    if (!anchor) {
+      throw new Error('Missing anchor fixture');
+    }
+    const singleTabWindow = createChromeWindow({ focused: true, id: 1, tabs: [anchor] });
+    vi.mocked(fake.api.windows.get).mockResolvedValue(singleTabWindow);
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([anchor]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    expect(result.sourceWindowClose.nonAnchorTabIds).toEqual([]);
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([anchor]);
+    const finishResult = await result.sourceWindowClose.finish();
+    expect(finishResult).toMatchObject({ errorMessage: null, status: 'close-requested' });
+    await expect(finishResult.completion).resolves.toEqual({ errorMessage: null });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([1]);
+  });
+
+  it('revalidates raw tab identity after restored metadata finishes resolving', async () => {
+    const fake = createApi();
+    const metadataResolution =
+      createDeferred<ReadonlyMap<number, { title: string; url: string }>>();
+    const restoredTabMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => metadataResolution.promise),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const stableTab = createChromeTab({
+      id: 3,
+      index: 2,
+      title: 'Stable tab',
+      url: 'https://stable.example.com/',
+    });
+    fake.sourceWindow.tabs?.push(stableTab);
+    const service = createChromeSavedWindowsService(
+      fake.api,
+      environment,
+      restoredTabMetadataService,
+    );
+    const savePromise = service.saveWindow(1, 'Project work', true);
+    await vi.waitFor(() => expect(restoredTabMetadataService.resolve).toHaveBeenCalledTimes(1));
+
+    const anchor = fake.sourceWindow.tabs?.[0];
+    const movedTab = fake.sourceWindow.tabs?.[1];
+    if (!anchor || !movedTab) {
+      throw new Error('Missing source tab fixtures');
+    }
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([anchor, stableTab]);
+    metadataResolution.resolve(new Map());
+
+    const result = await savePromise;
+    expect(result.sourceWindowClose).toBeNull();
+    expect(result.warnings).toContain(
+      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+    );
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
+  });
+
+  it('closes a tab that finishes the same pending navigation during persistence', async () => {
+    const fake = createApi();
+    const loadingTab = fake.sourceWindow.tabs?.[1];
+    if (!loadingTab) {
+      throw new Error('Missing loading tab fixture');
+    }
+    loadingTab.pendingUrl = 'https://docs.example.com/plan';
+    loadingTab.status = 'loading';
+    loadingTab.url = 'about:blank';
+    const completedTab = {
+      ...loadingTab,
+      pendingUrl: undefined,
+      status: 'complete' as const,
+      url: 'https://docs.example.com/plan',
+    };
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([
+      fake.sourceWindow.tabs?.[0] as chrome.tabs.Tab,
+      completedTab,
+    ]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.sourceWindowClose).toMatchObject({
+      anchorTabId: 1,
+      nonAnchorTabIds: [2],
+      targetTabIds: [1, 2],
+    });
+    expect(result.savedWindow.tabs[1]?.url).toBe('https://docs.example.com/plan');
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('closes a tab whose verified navigation is still pending after persistence', async () => {
+    const fake = createApi();
+    const loadingTab = fake.sourceWindow.tabs?.[1];
+    if (!loadingTab) {
+      throw new Error('Missing loading tab fixture');
+    }
+    loadingTab.pendingUrl = 'https://docs.example.com/plan';
+    loadingTab.status = 'loading';
+    loadingTab.url = 'about:blank';
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.savedWindow.tabs[1]).toMatchObject({
+      title: 'https://docs.example.com/plan',
+      url: 'https://docs.example.com/plan',
+    });
+    expect(result.sourceWindowClose).toMatchObject({
+      anchorTabId: 1,
+      nonAnchorTabIds: [2],
+      targetTabIds: [1, 2],
+    });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('does not reject an unchanged committed tab merely because it is loading', async () => {
+    const fake = createApi();
+    const loadingTab = fake.sourceWindow.tabs?.[1];
+    if (!loadingTab) {
+      throw new Error('Missing loading tab fixture');
+    }
+    loadingTab.status = 'loading';
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.sourceWindowClose).toMatchObject({
+      nonAnchorTabIds: [2],
+      targetTabIds: [1, 2],
+    });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('can stop final-tab closing while its verification query is pending', async () => {
+    const fake = createApi();
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.saveWindow(1, 'Project work', true);
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    const anchor = fake.sourceWindow.tabs?.[0];
+    if (!anchor) {
+      throw new Error('Missing anchor fixture');
+    }
+    const finalQuery = createDeferred<chrome.tabs.Tab[]>();
+    vi.mocked(fake.api.tabs.query).mockReturnValueOnce(finalQuery.promise);
+
+    const finishPromise = result.sourceWindowClose.finish();
+    result.sourceWindowClose.cancelFinalization();
+    finalQuery.resolve([anchor]);
+
+    await expect(finishPromise).resolves.toEqual({
+      completion: null,
+      errorMessage: 'Automatic final-tab closing stopped after the operation timed out.',
+      status: 'partial',
+    });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('does not start a fast close when a tab is added during persistence', async () => {
+    const fake = createApi();
+    const anchor = fake.sourceWindow.tabs?.[0];
+    const originalSecondTab = fake.sourceWindow.tabs?.[1];
+    if (!anchor || !originalSecondTab) {
+      throw new Error('Missing source tab fixtures');
+    }
+    const changedWindow = createChromeWindow({
+      focused: true,
+      id: 1,
+      tabs: [
+        anchor,
+        originalSecondTab,
+        createChromeTab({
+          id: 3,
+          index: 2,
+          title: 'New work',
+          url: 'https://new.example.com/',
+        }),
+      ],
+    });
+    vi.mocked(fake.api.tabs.query).mockResolvedValue(changedWindow.tabs ?? []);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.sourceWindowClose).toBeNull();
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
+    expect(result.warnings).toContain(
+      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+    );
+  });
+
+  it('does not start a fast close when a tab navigates during persistence', async () => {
+    const fake = createApi();
+    const anchor = fake.sourceWindow.tabs?.[0];
+    const originalSecondTab = fake.sourceWindow.tabs?.[1];
+    if (!anchor || !originalSecondTab) {
+      throw new Error('Missing source tab fixtures');
+    }
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([
+      anchor,
       {
-        groups: [{ collapsed: true, color: 'purple', title: 'Planning' }],
-        id: 'saved-new',
-        tabs: [
-          { active: true, pinned: true, url: 'https://mail.example.com/' },
-          { groupKey: 'group-1', url: 'https://docs.example.com/plan' },
-        ],
+        ...originalSecondTab,
+        pendingUrl: 'https://docs.example.com/changed',
+        status: 'loading',
       },
     ]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.sourceWindowClose).toBeNull();
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
+    expect(result.warnings).toContain(
+      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+    );
+  });
+
+  it('reports a partial fast close after a batch rejection without closing the anchor', async () => {
+    const fake = createApi();
+    vi.mocked(fake.api.tabs.remove).mockRejectedValue(new Error('Tab is being dragged'));
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    await expect(result.sourceWindowClose.batchCompletion).resolves.toEqual({
+      errorMessage: 'Tab is being dragged',
+    });
+    vi.mocked(fake.api.tabs.query).mockResolvedValue(fake.sourceWindow.tabs ?? []);
+    await expect(result.sourceWindowClose.finish()).resolves.toEqual({
+      completion: null,
+      errorMessage: '1 tab still needs attention before the source window can close.',
+      status: 'partial',
+    });
+    await expect(service.load()).resolves.toHaveLength(1);
+  });
+
+  it('does not close the anchor when a new tab appears after fast closing starts', async () => {
+    const fake = createApi();
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.saveWindow(1, 'Project work', true);
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    const anchor = fake.sourceWindow.tabs?.[0];
+    if (!anchor) {
+      throw new Error('Missing anchor fixture');
+    }
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([
+      anchor,
+      createChromeTab({
+        id: 3,
+        index: 1,
+        title: 'New work',
+        url: 'https://new.example.com/',
+      }),
+    ]);
+
+    await expect(result.sourceWindowClose.finish()).resolves.toEqual({
+      completion: null,
+      errorMessage:
+        'The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+      status: 'partial',
+    });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('does not close the anchor when it navigates after fast closing starts', async () => {
+    const fake = createApi();
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.saveWindow(1, 'Project work', true);
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    const anchor = fake.sourceWindow.tabs?.[0];
+    if (!anchor) {
+      throw new Error('Missing anchor fixture');
+    }
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([
+      {
+        ...anchor,
+        pendingUrl: 'https://mail.example.com/other',
+        status: 'loading',
+      },
+    ]);
+
+    await expect(result.sourceWindowClose.finish()).resolves.toEqual({
+      completion: null,
+      errorMessage:
+        'The final saved tab navigated while the window was closing, so Weaver left it open.',
+      status: 'partial',
+    });
+    expect(fake.api.tabs.remove).toHaveBeenCalledTimes(1);
+    expect(fake.api.tabs.remove).toHaveBeenCalledWith([2]);
+  });
+
+  it('never chases the retained anchor after it moves to another window', async () => {
+    const fake = createApi();
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    if (!result.sourceWindowClose) {
+      throw new Error('Expected a fast close operation');
+    }
+    const movedAnchor = createChromeTab({
+      active: true,
+      id: result.sourceWindowClose.anchorTabId,
+      url: 'https://mail.example.com/',
+      windowId: 2,
+    });
+    vi.mocked(fake.api.tabs.query).mockResolvedValue([movedAnchor]);
+
+    await expect(result.sourceWindowClose.finish()).resolves.toEqual({
+      completion: null,
+      errorMessage: 'The final saved tab moved to another window, so Weaver left it open.',
+      status: 'partial',
+    });
+  });
+
+  it('does not start a fast close when a source tab has no verifiable URL', async () => {
+    const fake = createApi();
+    const urlLessTab = fake.sourceWindow.tabs?.[1];
+    if (!urlLessTab) {
+      throw new Error('Missing URL-less tab fixture');
+    }
+    delete urlLessTab.url;
+    delete urlLessTab.pendingUrl;
+    fake.sourceWindow.tabs?.push(
+      createChromeTab({
+        id: 3,
+        index: 2,
+        title: 'Stable tab',
+        url: 'https://stable.example.com/',
+      }),
+    );
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.saveWindow(1, 'Project work', true);
+
+    expect(result.sourceWindowClose).toBeNull();
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
+    expect(result.warnings).toContain('A tab without an available URL was skipped.');
+    expect(result.warnings).toContain(
+      'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+    );
   });
 
   it('uses restored session metadata when saving a recently restored tab again', async () => {
@@ -288,19 +697,19 @@ describe('createChromeSavedWindowsService', () => {
     const service = createChromeSavedWindowsService(fake.api, environment);
 
     await expect(service.saveWindow(1, 'Project work', true)).rejects.toThrow('Quota exceeded');
-    expect(fake.api.windows.remove).not.toHaveBeenCalled();
+    expect(fake.api.tabs.remove).not.toHaveBeenCalled();
   });
 
-  it('keeps a successful snapshot and reports when the optional source close fails', async () => {
+  it('keeps a successful snapshot and reports when its source tabs cannot be prepared', async () => {
     const fake = createApi();
-    vi.mocked(fake.api.windows.remove).mockRejectedValue(new Error('Last window'));
+    vi.mocked(fake.api.tabs.query).mockRejectedValue(new Error('Tabs unavailable'));
     const service = createChromeSavedWindowsService(fake.api, environment);
 
     const result = await service.saveWindow(1, 'Project work', true);
 
-    expect(result.sourceWindowClosed).toBe(false);
+    expect(result.sourceWindowClose).toBeNull();
     expect(result.warnings).toEqual([
-      'The window was saved, but its source could not be closed: Last window',
+      'The window was saved, but its tabs could not be prepared for closing: Tabs unavailable',
     ]);
     await expect(service.load()).resolves.toHaveLength(1);
   });
@@ -347,6 +756,38 @@ describe('createChromeSavedWindowsService', () => {
     });
     await expect(deletion).resolves.toBeUndefined();
     await expect(service.load()).resolves.toEqual([]);
+  });
+
+  it('advances a renamed snapshot revision when the clock has not advanced', async () => {
+    const existing = createSavedWindow({ updatedAt: '2026-07-10T21:00:00.000Z' });
+    const fake = createApi([existing]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    await expect(service.renameWindow(existing.id, 'Renamed')).resolves.toMatchObject({
+      name: 'Renamed',
+      updatedAt: '2026-07-10T21:00:00.001Z',
+    });
+  });
+
+  it('routes each direct collection mutation through the collection-operation lock', async () => {
+    const existing = createSavedWindow();
+    const fake = createApi([existing]);
+    let collectionLockCalls = 0;
+    const withCollectionOperationLock = <T>(operation: () => Promise<T>): Promise<T> => {
+      collectionLockCalls += 1;
+      return operation();
+    };
+    const service = createChromeSavedWindowsService(fake.api, {
+      ...environment,
+      withCollectionOperationLock,
+    });
+
+    await service.renameWindow(existing.id, 'Renamed');
+    await service.keepWindow(createSavedWindow({ id: 'kept' }));
+    await service.deleteWindow(existing.id);
+    await service.saveWindow(1, 'Fresh snapshot', false);
+
+    expect(collectionLockCalls).toBe(4);
   });
 
   it('keeps a consumed snapshot idempotently without changing its identity', async () => {
@@ -841,6 +1282,424 @@ describe('createChromeSavedWindowsService', () => {
     expect(fake.api.tabs.update).not.toHaveBeenCalled();
     expect(fake.api.windows.update).toHaveBeenCalledWith(9, { focused: true });
     await expect(service.load()).resolves.toEqual([savedWindow]);
+  });
+
+  it('deduplicates the latest saved collection atomically and can undo it', async () => {
+    const older = createSavedWindow({
+      createdAt: '2026-07-09T20:00:00.000Z',
+      groups: [],
+      id: 'older',
+      name: 'Older',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Old plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+      updatedAt: '2026-07-09T20:00:00.000Z',
+    });
+    const newer = createSavedWindow({
+      createdAt: '2026-07-10T20:00:00.000Z',
+      groups: [],
+      id: 'newer',
+      name: 'Newer',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'New plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+    });
+    const fake = createApi([older, newer]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.deduplicateTabs([]);
+
+    expect(result).toMatchObject({
+      duplicateGroupCount: 1,
+      removedTabCount: 1,
+      removedWindowIds: ['older'],
+      updatedWindowIds: [],
+    });
+    expect(result.undo).not.toBeNull();
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+    await expect(service.load()).resolves.toMatchObject([{ id: 'newer' }]);
+
+    await service.undoMutation(result.undo!);
+
+    await expect(service.load()).resolves.toMatchObject([{ id: 'older' }, { id: 'newer' }]);
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips the storage write and Undo when no saved duplicates remain', async () => {
+    const fake = createApi([createSavedWindow()]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.deduplicateTabs([]);
+
+    expect(result).toMatchObject({
+      duplicateGroupCount: 0,
+      removedTabCount: 0,
+      removedWindowIds: [],
+      undo: null,
+      updatedWindowIds: [],
+    });
+    expect(fake.api.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('serializes a restore and duplicate cleanup across app contexts', async () => {
+    const restoreTarget = createSavedWindow({
+      groups: [],
+      id: 'restore-target',
+      name: 'Restore target',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Restore me',
+          url: 'https://restore.example.com/',
+        },
+      ],
+    });
+    const older = createSavedWindow({
+      createdAt: '2026-07-09T20:00:00.000Z',
+      groups: [],
+      id: 'older',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Old plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+      updatedAt: '2026-07-09T20:00:00.000Z',
+    });
+    const newer = createSavedWindow({
+      createdAt: '2026-07-11T20:00:00.000Z',
+      groups: [],
+      id: 'newer',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'New plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+      updatedAt: '2026-07-11T20:00:00.000Z',
+    });
+    const fake = createApi([restoreTarget, older, newer]);
+    const restoredTab = createDeferred<chrome.tabs.Tab>();
+    vi.mocked(fake.api.tabs.create).mockImplementationOnce(() => restoredTab.promise);
+    let collectionQueue: Promise<void> = Promise.resolve();
+    const withCollectionOperationLock = <T>(operation: () => Promise<T>): Promise<T> => {
+      const result = collectionQueue.then(operation);
+      collectionQueue = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    };
+    const sharedEnvironment = { ...environment, withCollectionOperationLock };
+    const restoreService = createChromeSavedWindowsService(fake.api, sharedEnvironment);
+    const cleanupService = createChromeSavedWindowsService(fake.api, sharedEnvironment);
+
+    const restorePromise = restoreService.restoreWindow(restoreTarget.id);
+    await vi.waitFor(() => expect(fake.api.tabs.create).toHaveBeenCalledTimes(1));
+    const readsBeforeCleanup = vi.mocked(fake.api.storage.local.get).mock.calls.length;
+    const cleanupPromise = cleanupService.deduplicateTabs([]);
+    await Promise.resolve();
+
+    expect(vi.mocked(fake.api.storage.local.get).mock.calls).toHaveLength(readsBeforeCleanup);
+    expect(fake.api.storage.local.set).not.toHaveBeenCalled();
+
+    restoredTab.resolve(
+      createChromeTab({
+        active: false,
+        id: 100,
+        pendingUrl: 'https://restore.example.com/',
+        url: 'about:blank',
+        windowId: 9,
+      }),
+    );
+    await expect(restorePromise).resolves.toMatchObject({ savedWindowRemoved: true });
+    await expect(cleanupPromise).resolves.toMatchObject({
+      removedTabCount: 1,
+      removedWindowIds: ['older'],
+    });
+    await expect(cleanupService.load()).resolves.toMatchObject([{ id: 'newer' }]);
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a stale duplicate-cleanup undo instead of overwriting a later rename', async () => {
+    const duplicate = createSavedWindow({ id: 'older' });
+    const newer = createSavedWindow({
+      createdAt: '2026-07-10T20:30:00.000Z',
+      id: 'newer',
+      updatedAt: '2026-07-10T20:30:00.000Z',
+    });
+    const fake = createApi([duplicate, newer]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.deduplicateTabs([]);
+
+    await service.renameWindow('newer', 'Changed later');
+
+    const staleUndo = service.undoMutation(result.undo!);
+    await expect(staleUndo).rejects.toThrow('Saved Windows changed after this action');
+    await expect(staleUndo).rejects.toBeInstanceOf(SavedWindowsMutationConflictError);
+    await expect(service.load()).resolves.toMatchObject([{ id: 'newer', name: 'Changed later' }]);
+  });
+
+  it('merges selected saved windows in request order and rejects a stale selection', async () => {
+    const destination = createSavedWindow({ id: 'destination', name: 'Destination' });
+    const source = createSavedWindow({
+      groups: [],
+      id: 'source',
+      name: 'Source',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Source tab',
+          url: 'https://source.example.com/',
+        },
+      ],
+    });
+    const fake = createApi([destination, source]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.mergeWindows(['destination', 'source'], 'Combined research');
+
+    expect(result.destinationWindow).toMatchObject({
+      id: 'destination',
+      name: 'Combined research',
+    });
+    expect(result.destinationWindow.tabs.some((tab) => tab.title === 'Source tab')).toBe(true);
+    expect(result.mergedSourceWindowIds).toEqual(['source']);
+    await expect(service.load()).resolves.toHaveLength(1);
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+
+    await expect(service.mergeWindows(['destination', 'missing'], 'Another name')).rejects.toThrow(
+      'A selected saved window no longer exists.',
+    );
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+
+    await expect(service.mergeWindows(['destination', 'source'], '   ')).rejects.toThrow(
+      'Enter a name for this saved window.',
+    );
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes selected saved tabs in one write and restores them with guarded Undo', async () => {
+    const savedWindow = createSavedWindow();
+    const fake = createApi([savedWindow]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.removeSelectedTabs([selectSavedTab(savedWindow, 1)]);
+
+    expect(result).toMatchObject({
+      removedTabCount: 1,
+      removedWindowIds: [],
+    });
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+    await expect(service.load()).resolves.toMatchObject([
+      { tabs: [{ title: 'Inbox' }, { title: 'Notes' }] },
+    ]);
+
+    await service.undoMutation(result.undo);
+    await expect(service.load()).resolves.toEqual([savedWindow]);
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('moves selected saved tabs to a newly named snapshot without opening browser tabs', async () => {
+    const savedWindow = createSavedWindow();
+    const fake = createApi([savedWindow]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.moveSelectedTabsToNewWindow(
+      [selectSavedTab(savedWindow, 1)],
+      '  Follow-up  ',
+    );
+
+    expect(result).toMatchObject({
+      createdWindow: { id: 'saved-new', name: 'Follow-up' },
+      movedTabCount: 1,
+      removedSourceWindowIds: [],
+    });
+    await expect(service.load()).resolves.toMatchObject([
+      { id: 'saved-new', tabs: [{ title: 'Plan' }] },
+      { id: savedWindow.id, tabs: [{ title: 'Inbox' }, { title: 'Notes' }] },
+    ]);
+    expect(fake.api.tabs.create).not.toHaveBeenCalled();
+    expect(fake.api.windows.create).not.toHaveBeenCalled();
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a stale selected-tab revision without writing storage', async () => {
+    const savedWindow = createSavedWindow();
+    const fake = createApi([savedWindow]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const stale = {
+      ...selectSavedTab(savedWindow, 1),
+      expectedWindowUpdatedAt: '2026-07-10T19:00:00.000Z',
+    };
+
+    await expect(service.removeSelectedTabs([stale])).rejects.toThrow(
+      'selected saved tabs changed',
+    );
+    expect(fake.api.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('sorts one saved window atomically and restores the original order with guarded Undo', async () => {
+    const first = createSavedWindow({ id: 'first' });
+    const second = createSavedWindow({ id: 'second', name: 'Second' });
+    const fake = createApi([first, second]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.sortWindow('first', {
+      criterion: 'title',
+      direction: 'asc',
+    });
+
+    expect(result.sortedWindowIds).toEqual(['first']);
+    expect(result.undo).not.toBeNull();
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+    await expect(service.load()).resolves.toMatchObject([
+      {
+        id: 'first',
+        tabs: [{ title: 'Inbox' }, { title: 'Notes' }, { title: 'Plan' }],
+        updatedAt: '2026-07-10T21:00:00.000Z',
+      },
+      {
+        id: 'second',
+        tabs: [{ title: 'Inbox' }, { title: 'Plan' }, { title: 'Notes' }],
+        updatedAt: second.updatedAt,
+      },
+    ]);
+
+    await service.undoMutation(result.undo!);
+
+    await expect(service.load()).resolves.toEqual([first, second]);
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('sorts only changed windows during sort-all and preserves an already sorted revision', async () => {
+    const first = createSavedWindow({ id: 'first' });
+    const second = createSavedWindow({
+      groups: [],
+      id: 'second',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Alpha',
+          url: 'https://a.example.com/',
+        },
+        {
+          active: false,
+          order: 1,
+          pinned: false,
+          title: 'Zulu',
+          url: 'https://z.example.com/',
+        },
+      ],
+    });
+    const fake = createApi([first, second]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    const result = await service.sortAllWindows({
+      criterion: 'title',
+      direction: 'asc',
+    });
+
+    expect(result.sortedWindowIds).toEqual(['first']);
+    expect(result.undo).not.toBeNull();
+    expect(fake.api.storage.local.set).toHaveBeenCalledTimes(1);
+    await expect(service.load()).resolves.toMatchObject([
+      {
+        id: 'first',
+        tabs: [{ title: 'Inbox' }, { title: 'Notes' }, { title: 'Plan' }],
+      },
+      {
+        id: 'second',
+        tabs: [{ title: 'Alpha' }, { title: 'Zulu' }],
+        updatedAt: second.updatedAt,
+      },
+    ]);
+  });
+
+  it('does not write or create Undo when requested saved windows are already sorted', async () => {
+    const sorted = createSavedWindow({
+      groups: [],
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Alpha',
+          url: 'https://a.example.com/',
+        },
+        {
+          active: false,
+          order: 1,
+          pinned: false,
+          title: 'Zulu',
+          url: 'https://z.example.com/',
+        },
+      ],
+    });
+    const fake = createApi([sorted]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    await expect(
+      service.sortWindow(sorted.id, { criterion: 'title', direction: 'asc' }),
+    ).resolves.toEqual({ sortedWindowIds: [], undo: null });
+    await expect(service.sortAllWindows({ criterion: 'url', direction: 'asc' })).resolves.toEqual({
+      sortedWindowIds: [],
+      undo: null,
+    });
+    expect(fake.api.storage.local.set).not.toHaveBeenCalled();
+    await expect(service.load()).resolves.toEqual([sorted]);
+  });
+
+  it('rejects a missing saved-window sort target without writing storage', async () => {
+    const fake = createApi([createSavedWindow()]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+
+    await expect(
+      service.sortWindow('missing', { criterion: 'title', direction: 'asc' }),
+    ).rejects.toThrow('A selected saved window no longer exists.');
+    expect(fake.api.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('refuses stale saved-window sort Undo after a later mutation', async () => {
+    const savedWindow = createSavedWindow();
+    const fake = createApi([savedWindow]);
+    const service = createChromeSavedWindowsService(fake.api, environment);
+    const result = await service.sortWindow(savedWindow.id, {
+      criterion: 'title',
+      direction: 'asc',
+    });
+
+    await service.renameWindow(savedWindow.id, 'Changed later');
+
+    const staleUndo = service.undoMutation(result.undo!);
+    await expect(staleUndo).rejects.toBeInstanceOf(SavedWindowsMutationConflictError);
+    await expect(service.load()).resolves.toMatchObject([
+      { id: savedWindow.id, name: 'Changed later' },
+    ]);
   });
 
   it('subscribes only to local changes for the saved-window key and cleans up', () => {

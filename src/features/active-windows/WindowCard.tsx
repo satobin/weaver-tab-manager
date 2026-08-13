@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { Fragment, useEffect, useRef } from 'react';
 
+import { SelectionCheckbox } from '../../ui/SelectionCheckbox';
 import { AgentAssociatedTabIndicator } from './AgentAssociatedTabIndicator';
 import {
   formatTabLocation,
@@ -30,6 +31,7 @@ import { type SortCriterion, type SortDirection, type TabSortOptions } from './t
 interface WindowCardProps {
   allWindowTabs: readonly ManagedTab[];
   collapsed: boolean;
+  closing?: boolean;
   disabled: boolean;
   extensionOrigin: string;
   draggedGroupId: number | null;
@@ -90,46 +92,11 @@ function pluralizeTabs(count: number) {
   return `${count} ${count === 1 ? 'tab' : 'tabs'}`;
 }
 
-interface SelectionCheckboxProps {
-  ariaLabel: string;
-  checked: boolean;
-  disabled?: boolean;
-  indeterminate?: boolean;
-  onChange: (checked: boolean) => void;
-}
-
-function SelectionCheckbox({
-  ariaLabel,
-  checked,
-  disabled = false,
-  indeterminate = false,
-  onChange,
-}: SelectionCheckboxProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.indeterminate = indeterminate;
-    }
-  }, [indeterminate]);
-
-  return (
-    <input
-      ref={inputRef}
-      className="selection-checkbox"
-      type="checkbox"
-      aria-label={ariaLabel}
-      checked={checked}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.checked)}
-    />
-  );
-}
-
 export function WindowCard({
   allWindowTabs,
   collapsed,
-  disabled,
+  closing = false,
+  disabled: disabledProp,
   extensionOrigin,
   draggedGroupId,
   draggedTabIds,
@@ -169,6 +136,7 @@ export function WindowCard({
   window,
   windowActionsAvailable = true,
 }: WindowCardProps) {
+  const disabled = disabledProp || closing;
   const suppressGroupFocusRef = useRef(false);
   const groupFocusReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupsById = new Map(window.groups.map((group) => [group.id, group]));
@@ -275,10 +243,12 @@ export function WindowCard({
         dropTarget?.windowId === window.id ? 'is-drop-target' : '',
         !showTabUrls ? 'is-compact-tabs' : '',
         collapsed ? 'is-collapsed' : '',
+        closing ? 'is-closing' : '',
       ]
         .filter(Boolean)
         .join(' ')}
       data-window-id={window.id}
+      aria-busy={closing || undefined}
       aria-labelledby={`window-${window.id}-title`}
       onDragLeave={(event) => {
         const nextTarget = event.relatedTarget;
@@ -300,50 +270,72 @@ export function WindowCard({
     >
       <header className="window-card-header">
         <div className="window-identity">
-          <SelectionCheckbox
-            ariaLabel={`Select all visible tabs in ${window.label}`}
-            checked={allSelected}
-            disabled={disabled}
-            indeterminate={selectedCount > 0 && !allSelected}
-            onChange={(checked) => onSetTabsSelected(visibleTabIds, checked)}
-          />
+          {!closing ? (
+            <SelectionCheckbox
+              ariaLabel={`Select all visible tabs in ${window.label}`}
+              checked={allSelected}
+              disabled={disabled}
+              indeterminate={selectedCount > 0 && !allSelected}
+              onChange={(checked) => onSetTabsSelected(visibleTabIds, checked)}
+            />
+          ) : null}
           <div className="window-heading-copy">
             <h3 id={`window-${window.id}-title`}>
-              <button
-                className="window-heading-button"
-                type="button"
-                aria-current={window.focused ? 'true' : undefined}
-                title="Focus window"
-                onClick={() => onFocusWindow(window.id)}
-              >
-                {window.label}
-              </button>
+              {closing ? (
+                <span className="window-heading-static">{window.label}</span>
+              ) : (
+                <button
+                  className="window-heading-button"
+                  type="button"
+                  aria-current={window.focused ? 'true' : undefined}
+                  title="Focus window"
+                  onClick={() => onFocusWindow(window.id)}
+                >
+                  {window.label}
+                </button>
+              )}
             </h3>
             <span className="window-heading-summary">
               {pluralizeTabs(window.tabs.length)}
-              {selectedCount > 0 ? ` (${selectedCount} selected)` : ''}
+              {!closing && selectedCount > 0 ? ` (${selectedCount} selected)` : ''}
             </span>
           </div>
-          <span className="window-collapse-state" aria-hidden="true">
-            {collapsed ? (
-              <ChevronRight className="window-heading-chevron" size={15} />
-            ) : (
-              <ChevronDown className="window-heading-chevron" size={15} />
-            )}
-          </span>
+          {!closing ? (
+            <span className="window-collapse-state" aria-hidden="true">
+              {collapsed ? (
+                <ChevronRight className="window-heading-chevron" size={15} />
+              ) : (
+                <ChevronDown className="window-heading-chevron" size={15} />
+              )}
+            </span>
+          ) : null}
         </div>
 
-        <button
-          className="window-collapse-button"
-          type="button"
-          aria-controls={`window-${window.id}-tabs`}
-          aria-expanded={!collapsed}
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${window.label}`}
-          title={`${collapsed ? 'Expand' : 'Collapse'} window`}
-          onClick={() => onToggleCollapsed(window.id)}
-        />
+        {!closing ? (
+          <button
+            className="window-collapse-button"
+            type="button"
+            aria-controls={`window-${window.id}-tabs`}
+            aria-expanded={!collapsed}
+            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${window.label}`}
+            title={`${collapsed ? 'Expand' : 'Collapse'} window`}
+            onClick={() => onToggleCollapsed(window.id)}
+          />
+        ) : null}
 
-        {windowActionsAvailable ? (
+        {closing ? (
+          <div
+            className="window-card-closing-status"
+            role="status"
+            aria-label={`${window.label}, ${pluralizeTabs(window.tabs.length)}, closing`}
+            aria-atomic="true"
+            aria-live="polite"
+            tabIndex={-1}
+          >
+            <span className="window-card-closing-spinner" aria-hidden="true" />
+            <span>Closing…</span>
+          </div>
+        ) : windowActionsAvailable ? (
           <div className="window-card-actions">
             <div className="window-sort-controls" role="group" aria-label={`Sort ${window.label}`}>
               <SortCriterionMenu
@@ -435,8 +427,9 @@ export function WindowCard({
       {window.tabs.length > 0 ? (
         <ul
           id={`window-${window.id}-tabs`}
-          className="tab-list"
+          className={`tab-list${closing ? ' is-closing-snapshot' : ''}`}
           hidden={collapsed}
+          inert={closing || undefined}
           onDragOver={(event) => {
             if (event.target === event.currentTarget && draggedTabIds.size > 0 && !disabled) {
               event.preventDefault();
@@ -482,7 +475,7 @@ export function WindowCard({
                 : null;
             const duplicatePreviewOutcome =
               duplicatePreviewState === 'close'
-                ? 'Will close'
+                ? 'Close'
                 : duplicatePreviewState === 'keep'
                   ? 'Keep'
                   : null;
@@ -593,6 +586,7 @@ export function WindowCard({
                         draggable={!disabled && completeGroupAction}
                         aria-label={`Focus first tab in ${groupLabel}`}
                         title={`Focus ${firstGroupTab.title}`}
+                        disabled={closing}
                         onDragStart={(event) => {
                           if (disabled || !completeGroupAction) {
                             event.preventDefault();
@@ -661,6 +655,7 @@ export function WindowCard({
                       aria-describedby={tabDescriptionIds || undefined}
                       aria-current={tab.active ? 'page' : undefined}
                       title={tab.url || tab.title}
+                      disabled={closing}
                       onDragStart={(event) => {
                         event.stopPropagation();
                         beginTabDrag(event, { groupId: null, tabIds: [tab.id] }, tab.windowId);
@@ -846,9 +841,9 @@ export function WindowCard({
             <li className="tab-drop-indicator" aria-hidden="true" />
           ) : null}
         </ul>
-      ) : (
+      ) : !closing ? (
         <p className="window-empty">This window has no available tabs.</p>
-      )}
+      ) : null}
     </article>
   );
 }

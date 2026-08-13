@@ -2,8 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type SavedWindow } from './savedWindowModel';
-import { type SavedWindowsService } from './savedWindowsService';
-import { useSavedWindows } from './useSavedWindows';
+import { useSavedWindows, type SavedWindowsReadService } from './useSavedWindows';
 
 const savedWindow: SavedWindow = {
   createdAt: '2026-07-10T20:00:00.000Z',
@@ -24,14 +23,10 @@ const savedWindow: SavedWindow = {
 
 function createService() {
   const listeners = new Set<() => void>();
-  const service: SavedWindowsService = {
-    deleteWindow: vi.fn(() => Promise.resolve()),
-    keepWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
+  const service: SavedWindowsReadService = {
+    dismissCleanupNotice: vi.fn(() => Promise.resolve()),
     load: vi.fn(() => Promise.resolve([savedWindow])),
-    openTab: vi.fn(() => Promise.reject(new Error('Not used'))),
-    renameWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
-    restoreWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
-    saveWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
+    loadCleanupNotice: vi.fn(() => Promise.resolve(null)),
     subscribe: vi.fn((listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -69,6 +64,17 @@ describe('useSavedWindows', () => {
     expect(result.current.status).toBe('ready');
     expect(result.current.windows).toEqual([savedWindow]);
     expect(result.current.errorMessage).toBe('Storage unavailable');
+  });
+
+  it('still loads windows when the optional cleanup notice cannot be read', async () => {
+    const fake = createService();
+    vi.mocked(fake.service.loadCleanupNotice!).mockRejectedValue(new Error('Notice unavailable'));
+    const { result } = renderHook(() => useSavedWindows(fake.service));
+
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.windows).toEqual([savedWindow]);
+    expect(result.current.cleanupNotice).toBeNull();
+    expect(result.current.errorMessage).toBeNull();
   });
 
   it('removes its storage listener on unmount', async () => {

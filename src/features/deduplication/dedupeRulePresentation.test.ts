@@ -69,6 +69,7 @@ describe('dedupe rule presentation', () => {
         { pattern: 'notion.so/PAGE_PATH' },
         { pattern: 'WORKSPACE.notion.so/PAGE_PATH' },
         { pattern: 'notion.com/PAGE_PATH' },
+        { pattern: 'app.notion.com/PAGE_PATH' },
       ],
     ]);
   });
@@ -90,7 +91,7 @@ describe('dedupe rule presentation', () => {
     });
   });
 
-  it('previews the keeper and tabs that would close', () => {
+  it('previews the keeper and tabs selected to close', () => {
     const rule = createRule();
     const tabs = [
       createTab({ id: 1, windowId: 2, windowLabel: 'Window 1' }),

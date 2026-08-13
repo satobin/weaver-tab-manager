@@ -11,7 +11,6 @@ import {
   PanelsTopLeft,
   RefreshCw,
   Search,
-  Trash2,
   X,
 } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -32,6 +31,7 @@ import { getMergeDialogHorizontalOffset } from '../features/active-windows/merge
 import {
   filterActiveWindows,
   isTabSuspended,
+  type ActiveWindowsSnapshot,
   type ManagedWindow,
 } from '../features/active-windows/model';
 import { type ToggleTabSelection } from '../features/active-windows/selection';
@@ -62,11 +62,13 @@ import {
   type WindowCardBounds,
   type WindowDropPlacement,
 } from '../features/active-windows/windowDisplayOrder';
+import { formatWindowLabel } from '../features/active-windows/windowLabel';
 import { planDuplicateTabs } from '../features/deduplication/deduplication';
 import { type DedupePreviewTab } from '../features/deduplication/dedupeRulePresentation';
 import { SaveWindowDialog } from '../features/saved-windows/SaveWindowDialog';
 import {
   createSavedWindowsService,
+  type FastSourceWindowCloseOperation,
   type SaveWindowResult,
   type SavedWindowsService,
 } from '../features/saved-windows/savedWindowsService';
@@ -97,14 +99,64 @@ interface PendingNewWindowDropTarget {
   origin: PointerPosition;
   target: NewWindowDropTarget;
 }
-interface TabDragSession extends TabDragPayload {
-  handled: boolean;
+type TabDragSession = TabDragPayload;
+interface PendingWindowClose {
+  batchErrorMessage: string | null;
+  delayed: boolean;
+  displayIndex: number;
+  displayWindow: ManagedWindow;
+  dismissed: boolean;
+  finalizationState: 'accepted' | 'idle';
+  operation: FastSourceWindowCloseOperation;
+  savedWindowId: string;
+  savedWindowName: string;
+  terminalErrorMessage: string | null;
+  warningText: string;
+  windowId: number;
+  windowLabel: string;
 }
+interface PendingWindowCloseProgress {
+  remainingNonAnchorTabCount: number;
+  remainingTargetTabCount: number;
+}
+interface PendingWindowCloseTimers {
+  delayTimer: ReturnType<typeof globalThis.setTimeout>;
+  savedWindowId: string;
+  timeoutTimer: ReturnType<typeof globalThis.setTimeout>;
+}
+interface WindowCloseCompletionNotice {
+  message: string;
+  savedWindowId: string;
+  savedWindowName: string;
+  windowLabel: string;
+}
+interface PendingWindowCloseFocus {
+  savedWindowId: string;
+  windowId: number;
+}
+type PendingWindowCloseResultFocus = 'error' | 'page' | { savedWindowId: string } | null;
 const DEFAULT_WINDOW_SORT_SELECTION: WindowSortSelection = {
   criterion: 'title',
   direction: 'asc',
 };
 const NEW_WINDOW_TARGET_SWITCH_DISTANCE = 12;
+const WINDOW_CLOSE_DELAY_NOTICE_MS = 3_000;
+const WINDOW_CLOSE_TIMEOUT_MS = 60_000;
+
+function finishFastCloseWithoutPage(operation: FastSourceWindowCloseOperation): void {
+  void operation.batchCompletion
+    .then(({ errorMessage }) => {
+      if (errorMessage) {
+        return;
+      }
+      return operation.finish().then((result) => {
+        if (result.completion) {
+          void result.completion.catch(() => undefined);
+        }
+      });
+    })
+    .catch(() => undefined);
+}
 
 function sortSelectionsMatch(
   first: TabSortOptions | null | undefined,
@@ -130,6 +182,55 @@ function pointerDistance(first: PointerPosition, second: PointerPosition): numbe
 
 function pluralize(count: number, singular: string) {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
+function getOpenTabIds(snapshot: ActiveWindowsSnapshot): ReadonlySet<number> {
+  return new Set(
+    snapshot.windows.flatMap((activeWindow) => activeWindow.tabs.map((tab) => tab.id)),
+  );
+}
+
+function getPendingWindowCloseKey(pendingClose: PendingWindowClose): string {
+  return `${pendingClose.windowId}:${pendingClose.savedWindowId}`;
+}
+
+function getPendingWindowCloseProgress(
+  pendingClose: PendingWindowClose,
+  snapshot: ActiveWindowsSnapshot,
+): PendingWindowCloseProgress {
+  const openTabIds = getOpenTabIds(snapshot);
+  const remainingTargetTabCount = pendingClose.operation.targetTabIds.filter((tabId) =>
+    openTabIds.has(tabId),
+  ).length;
+  const remainingNonAnchorTabCount = pendingClose.operation.nonAnchorTabIds.filter((tabId) =>
+    openTabIds.has(tabId),
+  ).length;
+  return {
+    remainingNonAnchorTabCount,
+    remainingTargetTabCount,
+  };
+}
+
+function getPendingWindowCloseNotice(pendingClose: PendingWindowClose): string {
+  return `Saved "${pendingClose.savedWindowName}". Still closing ${pendingClose.windowLabel}. A page may need extra time or confirmation.${pendingClose.warningText}`;
+}
+
+function getCompletedWindowCloseNotice(pendingClose: PendingWindowClose): string {
+  return `Saved "${pendingClose.savedWindowName}" and closed ${pendingClose.windowLabel}.${pendingClose.warningText}`;
+}
+
+function getFailedWindowCloseMessage(
+  pendingClose: PendingWindowClose,
+  errorMessage: string,
+): string {
+  return `Saved "${pendingClose.savedWindowName}", but ${pendingClose.windowLabel} did not finish closing. ${errorMessage}`;
+}
+
+function appendOperationError(current: string | null, next: string): string {
+  if (!current) {
+    return next;
+  }
+  return current.includes(next) ? current : `${current} ${next}`;
 }
 
 function summarizeFailures(
@@ -245,12 +346,32 @@ export function ActiveWindowsPage({
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
+  const [windowCloseCompletionNotices, setWindowCloseCompletionNotices] = useState<
+    readonly WindowCloseCompletionNotice[]
+  >([]);
   const [duplicateUndoTabs, setDuplicateUndoTabs] = useState<readonly RestorableTab[] | null>(null);
   const [operationLabel, setOperationLabel] = useState<string | null>(null);
+  const [duplicateRemovalTabIds, setDuplicateRemovalTabIds] = useState<readonly number[] | null>(
+    null,
+  );
   const [saveWindowId, setSaveWindowId] = useState<number | null>(null);
+  const [pendingWindowCloses, setPendingWindowCloses] = useState<
+    ReadonlyMap<number, PendingWindowClose>
+  >(() => new Map());
+  const [pendingWindowCloseSummaryBaseline, setPendingWindowCloseSummaryBaseline] = useState<{
+    tabCount: number;
+    windowCount: number;
+  } | null>(null);
   const [windowColumnCount, setWindowColumnCount] = useState(1);
   const [windowGridElement, setWindowGridElement] = useState<HTMLDivElement | null>(null);
   const operationInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pendingWindowCloseFocusRef = useRef<PendingWindowCloseFocus | null>(null);
+  const pendingWindowCloseOwnedFocusIdRef = useRef<number | null>(null);
+  const pendingWindowCloseResultFocusRef = useRef<PendingWindowCloseResultFocus>(null);
+  const pendingWindowClosesRef = useRef(pendingWindowCloses);
+  const pendingWindowCloseFinalizationsRef = useRef<Set<string>>(new Set());
+  const pendingWindowCloseTimersRef = useRef<Map<number, PendingWindowCloseTimers>>(new Map());
   const dragSessionRef = useRef<TabDragSession | null>(null);
   const dragWindowCardBoundsRef = useRef<readonly WindowCardBounds[]>([]);
   const newWindowDropTargetRef = useRef<NewWindowDropTarget | null>(null);
@@ -357,9 +478,11 @@ export function ActiveWindowsPage({
   const selectedTabIdsInOrder = useMemo(
     () =>
       snapshot?.windows.flatMap((window) =>
-        window.tabs.flatMap((tab) => (selection.selectedIds.has(tab.id) ? [tab.id] : [])),
+        pendingWindowCloses.has(window.id)
+          ? []
+          : window.tabs.flatMap((tab) => (selection.selectedIds.has(tab.id) ? [tab.id] : [])),
       ) ?? [],
-    [selection.selectedIds, snapshot],
+    [pendingWindowCloses, selection.selectedIds, snapshot],
   );
   const validSelectedGroupIds = useMemo(() => {
     const validGroupIds = new Set<number>();
@@ -496,6 +619,16 @@ export function ActiveWindowsPage({
   const duplicateActionTabIds = duplicatePreviewMode
     ? visibleDuplicateCloseTabIds
     : duplicatePlan.duplicateTabIds;
+  const duplicateRemovalRemainingCount = useMemo(() => {
+    if (!duplicateRemovalTabIds) {
+      return null;
+    }
+    if (!snapshot) {
+      return duplicateRemovalTabIds.length;
+    }
+    const openTabIds = getOpenTabIds(snapshot);
+    return duplicateRemovalTabIds.filter((tabId) => openTabIds.has(tabId)).length;
+  }, [duplicateRemovalTabIds, snapshot]);
 
   const displayed = useMemo(() => {
     if (!filtered || !snapshot || !duplicatePreviewMode) {
@@ -531,18 +664,51 @@ export function ActiveWindowsPage({
       ),
     [displayed?.windows],
   );
-  const layoutWindows = useMemo(
-    () =>
-      duplicatePreviewMode
-        ? (snapshot?.windows ?? EMPTY_WINDOWS)
-        : (displayed?.windows ?? EMPTY_WINDOWS),
-    [displayed?.windows, duplicatePreviewMode, snapshot?.windows],
-  );
+  const layoutWindows = useMemo(() => {
+    const baseWindows = duplicatePreviewMode
+      ? (snapshot?.windows ?? EMPTY_WINDOWS)
+      : (displayed?.windows ?? EMPTY_WINDOWS);
+    if (duplicatePreviewMode || pendingWindowCloses.size === 0) {
+      return baseWindows;
+    }
+
+    const baseWindowsById = new Map(
+      baseWindows.map((activeWindow) => [activeWindow.id, activeWindow] as const),
+    );
+    const augmentedWindows = [...(snapshot?.windows ?? EMPTY_WINDOWS)];
+    [...pendingWindowCloses.values()]
+      .sort((first, second) => first.displayIndex - second.displayIndex)
+      .forEach((pendingClose) => {
+        if (augmentedWindows.some((activeWindow) => activeWindow.id === pendingClose.windowId)) {
+          return;
+        }
+        augmentedWindows.splice(
+          Math.min(Math.max(0, pendingClose.displayIndex), augmentedWindows.length),
+          0,
+          pendingClose.displayWindow,
+        );
+      });
+    return augmentedWindows.flatMap((activeWindow, index) => {
+      const displayedWindow = baseWindowsById.get(activeWindow.id);
+      const pendingClose = pendingWindowCloses.get(activeWindow.id);
+      if (!displayedWindow && !pendingClose) {
+        return [];
+      }
+      return [
+        {
+          ...(pendingClose?.displayWindow ?? displayedWindow ?? activeWindow),
+          label: pendingClose?.windowLabel ?? formatWindowLabel(index + 1),
+        },
+      ];
+    });
+  }, [displayed?.windows, duplicatePreviewMode, pendingWindowCloses, snapshot?.windows]);
   const layoutWindowCount = layoutWindows.length;
   const visibleTabIds = useMemo(
     () =>
-      displayed?.windows.flatMap((activeWindow) => activeWindow.tabs.map((tab) => tab.id)) ?? [],
-    [displayed],
+      displayed?.windows.flatMap((activeWindow) =>
+        pendingWindowCloses.has(activeWindow.id) ? [] : activeWindow.tabs.map((tab) => tab.id),
+      ) ?? [],
+    [displayed, pendingWindowCloses],
   );
   const windowColumns = useMemo(() => {
     const columns = distributeAcrossWindowColumns(
@@ -552,7 +718,9 @@ export function ActiveWindowsPage({
         estimateWindowCardHeight(
           activeWindow,
           settings.showTabUrls,
-          collapsedWindowIds.has(activeWindow.id),
+          pendingWindowCloses.has(activeWindow.id)
+            ? false
+            : collapsedWindowIds.has(activeWindow.id),
         ),
     );
 
@@ -571,6 +739,7 @@ export function ActiveWindowsPage({
     displayedWindowsById,
     duplicatePreviewMode,
     layoutWindows,
+    pendingWindowCloses,
     settings.showTabUrls,
     windowColumnCount,
   ]);
@@ -593,7 +762,367 @@ export function ActiveWindowsPage({
     return () => observer.disconnect();
   }, [layoutWindowCount, windowGridElement]);
 
+  useEffect(() => {
+    pendingWindowClosesRef.current = pendingWindowCloses;
+  }, [pendingWindowCloses]);
+
   const saveWindowTarget = snapshot?.windows.find((window) => window.id === saveWindowId) ?? null;
+
+  const clearPendingWindowCloseTimer = useCallback((windowId: number) => {
+    const timers = pendingWindowCloseTimersRef.current.get(windowId);
+    if (timers) {
+      globalThis.clearTimeout(timers.delayTimer);
+      globalThis.clearTimeout(timers.timeoutTimer);
+      pendingWindowCloseTimersRef.current.delete(windowId);
+    }
+  }, []);
+
+  const schedulePendingWindowCloseNotice = useCallback(
+    (pendingClose: PendingWindowClose) => {
+      clearPendingWindowCloseTimer(pendingClose.windowId);
+      const delayTimer = globalThis.setTimeout(() => {
+        if (
+          pendingWindowCloseTimersRef.current.get(pendingClose.windowId)?.savedWindowId !==
+          pendingClose.savedWindowId
+        ) {
+          return;
+        }
+        setPendingWindowCloses((current) => {
+          const latest = current.get(pendingClose.windowId);
+          if (!latest || latest.savedWindowId !== pendingClose.savedWindowId || latest.delayed) {
+            return current;
+          }
+          const next = new Map(current);
+          next.set(pendingClose.windowId, { ...latest, delayed: true });
+          return next;
+        });
+      }, WINDOW_CLOSE_DELAY_NOTICE_MS);
+      const timeoutTimer = globalThis.setTimeout(() => {
+        const latestTimers = pendingWindowCloseTimersRef.current.get(pendingClose.windowId);
+        if (latestTimers?.savedWindowId !== pendingClose.savedWindowId) {
+          return;
+        }
+        globalThis.clearTimeout(latestTimers.delayTimer);
+        pendingWindowCloseTimersRef.current.delete(pendingClose.windowId);
+        const latestPendingClose = pendingWindowClosesRef.current.get(pendingClose.windowId);
+        const finalCloseRequested =
+          latestPendingClose?.savedWindowId === pendingClose.savedWindowId &&
+          latestPendingClose.finalizationState === 'accepted' &&
+          latestPendingClose.terminalErrorMessage === null;
+        const finalizationVerificationPending =
+          latestPendingClose?.savedWindowId === pendingClose.savedWindowId &&
+          latestPendingClose.finalizationState === 'idle' &&
+          pendingWindowCloseFinalizationsRef.current.has(
+            getPendingWindowCloseKey(latestPendingClose),
+          );
+        if (latestPendingClose?.savedWindowId === pendingClose.savedWindowId) {
+          latestPendingClose.operation.cancelFinalization();
+        }
+        pendingWindowCloseFinalizationsRef.current.delete(getPendingWindowCloseKey(pendingClose));
+        if (pendingWindowCloseOwnedFocusIdRef.current === pendingClose.windowId) {
+          pendingWindowCloseResultFocusRef.current = 'error';
+          pendingWindowCloseOwnedFocusIdRef.current = null;
+        }
+        setPendingWindowCloses((current) => {
+          if (current.get(pendingClose.windowId)?.savedWindowId !== pendingClose.savedWindowId) {
+            return current;
+          }
+          const next = new Map(current);
+          next.delete(pendingClose.windowId);
+          return next;
+        });
+        setDuplicateUndoTabs(null);
+        const timeoutMessage = finalCloseRequested
+          ? `Saved "${pendingClose.savedWindowName}", but your browser is still waiting to close the final tab in ${pendingClose.windowLabel}. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.`
+          : finalizationVerificationPending
+            ? `Saved "${pendingClose.savedWindowName}", but Weaver could not finish verifying the final tab in ${pendingClose.windowLabel}. Weaver stopped automatic closing and unlocked the window.`
+            : `Saved "${pendingClose.savedWindowName}", but your browser did not finish closing all saved tabs from ${pendingClose.windowLabel}. Weaver stopped before closing the final tab. Focus the window to check for a confirmation.`;
+        setOperationError((current) => appendOperationError(current, timeoutMessage));
+      }, WINDOW_CLOSE_TIMEOUT_MS);
+      pendingWindowCloseTimersRef.current.set(pendingClose.windowId, {
+        delayTimer,
+        savedWindowId: pendingClose.savedWindowId,
+        timeoutTimer,
+      });
+    },
+    [clearPendingWindowCloseTimer],
+  );
+
+  useEffect(() => {
+    if (!snapshot || pendingWindowCloses.size === 0) {
+      return;
+    }
+    const finalizationCandidates = [...pendingWindowCloses.values()].filter((pendingClose) => {
+      if (
+        pendingClose.finalizationState !== 'idle' ||
+        pendingWindowCloseFinalizationsRef.current.has(getPendingWindowCloseKey(pendingClose))
+      ) {
+        return false;
+      }
+      const progress = getPendingWindowCloseProgress(pendingClose, snapshot);
+      return progress.remainingNonAnchorTabCount === 0;
+    });
+    if (finalizationCandidates.length === 0) {
+      return;
+    }
+
+    finalizationCandidates.forEach((pendingClose) => {
+      pendingWindowCloseFinalizationsRef.current.add(getPendingWindowCloseKey(pendingClose));
+      const operation = pendingClose.operation;
+      void operation
+        .finish()
+        .then(async (result) => {
+          await refresh();
+          if (!mountedRef.current) {
+            return;
+          }
+          setPendingWindowCloses((current) => {
+            const latest = current.get(pendingClose.windowId);
+            if (latest?.savedWindowId !== pendingClose.savedWindowId) {
+              return current;
+            }
+            const next = new Map(current);
+            next.set(pendingClose.windowId, {
+              ...latest,
+              finalizationState: 'accepted',
+              terminalErrorMessage:
+                result.status === 'partial'
+                  ? (result.errorMessage ?? 'Your browser left part of the source window open.')
+                  : null,
+            });
+            return next;
+          });
+          if (result.completion) {
+            void result.completion.then(async ({ errorMessage }) => {
+              await refresh();
+              if (!mountedRef.current || !errorMessage) {
+                return;
+              }
+              setPendingWindowCloses((current) => {
+                const latest = current.get(pendingClose.windowId);
+                if (latest?.savedWindowId !== pendingClose.savedWindowId) {
+                  return current;
+                }
+                const next = new Map(current);
+                next.set(pendingClose.windowId, {
+                  ...latest,
+                  finalizationState: 'accepted',
+                  terminalErrorMessage: `The final saved tab could not be closed: ${errorMessage}`,
+                });
+                return next;
+              });
+            });
+          }
+        })
+        .catch(async (error: unknown) => {
+          await refresh();
+          if (!mountedRef.current) {
+            return;
+          }
+          setPendingWindowCloses((current) => {
+            const latest = current.get(pendingClose.windowId);
+            if (latest?.savedWindowId !== pendingClose.savedWindowId) {
+              return current;
+            }
+            const next = new Map(current);
+            next.set(pendingClose.windowId, {
+              ...latest,
+              finalizationState: 'accepted',
+              terminalErrorMessage:
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : 'Your browser could not finish closing the source window.',
+            });
+            return next;
+          });
+        });
+    });
+  }, [pendingWindowCloses, refresh, snapshot]);
+
+  useEffect(() => {
+    if (!snapshot || pendingWindowCloses.size === 0) {
+      return;
+    }
+    const openWindowIds = new Set(snapshot.windows.map((activeWindow) => activeWindow.id));
+    const completedCloses = [...pendingWindowCloses.values()].filter(
+      (pendingClose) =>
+        pendingClose.finalizationState === 'accepted' &&
+        pendingClose.terminalErrorMessage === null &&
+        getPendingWindowCloseProgress(pendingClose, snapshot).remainingTargetTabCount === 0 &&
+        !openWindowIds.has(pendingClose.windowId),
+    );
+    const completedKeys = new Set(
+      completedCloses.map(
+        (pendingClose) => `${pendingClose.windowId}:${pendingClose.savedWindowId}`,
+      ),
+    );
+    const failedCloses = [...pendingWindowCloses.values()].filter((pendingClose) => {
+      if (completedKeys.has(`${pendingClose.windowId}:${pendingClose.savedWindowId}`)) {
+        return false;
+      }
+      const progress = getPendingWindowCloseProgress(pendingClose, snapshot);
+      return (
+        pendingClose.terminalErrorMessage !== null ||
+        (pendingClose.batchErrorMessage !== null && progress.remainingNonAnchorTabCount > 0)
+      );
+    });
+    const settledCloses = [...completedCloses, ...failedCloses];
+    if (settledCloses.length === 0) {
+      return;
+    }
+
+    settledCloses.forEach((pendingClose) =>
+      pendingWindowCloseFinalizationsRef.current.delete(getPendingWindowCloseKey(pendingClose)),
+    );
+    settledCloses.forEach((pendingClose) => clearPendingWindowCloseTimer(pendingClose.windowId));
+    const completionTimer = globalThis.setTimeout(() => {
+      const focusedCompletedClose = completedCloses.find(
+        (pendingClose) => pendingWindowCloseOwnedFocusIdRef.current === pendingClose.windowId,
+      );
+      if (
+        failedCloses.some(
+          (pendingClose) => pendingWindowCloseOwnedFocusIdRef.current === pendingClose.windowId,
+        )
+      ) {
+        pendingWindowCloseResultFocusRef.current = 'error';
+      } else if (focusedCompletedClose) {
+        pendingWindowCloseResultFocusRef.current = {
+          savedWindowId: focusedCompletedClose.savedWindowId,
+        };
+      }
+      if (
+        settledCloses.some(
+          (pendingClose) => pendingWindowCloseOwnedFocusIdRef.current === pendingClose.windowId,
+        )
+      ) {
+        pendingWindowCloseOwnedFocusIdRef.current = null;
+      }
+      setPendingWindowCloses((current) => {
+        const next = new Map(current);
+        settledCloses.forEach((pendingClose) => {
+          if (next.get(pendingClose.windowId)?.savedWindowId === pendingClose.savedWindowId) {
+            next.delete(pendingClose.windowId);
+          }
+        });
+        return next;
+      });
+      const completionNotices = completedCloses.map((pendingClose) => ({
+        message: getCompletedWindowCloseNotice(pendingClose),
+        savedWindowId: pendingClose.savedWindowId,
+        savedWindowName: pendingClose.savedWindowName,
+        windowLabel: pendingClose.windowLabel,
+      }));
+      if (completionNotices.length > 0) {
+        setWindowCloseCompletionNotices((current) => {
+          const existingIds = new Set(current.map((notice) => notice.savedWindowId));
+          const additions = completionNotices.filter(
+            (notice) => !existingIds.has(notice.savedWindowId),
+          );
+          return additions.length > 0 ? [...current, ...additions] : current;
+        });
+      }
+      const failureNotice = failedCloses
+        .map((pendingClose) =>
+          getFailedWindowCloseMessage(
+            pendingClose,
+            pendingClose.terminalErrorMessage ??
+              pendingClose.batchErrorMessage ??
+              'Your browser left part of the source window open.',
+          ),
+        )
+        .join(' ');
+      if (failureNotice) {
+        setDuplicateUndoTabs(null);
+        setOperationError((current) => appendOperationError(current, failureNotice));
+      }
+    }, 0);
+    return () => globalThis.clearTimeout(completionTimer);
+  }, [clearPendingWindowCloseTimer, pendingWindowCloses, snapshot]);
+
+  useEffect(() => {
+    const timers = pendingWindowCloseTimersRef.current;
+    const finalizations = pendingWindowCloseFinalizationsRef.current;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timers.forEach(({ delayTimer, timeoutTimer }) => {
+        globalThis.clearTimeout(delayTimer);
+        globalThis.clearTimeout(timeoutTimer);
+      });
+      pendingWindowClosesRef.current.forEach((pendingClose) =>
+        finishFastCloseWithoutPage(pendingClose.operation),
+      );
+      timers.clear();
+      finalizations.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    const getPendingWindowCloseId = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+      const closingCard = target.closest<HTMLElement>('.window-card.is-closing[data-window-id]');
+      const pendingNotice = target.closest<HTMLElement>('[data-window-close-id]');
+      const windowId = Number(
+        closingCard?.dataset.windowId ?? pendingNotice?.dataset.windowCloseId ?? Number.NaN,
+      );
+      return Number.isInteger(windowId) ? windowId : null;
+    };
+    const trackPendingWindowCloseFocus = (event: FocusEvent) => {
+      pendingWindowCloseOwnedFocusIdRef.current = getPendingWindowCloseId(event.target);
+    };
+    const trackPendingWindowClosePointer = (event: PointerEvent) => {
+      pendingWindowCloseOwnedFocusIdRef.current = getPendingWindowCloseId(event.target);
+    };
+    document.addEventListener('focusin', trackPendingWindowCloseFocus);
+    document.addEventListener('pointerdown', trackPendingWindowClosePointer);
+    return () => {
+      document.removeEventListener('focusin', trackPendingWindowCloseFocus);
+      document.removeEventListener('pointerdown', trackPendingWindowClosePointer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const focusIntent = pendingWindowCloseFocusRef.current;
+    if (focusIntent === null) {
+      return;
+    }
+    const closingStatus = document.querySelector<HTMLElement>(
+      `.window-card[data-window-id="${focusIntent.windowId}"] .window-card-closing-status`,
+    );
+    if (closingStatus) {
+      closingStatus.focus();
+      pendingWindowCloseFocusRef.current = null;
+      return;
+    }
+    if (!pendingWindowCloses.has(focusIntent.windowId)) {
+      [...document.querySelectorAll<HTMLElement>('.window-close-completion-notice')]
+        .find((notice) => notice.dataset.savedWindowId === focusIntent.savedWindowId)
+        ?.querySelector<HTMLButtonElement>('button[title="Undo Save & close"]')
+        ?.focus();
+      pendingWindowCloseFocusRef.current = null;
+    }
+  }, [pendingWindowCloses, windowCloseCompletionNotices]);
+
+  useEffect(() => {
+    const focusTarget = pendingWindowCloseResultFocusRef.current;
+    if (focusTarget === null) {
+      return;
+    }
+    const element =
+      focusTarget === 'error'
+        ? document.querySelector<HTMLElement>('.operation-error button[title="Dismiss error"]')
+        : focusTarget === 'page'
+          ? document.querySelector<HTMLElement>('.window-search input')
+          : [...document.querySelectorAll<HTMLElement>('.window-close-completion-notice')]
+              .find((notice) => notice.dataset.savedWindowId === focusTarget.savedWindowId)
+              ?.querySelector<HTMLElement>('button[title="Undo Save & close"]');
+    if (element) {
+      element.focus();
+      pendingWindowCloseResultFocusRef.current = null;
+    }
+  }, [operationError, pendingWindowCloses, windowCloseCompletionNotices]);
 
   const beginOperation = (label: string | null, resetFeedback = true) => {
     if (operationInFlightRef.current) {
@@ -671,9 +1200,11 @@ export function ActiveWindowsPage({
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [closeMergeDialog, mergeDialogOpen]);
 
-  const closeSaveWindowDialog = useCallback(() => {
+  const closeSaveWindowDialog = useCallback((restoreFocus = true) => {
     setSaveWindowId(null);
-    queueMicrotask(() => saveWindowTriggerRef.current?.focus());
+    if (restoreFocus) {
+      queueMicrotask(() => saveWindowTriggerRef.current?.focus());
+    }
   }, []);
 
   const openSaveWindowDialog = (windowId: number, trigger: HTMLButtonElement) => {
@@ -684,10 +1215,81 @@ export function ActiveWindowsPage({
   };
 
   const completeSaveWindow = (result: SaveWindowResult) => {
+    if (!mountedRef.current) {
+      if (result.sourceWindowClose) {
+        finishFastCloseWithoutPage(result.sourceWindowClose);
+      }
+      return;
+    }
     const warningText = result.warnings.length > 0 ? ` ${result.warnings.join(' ')}` : '';
+    setOperationError(null);
     setDuplicateUndoTabs(null);
-    setOperationNotice(`Saved "${result.savedWindow.name}".${warningText}`);
-    closeSaveWindowDialog();
+    if (result.sourceWindowClose && saveWindowTarget) {
+      const pendingClose: PendingWindowClose = {
+        batchErrorMessage: null,
+        delayed: false,
+        displayIndex: Math.max(
+          0,
+          snapshot?.windows.findIndex((activeWindow) => activeWindow.id === saveWindowTarget.id) ??
+            0,
+        ),
+        displayWindow: saveWindowTarget,
+        dismissed: false,
+        finalizationState: 'idle',
+        operation: result.sourceWindowClose,
+        savedWindowId: result.savedWindow.id,
+        savedWindowName: result.savedWindow.name,
+        terminalErrorMessage: null,
+        warningText,
+        windowId: saveWindowTarget.id,
+        windowLabel: saveWindowTarget.label,
+      };
+      selection.setTabs(
+        saveWindowTarget.tabs.map((tab) => tab.id),
+        false,
+      );
+      const closingGroupIds = new Set(saveWindowTarget.groups.map((group) => group.id));
+      setSelectedGroupIds((current) => {
+        const next = new Set([...current].filter((groupId) => !closingGroupIds.has(groupId)));
+        return next.size === current.size ? current : next;
+      });
+      setPendingWindowCloses((current) => {
+        const next = new Map(current);
+        next.set(pendingClose.windowId, pendingClose);
+        return next;
+      });
+      if (pendingWindowCloses.size === 0 && snapshot) {
+        setPendingWindowCloseSummaryBaseline({
+          tabCount: snapshot.totalTabs,
+          windowCount: snapshot.windows.length,
+        });
+      }
+      pendingWindowCloseFocusRef.current = {
+        savedWindowId: pendingClose.savedWindowId,
+        windowId: pendingClose.windowId,
+      };
+      setOperationNotice(null);
+      schedulePendingWindowCloseNotice(pendingClose);
+      closeSaveWindowDialog(false);
+      void result.sourceWindowClose.batchCompletion.then(async ({ errorMessage }) => {
+        await refresh();
+        if (!mountedRef.current || !errorMessage) {
+          return;
+        }
+        setPendingWindowCloses((current) => {
+          const latest = current.get(pendingClose.windowId);
+          if (latest?.savedWindowId !== pendingClose.savedWindowId) {
+            return current;
+          }
+          const next = new Map(current);
+          next.set(pendingClose.windowId, { ...latest, batchErrorMessage: errorMessage });
+          return next;
+        });
+      });
+    } else {
+      setOperationNotice(`Saved "${result.savedWindow.name}".${warningText}`);
+      closeSaveWindowDialog();
+    }
     void refresh();
   };
 
@@ -999,18 +1601,21 @@ export function ActiveWindowsPage({
   };
 
   const removeDuplicateTabs = async () => {
+    const duplicateTabIds = [...duplicateActionTabIds];
+    const duplicateCount = duplicateTabIds.length;
     if (
-      duplicateActionTabIds.length === 0 ||
+      duplicateCount === 0 ||
       settingsLoading ||
-      !beginOperation(`Removing ${pluralize(duplicateActionTabIds.length, 'duplicate')}`)
+      !beginOperation(`Removing ${pluralize(duplicateCount, 'duplicate')}`)
     ) {
       return;
     }
+    setDuplicateRemovalTabIds(duplicateTabIds);
     try {
       const result = await service.closeDuplicateTabs({
         duplicateGroups: duplicatePlan.duplicateGroups,
         rules: duplicateRules,
-        tabIds: duplicateActionTabIds,
+        tabIds: duplicateTabIds,
       });
       setTabsSelected(result.closedTabIds, false);
       setOperationError(
@@ -1027,7 +1632,7 @@ export function ActiveWindowsPage({
             : []),
           ...(result.skippedChangedTabIds.length > 0
             ? [
-                `${pluralize(result.skippedChangedTabIds.length, 'duplicate tab')} left open because ${result.skippedChangedTabIds.length === 1 ? 'it or its keeper changed or is' : 'they or their keepers changed or are'} still loading.`,
+                `${pluralize(result.skippedChangedTabIds.length, 'tab')} left open because Weaver could not safely confirm ${result.skippedChangedTabIds.length === 1 ? 'it was still a duplicate' : 'they were still duplicates'}.`,
               ]
             : []),
         ]),
@@ -1040,6 +1645,7 @@ export function ActiveWindowsPage({
     } catch {
       setOperationError('The browser could not remove duplicate tabs.');
     } finally {
+      setDuplicateRemovalTabIds(null);
       finishOperation();
     }
   };
@@ -1064,9 +1670,85 @@ export function ActiveWindowsPage({
     }
   };
 
+  const dismissWindowCloseCompletionNotice = (savedWindowId: string) => {
+    pendingWindowCloseResultFocusRef.current = 'page';
+    setWindowCloseCompletionNotices((current) =>
+      current.filter((notice) => notice.savedWindowId !== savedWindowId),
+    );
+  };
+
+  const undoCompletedSaveAndClose = async (notice: WindowCloseCompletionNotice) => {
+    if (!beginOperation(`Reopening "${notice.savedWindowName}"`)) {
+      return;
+    }
+    try {
+      const result = await savedWindowsService.restoreWindow(notice.savedWindowId);
+      await refresh();
+      if (result.restoredTabCount > 0) {
+        pendingWindowCloseResultFocusRef.current = 'page';
+        setWindowCloseCompletionNotices((current) =>
+          current.filter((candidate) => candidate.savedWindowId !== notice.savedWindowId),
+        );
+      }
+
+      const warnings = result.warnings.length > 0 ? ` ${result.warnings.join(' ')}` : '';
+      if (result.failures.length === 0 && result.savedWindowRemoved) {
+        setOperationNotice(
+          `Reopened "${notice.savedWindowName}" and removed it from Saved Windows.${warnings}`,
+        );
+        return;
+      }
+
+      const firstFailure = result.failures[0]?.message;
+      const failureDetail = firstFailure ? ` ${firstFailure}` : '';
+      if (result.restoredTabCount > 0) {
+        setOperationError(
+          result.failures.length > 0
+            ? `Reopened ${pluralize(result.restoredTabCount, 'tab')} from "${notice.savedWindowName}". ${pluralize(result.failures.length, 'tab')} could not be reopened. A recovery copy remains in Saved Windows.${failureDetail}${warnings}`
+            : `Reopened "${notice.savedWindowName}", but its saved copy remains in Saved Windows.${warnings}`,
+        );
+        return;
+      }
+
+      pendingWindowCloseResultFocusRef.current = {
+        savedWindowId: notice.savedWindowId,
+      };
+      setOperationError(
+        `The browser could not reopen "${notice.savedWindowName}". Its saved copy remains in Saved Windows.${failureDetail}${warnings}`,
+      );
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message.trim() ? ` ${error.message.trim()}` : '';
+      pendingWindowCloseResultFocusRef.current = {
+        savedWindowId: notice.savedWindowId,
+      };
+      setOperationError(
+        `The browser could not reopen "${notice.savedWindowName}". Check Saved Windows to see whether the saved copy is still available.${detail}`,
+      );
+    } finally {
+      finishOperation();
+    }
+  };
+
   const dismissOperationNotice = () => {
     setOperationNotice(null);
     setDuplicateUndoTabs(null);
+  };
+
+  const dismissPendingWindowClose = (pendingClose: PendingWindowClose) => {
+    pendingWindowCloseFocusRef.current = {
+      savedWindowId: pendingClose.savedWindowId,
+      windowId: pendingClose.windowId,
+    };
+    setPendingWindowCloses((current) => {
+      const latest = current.get(pendingClose.windowId);
+      if (!latest || latest.savedWindowId !== pendingClose.savedWindowId || latest.dismissed) {
+        return current;
+      }
+      const next = new Map(current);
+      next.set(pendingClose.windowId, { ...latest, dismissed: true });
+      return next;
+    });
   };
 
   const sortTabs = async (windowId: number | undefined, options: TabSortOptions) => {
@@ -1222,7 +1904,7 @@ export function ActiveWindowsPage({
     if (operationInFlightRef.current || tabIds.length === 0) {
       return;
     }
-    dragSessionRef.current = { groupId: payload.groupId, handled: false, tabIds };
+    dragSessionRef.current = { groupId: payload.groupId, tabIds };
     resetDragTargetState();
     dragWindowCardBoundsRef.current = captureWindowCardBounds();
     setDraggedGroupId(payload.groupId);
@@ -1323,7 +2005,6 @@ export function ActiveWindowsPage({
     if (!session) {
       return;
     }
-    session.handled = true;
     setTabDropTarget(null);
     resetDragTargetState();
     if (!beginOperation(session.groupId === null ? 'Moving tab' : 'Moving tab group')) {
@@ -1377,7 +2058,6 @@ export function ActiveWindowsPage({
       return;
     }
     const beforeWindowId = newWindowDropTargetRef.current?.beforeWindowId ?? null;
-    session.handled = true;
     setTabDropTarget(null);
     resetDragTargetState();
     void moveDraggedTabsToNewWindow(
@@ -1395,41 +2075,70 @@ export function ActiveWindowsPage({
     resetDragTargetState();
   };
 
-  const totalSummary = snapshot
-    ? `${pluralize(snapshot.windows.length, 'window')} · ${pluralize(snapshot.totalTabs, 'tab')}`
+  const displayedSnapshotTotals = snapshot
+    ? pendingWindowCloses.size > 0 && pendingWindowCloseSummaryBaseline
+      ? pendingWindowCloseSummaryBaseline
+      : { tabCount: snapshot.totalTabs, windowCount: snapshot.windows.length }
+    : null;
+  const totalSummary = displayedSnapshotTotals
+    ? `${pluralize(displayedSnapshotTotals.windowCount, 'window')} · ${pluralize(displayedSnapshotTotals.tabCount, 'tab')}`
     : 'Loading windows';
-  const compactTotalSummary = snapshot
-    ? `${snapshot.windows.length}w · ${snapshot.totalTabs}t`
+  const compactTotalSummary = displayedSnapshotTotals
+    ? `${displayedSnapshotTotals.windowCount}w · ${displayedSnapshotTotals.tabCount}t`
     : 'Loading';
+  const visiblePendingWindowClose =
+    [...pendingWindowCloses.values()]
+      .reverse()
+      .find((pendingClose) => pendingClose.delayed && !pendingClose.dismissed) ?? null;
+  const hasPendingWindowCloses = pendingWindowCloses.size > 0;
   const headerStatus = (
     <div className="active-window-header-status">
-      <span className="window-summary" aria-live="polite">
-        <span className="window-summary-full">{totalSummary}</span>
-        <span className="window-summary-compact">{compactTotalSummary}</span>
+      <span className="window-summary" role="status" aria-label={totalSummary} aria-live="polite">
+        <span className="window-summary-full" aria-hidden="true">
+          {totalSummary}
+        </span>
+        <span className="window-summary-compact" aria-hidden="true">
+          {compactTotalSummary}
+        </span>
       </span>
     </div>
   );
   const duplicateActionLabel =
     duplicatePreviewMode && hasFilter ? 'Close filtered duplicate tabs' : 'Close duplicate tabs';
+  const isRemovingDuplicates = duplicateRemovalTabIds !== null;
+  const displayedDuplicateActionCount =
+    duplicateRemovalRemainingCount ?? duplicateActionTabIds.length;
   const duplicateActionDisabled =
-    settingsLoading || duplicateActionTabIds.length === 0 || operationLabel !== null;
+    settingsLoading ||
+    duplicateActionTabIds.length === 0 ||
+    operationLabel !== null ||
+    hasPendingWindowCloses;
   const duplicatePreviewDisabled =
     settingsLoading ||
     operationLabel !== null ||
+    hasPendingWindowCloses ||
     (!duplicatePreviewMode && duplicatePlan.duplicateGroups.length === 0);
   const removeDuplicatesControl = (
     <div className="duplicate-preview-control">
       <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
         <button
-          className="toolbar-button topbar-remove-duplicates-button"
+          className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${isRemovingDuplicates ? ' is-removing-duplicates' : ''}`}
           type="button"
+          aria-label={
+            isRemovingDuplicates
+              ? 'Closing duplicate tabs'
+              : `${duplicateActionLabel}: ${pluralize(displayedDuplicateActionCount, 'tab')}`
+          }
           title={duplicateActionLabel}
           disabled={duplicateActionDisabled}
+          aria-busy={isRemovingDuplicates || undefined}
           onClick={() => void removeDuplicateTabs()}
         >
           <CopyX aria-hidden="true" size={16} />
           <span className="topbar-action-label">{duplicateActionLabel}</span>
-          <span className="toolbar-count">{duplicateActionTabIds.length}</span>
+          <span className="toolbar-count" aria-hidden={isRemovingDuplicates || undefined}>
+            {displayedDuplicateActionCount}
+          </span>
         </button>
         <button
           className="toolbar-button topbar-duplicate-preview-button"
@@ -1467,7 +2176,8 @@ export function ActiveWindowsPage({
           duplicatePreviewMode ||
           !snapshot ||
           snapshot.windows.length < 2 ||
-          operationLabel !== null
+          operationLabel !== null ||
+          hasPendingWindowCloses
         }
         onClick={() => (mergeDialogOpen ? closeMergeDialog() : openMergeDialog())}
       >
@@ -1477,7 +2187,7 @@ export function ActiveWindowsPage({
 
       {mergeDialogOpen && snapshot ? (
         <MergeWindowsDialog
-          disabled={operationLabel !== null}
+          disabled={operationLabel !== null || hasPendingWindowCloses}
           horizontalOffset={mergeDialogHorizontalOffset}
           onApply={() => void mergeWindows()}
           onClose={closeMergeDialog}
@@ -1495,7 +2205,8 @@ export function ActiveWindowsPage({
       {mergeControl}
     </div>
   );
-  const showToolbarStatus = operationLabel !== null || headerPortalTarget === undefined;
+  const showToolbarStatus =
+    (operationLabel !== null && !isRemovingDuplicates) || headerPortalTarget === undefined;
 
   return (
     <section
@@ -1507,6 +2218,11 @@ export function ActiveWindowsPage({
     >
       {headerPortalTarget ? createPortal(headerStatus, headerPortalTarget) : null}
       {actionPortalTarget ? createPortal(windowActionControls, actionPortalTarget) : null}
+      {isRemovingDuplicates ? (
+        <span className="sr-only" role="status">
+          Closing {pluralize(duplicateRemovalTabIds.length, 'duplicate tab')}
+        </span>
+      ) : null}
 
       <h2 id="active-windows-heading" className="sr-only">
         Active browser windows
@@ -1562,7 +2278,12 @@ export function ActiveWindowsPage({
             <SortCriterionMenu
               ariaLabel="Sort all windows by"
               value={sortCriterion}
-              disabled={duplicatePreviewMode || !snapshot || operationLabel !== null}
+              disabled={
+                duplicatePreviewMode ||
+                !snapshot ||
+                operationLabel !== null ||
+                hasPendingWindowCloses
+              }
               onChange={setSortCriterion}
             />
             <button
@@ -1584,7 +2305,8 @@ export function ActiveWindowsPage({
                 duplicatePreviewMode ||
                 snapshot.windows.length === 0 ||
                 settingsLoading ||
-                operationLabel !== null
+                operationLabel !== null ||
+                hasPendingWindowCloses
               }
               onClick={() => void applyGlobalSort()}
             >
@@ -1626,7 +2348,7 @@ export function ActiveWindowsPage({
             disabled={actionSelectedCount === 0 || operationLabel !== null}
             onClick={() => void closeSelectedTabs()}
           >
-            <Trash2 aria-hidden="true" size={16} />
+            <X aria-hidden="true" size={16} />
             <span>Close</span>
             <span className="toolbar-count">{actionSelectedCount}</span>
           </button>
@@ -1634,7 +2356,7 @@ export function ActiveWindowsPage({
 
         {showToolbarStatus ? (
           <div className="active-toolbar-status">
-            {operationLabel ? (
+            {operationLabel && !isRemovingDuplicates ? (
               <span className="operation-summary" role="status">
                 {operationLabel}
               </span>
@@ -1672,7 +2394,7 @@ export function ActiveWindowsPage({
       ) : null}
 
       {operationError ? (
-        <div className="inline-alert" role="alert">
+        <div className="inline-alert operation-error" role="alert">
           <AlertTriangle aria-hidden="true" size={16} />
           <span>{operationError}</span>
           <button type="button" title="Dismiss error" onClick={() => setOperationError(null)}>
@@ -1681,8 +2403,68 @@ export function ActiveWindowsPage({
         </div>
       ) : null}
 
+      {visiblePendingWindowClose ? (
+        <div
+          className="inline-notice is-window-close-pending"
+          role="status"
+          aria-atomic="true"
+          data-window-close-id={visiblePendingWindowClose.windowId}
+        >
+          <span>{getPendingWindowCloseNotice(visiblePendingWindowClose)}</span>
+          <div className="inline-notice-actions">
+            <button
+              type="button"
+              title={`Focus ${visiblePendingWindowClose.windowLabel}`}
+              onClick={() => void focusWindow(visiblePendingWindowClose.windowId)}
+            >
+              Focus window
+            </button>
+            <button
+              type="button"
+              title="Dismiss notification"
+              onClick={() => dismissPendingWindowClose(visiblePendingWindowClose)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {windowCloseCompletionNotices.map((notice) => (
+        <div
+          className="inline-notice window-close-completion-notice"
+          role="status"
+          aria-atomic="true"
+          data-saved-window-id={notice.savedWindowId}
+          key={notice.savedWindowId}
+        >
+          <span>{notice.message}</span>
+          <div className="inline-notice-actions">
+            <button
+              className="notice-undo-button"
+              type="button"
+              aria-label={`Undo Save & close for ${notice.savedWindowName} from ${notice.windowLabel}`}
+              title="Undo Save & close"
+              disabled={operationLabel !== null}
+              onClick={() => void undoCompletedSaveAndClose(notice)}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              aria-label={`Dismiss Save & close result for ${notice.savedWindowName} from ${notice.windowLabel}`}
+              title="Dismiss notification"
+              disabled={operationLabel !== null}
+              onClick={() => dismissWindowCloseCompletionNotice(notice.savedWindowId)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ))}
+
       {operationNotice ? (
-        <div className="inline-notice" role="status">
+        <div className="inline-notice operation-notice" role="status" aria-atomic="true">
           <span>{operationNotice}</span>
           <div className="inline-notice-actions">
             {duplicateUndoTabs ? (
@@ -1711,21 +2493,26 @@ export function ActiveWindowsPage({
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
                 ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs stay open while activity is ongoing or unclear.'
-                : 'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup removes tabs labeled Will close.'}
+                : 'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.'}
             </span>
           </div>
           <div className="duplicate-preview-banner-actions">
             <button
-              className="duplicate-preview-banner-action duplicate-preview-banner-close"
+              className={`duplicate-preview-banner-action duplicate-preview-banner-close duplicate-removal-button${isRemovingDuplicates ? ' is-removing-duplicates' : ''}`}
               type="button"
-              aria-label={`${duplicateActionLabel}: ${pluralize(duplicateActionTabIds.length, 'tab')}`}
+              aria-label={
+                isRemovingDuplicates
+                  ? 'Closing duplicate tabs'
+                  : `${duplicateActionLabel}: ${pluralize(displayedDuplicateActionCount, 'tab')}`
+              }
+              aria-busy={isRemovingDuplicates || undefined}
               title={duplicateActionLabel}
               disabled={duplicateActionDisabled}
               onClick={() => void removeDuplicateTabs()}
             >
               <span>{duplicateActionLabel}</span>
               <span className="toolbar-count" aria-hidden="true">
-                {duplicateActionTabIds.length}
+                {displayedDuplicateActionCount}
               </span>
             </button>
             <button
@@ -1761,7 +2548,10 @@ export function ActiveWindowsPage({
         </div>
       ) : null}
 
-      {status === 'ready' && snapshot && snapshot.windows.length === 0 ? (
+      {status === 'ready' &&
+      snapshot &&
+      snapshot.windows.length === 0 &&
+      !hasPendingWindowCloses ? (
         <EmptyState
           icon={PanelsTopLeft}
           title="No browser windows available"
@@ -1769,8 +2559,11 @@ export function ActiveWindowsPage({
         />
       ) : null}
 
-      {status === 'ready' && displayed && snapshot && snapshot.windows.length > 0 ? (
-        displayed.windows.length > 0 ? (
+      {status === 'ready' &&
+      displayed &&
+      snapshot &&
+      (snapshot.windows.length > 0 || hasPendingWindowCloses) ? (
+        windowColumns.some((column) => column.length > 0) ? (
           <div
             className="window-grid window-grid-columns"
             ref={setWindowGridElement}
@@ -1779,7 +2572,10 @@ export function ActiveWindowsPage({
             {windowColumns.map((column, columnIndex) => (
               <div className="window-grid-column" key={`window-column-${columnIndex}`}>
                 {column.map((window) => {
+                  const pendingWindowClose = pendingWindowCloses.get(window.id);
+                  const windowClosing = pendingWindowClose !== undefined;
                   const allWindowTabs =
+                    pendingWindowClose?.displayWindow.tabs ??
                     snapshot.windows.find((candidate) => candidate.id === window.id)?.tabs ??
                     window.tabs;
                   const windowSortSelection =
@@ -1818,7 +2614,8 @@ export function ActiveWindowsPage({
                       {newWindowDropTarget?.placement === 'before' ? dropZone : null}
                       <WindowCard
                         allWindowTabs={allWindowTabs}
-                        collapsed={collapsedWindowIds.has(window.id)}
+                        collapsed={windowClosing ? false : collapsedWindowIds.has(window.id)}
+                        closing={windowClosing}
                         disabled={operationLabel !== null}
                         {...(duplicatePreviewMode
                           ? {

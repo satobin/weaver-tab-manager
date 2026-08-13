@@ -133,11 +133,41 @@ describe('captureSavedWindow', () => {
         active: true,
         order: 0,
         pinned: false,
+        savedAt: '2026-07-11T06:00:00.000Z',
         title: 'https://saved.test',
         url: 'https://saved.test',
       },
     ]);
     expect(result.warnings).toHaveLength(2);
+  });
+
+  it('captures a pending navigation destination instead of the previously committed URL', () => {
+    const result = captureSavedWindow(
+      createChromeWindow({
+        tabs: [
+          createChromeTab({
+            active: true,
+            id: 11,
+            pendingUrl: 'https://next.test/document',
+            status: 'loading',
+            title: 'Previous page',
+            url: 'https://previous.test/',
+          }),
+        ],
+      }),
+      [],
+      'Loading tab',
+      'saved-loading',
+      '2026-07-11T06:00:00.000Z',
+    );
+
+    expect(result.savedWindow.tabs).toMatchObject([
+      {
+        active: true,
+        title: 'https://next.test/document',
+        url: 'https://next.test/document',
+      },
+    ]);
   });
 
   it('rejects incognito and empty captures', () => {
@@ -185,7 +215,14 @@ describe('saved window schema', () => {
         },
       ],
     });
-    expect(parseSavedWindow(savedWindow)?.tabs.map((tab) => tab.order)).toEqual([0, 1]);
+    const parsed = parseSavedWindow({
+      ...savedWindow,
+      tabs: savedWindow.tabs.map((tab) =>
+        tab.order === 0 ? { ...tab, savedAt: '2026-07-11T06:00:00.000Z' } : tab,
+      ),
+    });
+    expect(parsed?.tabs.map((tab) => tab.order)).toEqual([0, 1]);
+    expect(parsed?.tabs[0]?.savedAt).toBe('2026-07-11T06:00:00.000Z');
   });
 
   it('rejects invalid active, pin, order, group-reference, and group-contiguity states', () => {
@@ -208,6 +245,9 @@ describe('saved window schema', () => {
     ).toBeNull();
     expect(
       parseSavedWindow(createSavedWindow({ tabs: [{ ...baseTabs[0]!, groupKey: 'missing' }] })),
+    ).toBeNull();
+    expect(
+      parseSavedWindow(createSavedWindow({ tabs: [{ ...baseTabs[0]!, savedAt: 'yesterday' }] })),
     ).toBeNull();
     expect(
       parseSavedWindow(

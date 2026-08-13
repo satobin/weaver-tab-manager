@@ -245,7 +245,7 @@ describe('DedupeRuleEditor', () => {
     expect(within(preview).getByText(/Also closes: Project 99/)).toBeInTheDocument();
     expect(within(preview).getByText('Keep open')).toBeInTheDocument();
     expect(within(preview).getByText('Close 1')).toBeInTheDocument();
-    expect(within(preview).getByText(/1 match .* 1 tab would close/)).toBeInTheDocument();
+    expect(within(preview).getByText(/1 match .* 1 tab to close/)).toBeInTheDocument();
   });
 
   it('toggles each built-in preset as one setting', async () => {
@@ -332,11 +332,12 @@ describe('DedupeRuleEditor', () => {
     expect(within(notionTooltip).getByText('notion.so/PAGE_PATH')).toBeInTheDocument();
     expect(within(notionTooltip).getByText('WORKSPACE.notion.so/PAGE_PATH')).toBeInTheDocument();
     expect(within(notionTooltip).getByText('notion.com/PAGE_PATH')).toBeInTheDocument();
+    expect(within(notionTooltip).getByText('app.notion.com/PAGE_PATH')).toBeInTheDocument();
     expect(
       within(notionTooltip).getByText('Query parameters and page sections are ignored.'),
     ).toBeVisible();
     expect(notionFormats).toHaveAccessibleDescription(
-      /Supported URL formats.*notion\.so\/PAGE_PATH.*WORKSPACE\.notion\.so\/PAGE_PATH.*notion\.com\/PAGE_PATH.*Query parameters and page sections are ignored\./,
+      /Supported URL formats.*notion\.so\/PAGE_PATH.*WORKSPACE\.notion\.so\/PAGE_PATH.*notion\.com\/PAGE_PATH.*app\.notion\.com\/PAGE_PATH.*Query parameters and page sections are ignored\./,
     );
 
     await clickOnlyUser.click(screen.getByRole('heading', { name: 'Advanced duplicate matching' }));

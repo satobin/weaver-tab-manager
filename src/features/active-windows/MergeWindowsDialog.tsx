@@ -92,7 +92,9 @@ export function MergeWindowsDialog({
                 onChange={(event) => onToggleWindow(window.id, event.target.checked)}
               />
               <span className="merge-window-copy">
-                <span>{window.label}</span>
+                <span>
+                  <span className="merge-window-name">{window.label}</span>
+                </span>
                 <small title={mainTabTitle}>{mainTabTitle}</small>
               </span>
               <small>{`${window.tabs.length} ${window.tabs.length === 1 ? 'tab' : 'tabs'}`}</small>

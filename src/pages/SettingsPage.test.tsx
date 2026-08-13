@@ -30,7 +30,7 @@ function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWin
                   agentDedupeProtected: agentAssociatedTabId === 101,
                   id: 101,
                   title: 'Quarterly plan',
-                  url: 'https://docs.google.com/document/d/doc-id/edit?tab=t.0',
+                  url: 'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/edit?tab=t.0',
                 }),
               ],
             }),
@@ -46,7 +46,7 @@ function createActiveWindowsDataSource(agentAssociatedTabId?: number): ActiveWin
                   agentDedupeProtected: agentAssociatedTabId === 201,
                   id: 201,
                   title: 'Quarterly plan copy',
-                  url: 'https://docs.google.com/document/d/doc-id/preview#heading=one',
+                  url: 'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/preview#heading=one',
                   windowId: 2,
                 }),
               ],
@@ -441,12 +441,14 @@ describe('SettingsPage', () => {
 
     const preview = screen.getByRole('region', { name: 'Duplicate match preview' });
 
-    expect(within(preview).getByText('docs.google.com/document/d/doc-id')).toBeInTheDocument();
+    expect(
+      within(preview).getByText('docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf'),
+    ).toBeInTheDocument();
     expect(within(preview).getByText('Quarterly plan')).toBeInTheDocument();
     expect(within(preview).getByText(/Also closes: Quarterly plan copy/)).toBeInTheDocument();
     expect(within(preview).getByText('Keep open')).toBeInTheDocument();
     expect(within(preview).getByText('Close 1')).toBeInTheDocument();
-    expect(within(preview).getByText(/1 match .* 1 tab would close/)).toBeInTheDocument();
+    expect(within(preview).getByText(/1 match .* 1 tab to close/)).toBeInTheDocument();
   });
 
   it('shows an agent-associated duplicate as the protected keeper', async () => {
@@ -462,7 +464,7 @@ describe('SettingsPage', () => {
     await user.click(screen.getByRole('switch', { name: 'Google Docs, Sheets & Slides preset' }));
     const previewButton = screen.getByRole('button', { name: /Preview matches/ });
 
-    expect(previewButton).toHaveTextContent('1 tab would close');
+    expect(previewButton).toHaveTextContent('1 tab to close');
     await user.click(previewButton);
     const preview = screen.getByRole('region', { name: 'Duplicate match preview' });
     expect(within(preview).getByText('Quarterly plan copy')).toBeInTheDocument();

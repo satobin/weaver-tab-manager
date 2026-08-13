@@ -680,6 +680,41 @@ describe('Popup', () => {
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
   });
 
+  it('describes a changed duplicate without internal keeper or loading terminology', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    const duplicateUrl = 'https://example.test/changed';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(
+      createActiveWindowsSnapshot({
+        windows: [
+          createManagedWindow({
+            tabs: [
+              createManagedTab({ active: true, id: 101, url: duplicateUrl }),
+              createManagedTab({ id: 102, index: 1, url: duplicateUrl }),
+            ],
+          }),
+        ],
+      }),
+    );
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [],
+      closedTabs: [],
+      failures: [],
+      skippedAgentAssociatedTabIds: [],
+      skippedChangedTabIds: [102],
+      skippedPinnedTabIds: [],
+    });
+    renderPopup(service);
+
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      '1 tab left open because Weaver could not safely confirm it was still a duplicate.',
+    );
+    expect(alert).not.toHaveTextContent(/keeper|loading/i);
+  });
+
   it('keeps exact duplicate removal available when advanced matching is off', async () => {
     const service = createService();
     const duplicateUrl = 'https://example.test/same';
@@ -697,7 +732,10 @@ describe('Popup', () => {
     );
     renderPopup(service, createPopupSettingsService(false));
 
-    expect(await screen.findByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled();
+    const closeDuplicatesButton = await screen.findByRole('button', {
+      name: 'Close duplicate tabs 1',
+    });
+    await waitFor(() => expect(closeDuplicatesButton).toBeEnabled(), { timeout: 5_000 });
   });
 
   it('suspends inactive tabs and unsuspends sleeping or discarded tabs in the current window', async () => {

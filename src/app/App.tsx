@@ -78,9 +78,11 @@ function CurrentPage({
     case APP_ROUTES.savedWindows:
       return (
         <SavedWindowsPage
+          actionPortalTarget={actionPortalTarget}
           headerPortalTarget={headerPortalTarget}
           onWindowCountChange={onSavedWindowCountChange}
           service={savedWindowsService}
+          settingsService={settingsService}
         />
       );
     case APP_ROUTES.settings:

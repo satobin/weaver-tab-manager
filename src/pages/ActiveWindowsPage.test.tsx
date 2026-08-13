@@ -14,10 +14,15 @@ import { APP_LAUNCH_ROUTES, APP_ROUTES } from '../app/routes';
 import {
   PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE,
   type ActiveWindowsService,
+  type CloseDuplicateTabsResult,
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
 import { type DedupeRule } from '../features/deduplication/deduplication';
-import { type SavedWindowsService } from '../features/saved-windows/savedWindowsService';
+import {
+  type FastSourceWindowCloseOperation,
+  type SaveWindowResult,
+  type SavedWindowsService,
+} from '../features/saved-windows/savedWindowsService';
 import { DEFAULT_SETTINGS, type SettingsService } from '../features/settings/settingsService';
 import {
   createActiveWindowsSnapshot,
@@ -223,38 +228,114 @@ function createSettingsService(
   };
 }
 
+function createSaveWindowResult(
+  name: string,
+  closeSource: boolean,
+  warnings: string[] = [],
+  sourceWindowId = 1,
+): SaveWindowResult {
+  const targetTabIds = sourceWindowId === 1 ? [101, 102] : [201];
+  return {
+    savedWindow: {
+      createdAt: '2026-07-10T20:00:00.000Z',
+      groups: [],
+      id: 'saved-1',
+      name,
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Saved tab',
+          url: 'https://example.com/',
+        },
+      ],
+      updatedAt: '2026-07-10T20:00:00.000Z',
+    },
+    sourceWindowClose: closeSource
+      ? {
+          anchorTabId: targetTabIds[0] ?? 0,
+          batchCompletion: Promise.resolve({ errorMessage: null }),
+          cancelFinalization: vi.fn(),
+          finish: vi.fn(() =>
+            Promise.resolve({
+              completion: Promise.resolve({ errorMessage: null }),
+              errorMessage: null,
+              status: 'close-requested' as const,
+            }),
+          ),
+          nonAnchorTabIds: targetTabIds.slice(1),
+          targetTabIds,
+          windowId: sourceWindowId,
+        }
+      : null,
+    warnings,
+  };
+}
+
+function requireFastClose(result: SaveWindowResult): FastSourceWindowCloseOperation {
+  if (!result.sourceWindowClose) {
+    throw new Error('Expected a fast close fixture');
+  }
+  return result.sourceWindowClose;
+}
+
 function createSavedWindowsService(): SavedWindowsService {
   return {
+    deduplicateTabs: vi.fn(() => Promise.reject(new Error('Not used'))),
     deleteWindow: vi.fn(() => Promise.resolve()),
     keepWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     load: vi.fn(() => Promise.resolve([])),
+    mergeWindows: vi.fn(() => Promise.reject(new Error('Not used'))),
+    moveSelectedTabsToNewWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     openTab: vi.fn(() => Promise.reject(new Error('Not used'))),
+    removeSelectedTabs: vi.fn(() => Promise.reject(new Error('Not used'))),
     renameWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     restoreWindow: vi.fn(() => Promise.reject(new Error('Not used'))),
     saveWindow: vi.fn((sourceWindowId: number, name: string, closeSource: boolean) =>
-      Promise.resolve({
-        savedWindow: {
-          createdAt: '2026-07-10T20:00:00.000Z',
-          groups: [],
-          id: 'saved-1',
+      Promise.resolve(
+        createSaveWindowResult(
           name,
-          tabs: [
-            {
-              active: true,
-              order: 0,
-              pinned: false,
-              title: 'Saved tab',
-              url: 'https://example.com/',
-            },
-          ],
-          updatedAt: '2026-07-10T20:00:00.000Z',
-        },
-        sourceWindowClosed: closeSource,
-        warnings: sourceWindowId === 1 ? [] : ['Unexpected source'],
-      }),
+          closeSource,
+          sourceWindowId === 1 ? [] : ['Unexpected source'],
+          sourceWindowId,
+        ),
+      ),
     ),
+    sortAllWindows: vi.fn(() => Promise.resolve({ sortedWindowIds: [], undo: null })),
+    sortWindow: vi.fn(() => Promise.resolve({ sortedWindowIds: [], undo: null })),
     subscribe: vi.fn(() => () => undefined),
+    undoMutation: vi.fn(() => Promise.reject(new Error('Not used'))),
   };
+}
+
+async function renderCompletedSaveAndClose(
+  savedWindowsService: SavedWindowsService,
+  name = 'Project work',
+) {
+  const user = userEvent.setup();
+  const service = createService();
+  let currentSnapshot = await service.loadSnapshot();
+  const listeners = new Set<() => void>();
+  vi.mocked(service.loadSnapshot).mockClear();
+  vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+  service.subscribe = vi.fn((listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  });
+  render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+  await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+  const dialog = screen.getByRole('dialog', { name: 'Save window' });
+  await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), name);
+  await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+  currentSnapshot = createActiveWindowsSnapshot({
+    windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
+  });
+  act(() => listeners.forEach((listener) => listener()));
+  await screen.findByText(`Saved "${name}" and closed Window 1.`);
+  return { service, user };
 }
 
 afterEach(() => {
@@ -263,6 +344,7 @@ afterEach(() => {
     '',
     `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}`,
   );
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -352,7 +434,7 @@ describe('ActiveWindowsPage', () => {
 
     const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
     expect(duplicateBanner).toHaveTextContent(
-      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup removes tabs labeled Will close.',
+      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.',
     );
     const bannerButtons = within(duplicateBanner).getAllByRole('button');
     expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
@@ -368,7 +450,7 @@ describe('ActiveWindowsPage', () => {
     expect(keptTabRow).toHaveClass('is-duplicate-preview-keep');
     expect(closingTabRow).toHaveClass('is-duplicate-preview-close');
     expect(within(keptTabRow as HTMLElement).getByText('Keep')).toBeInTheDocument();
-    expect(within(closingTabRow as HTMLElement).getByText('Will close')).toBeInTheDocument();
+    expect(within(closingTabRow as HTMLElement).getByText('Close')).toBeInTheDocument();
     expect(
       within(keptTabRow as HTMLElement).getByRole('button', { name: 'Focus Keep this tab' }),
     ).toHaveAccessibleDescription(
@@ -377,7 +459,7 @@ describe('ActiveWindowsPage', () => {
     expect(
       within(closingTabRow as HTMLElement).getByRole('button', { name: 'Focus Close this tab' }),
     ).toHaveAccessibleDescription(
-      'Active tabs cannot be suspended. Select another tab in this window first. Will close',
+      'Active tabs cannot be suspended. Select another tab in this window first. Close',
     );
     expect(window.location.hash).toBe(APP_ROUTES.windows);
   });
@@ -452,7 +534,11 @@ describe('ActiveWindowsPage', () => {
       'is-duplicate-preview-close',
     );
 
-    await user.click(screen.getByRole('button', { name: 'Close duplicate tabs 1' }));
+    await user.click(
+      within(screen.getByRole('group', { name: 'Duplicate tab actions' })).getByRole('button', {
+        name: 'Close duplicate tabs: 1 tab',
+      }),
+    );
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [202] }),
@@ -521,13 +607,18 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
       'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs stay open while activity is ongoing or unclear.',
     );
-    expect(screen.getByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
+    const duplicateActions = screen.getByRole('group', { name: 'Duplicate tab actions' });
+    expect(
+      within(duplicateActions).getByRole('button', { name: 'Close duplicate tabs: 0 tabs' }),
+    ).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: 'Pin Pinned second copy', pressed: true }));
 
     expect(service.unpinTab).toHaveBeenCalledWith(102);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled(),
+      expect(
+        within(duplicateActions).getByRole('button', { name: 'Close duplicate tabs: 1 tab' }),
+      ).toBeEnabled(),
     );
     expect(screen.getByText('Pinned second copy').closest('li')).toHaveClass(
       'is-duplicate-preview-close',
@@ -664,7 +755,7 @@ describe('ActiveWindowsPage', () => {
     });
     render(<ActiveWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 2' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs: 2 tabs' }));
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [201, 202] }),
@@ -673,6 +764,28 @@ describe('ActiveWindowsPage', () => {
       '2 duplicate tabs left open because they are now pinned.',
     );
     expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument();
+  });
+
+  it('describes a changed duplicate match without internal keeper terminology', async () => {
+    const user = userEvent.setup();
+    const service = createDuplicateSelectionService();
+    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+      closedTabIds: [],
+      closedTabs: [],
+      failures: [],
+      skippedAgentAssociatedTabIds: [],
+      skippedChangedTabIds: [201],
+      skippedPinnedTabIds: [],
+    });
+    render(<ActiveWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs: 1 tab' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      '1 tab left open because Weaver could not safely confirm it was still a duplicate.',
+    );
+    expect(alert).not.toHaveTextContent(/keeper/i);
   });
 
   it('clears the query and selected group when the toolbar enters duplicate tabs view', async () => {
@@ -2012,6 +2125,13 @@ describe('ActiveWindowsPage', () => {
       'title',
       'Close selected tabs',
     );
+    const closeButton = screen.getByRole('button', { name: 'Close 0' });
+    const openInNewWindowButton = screen.getByRole('button', { name: 'Open in new window 0' });
+    expect(openInNewWindowButton.compareDocumentPosition(closeButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(closeButton.querySelector('.lucide-x')).toBeInTheDocument();
+    expect(closeButton.querySelector('.lucide-trash-2')).not.toBeInTheDocument();
   });
 
   it('merges selected windows in display order', async () => {
@@ -2118,32 +2238,37 @@ describe('ActiveWindowsPage', () => {
     const user = userEvent.setup();
     const service = createService();
     const duplicateUrl = 'https://example.test/same';
-    vi.mocked(service.loadSnapshot).mockResolvedValue(
-      createActiveWindowsSnapshot({
-        windows: [
-          createManagedWindow({
-            tabs: [
-              createManagedTab({ id: 101, url: duplicateUrl, windowId: 1 }),
-              createManagedTab({
-                active: true,
-                id: 102,
-                index: 1,
-                url: duplicateUrl,
-                windowId: 1,
-              }),
-            ],
-          }),
-          createManagedWindow({
-            focused: false,
-            id: 2,
-            isCurrent: false,
-            label: 'Window 2',
-            tabs: [createManagedTab({ id: 201, url: duplicateUrl, windowId: 2 })],
-          }),
-        ],
-      }),
-    );
-    vi.mocked(service.closeDuplicateTabs).mockResolvedValue({
+    let resolveDuplicateClose: ((result: CloseDuplicateTabsResult) => void) | null = null;
+    let currentSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          tabs: [
+            createManagedTab({ id: 101, url: duplicateUrl, windowId: 1 }),
+            createManagedTab({
+              active: true,
+              id: 102,
+              index: 1,
+              url: duplicateUrl,
+              windowId: 1,
+            }),
+          ],
+        }),
+        createManagedWindow({
+          focused: false,
+          id: 2,
+          isCurrent: false,
+          label: 'Window 2',
+          tabs: [createManagedTab({ id: 201, url: duplicateUrl, windowId: 2 })],
+        }),
+      ],
+    });
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const duplicateCloseResult: CloseDuplicateTabsResult = {
       closedTabIds: [101, 201],
       closedTabs: [
         {
@@ -2169,17 +2294,90 @@ describe('ActiveWindowsPage', () => {
       skippedAgentAssociatedTabIds: [],
       skippedChangedTabIds: [],
       skippedPinnedTabIds: [],
-    });
+    };
+    vi.mocked(service.closeDuplicateTabs).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDuplicateClose = resolve;
+        }),
+    );
     render(<ActiveWindowsPage service={service} />);
 
-    const removeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 2' });
+    const removeButton = await screen.findByRole('button', {
+      name: 'Close duplicate tabs: 2 tabs',
+    });
     await waitFor(() => expect(removeButton).toBeEnabled());
     await user.click(removeButton);
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [101, 201] }),
     );
+    expect(screen.queryByText('Removing 2 duplicates')).not.toBeInTheDocument();
+    expect(screen.getByText('Closing 2 duplicate tabs')).toHaveClass('sr-only');
+    expect(removeButton).toBeDisabled();
+    expect(removeButton).toHaveAccessibleName('Closing duplicate tabs');
+    expect(removeButton).toHaveAttribute('aria-busy', 'true');
+    expect(removeButton).toHaveClass('is-removing-duplicates');
+    expect(within(removeButton).getByText('2')).toHaveClass('toolbar-count');
+    expect(screen.getByRole('button', { name: 'Show duplicate tabs only' })).toBeDisabled();
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) => {
+        const tabs = activeWindow.tabs.filter((tab) => tab.id !== 101);
+        return {
+          ...activeWindow,
+          tabs:
+            activeWindow.id === 2
+              ? [
+                  ...tabs,
+                  createManagedTab({
+                    id: 301,
+                    index: 1,
+                    url: duplicateUrl,
+                    windowId: 2,
+                  }),
+                ]
+              : tabs,
+        };
+      }),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    const updatedRemoveButton = await screen.findByRole('button', {
+      name: 'Closing duplicate tabs',
+    });
+    expect(updatedRemoveButton).toBe(removeButton);
+    expect(updatedRemoveButton).toHaveAttribute('aria-busy', 'true');
+    expect(updatedRemoveButton).toHaveClass('is-removing-duplicates');
+    await waitFor(() =>
+      expect(within(updatedRemoveButton).getByText('1')).toHaveClass('toolbar-count'),
+    );
+    expect(screen.getByText('Closing 2 duplicate tabs')).toHaveClass('sr-only');
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) => ({
+        ...activeWindow,
+        tabs: activeWindow.tabs.filter((tab) => tab.id !== 201),
+      })),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(within(removeButton).getByText('0')).toHaveClass('toolbar-count'));
+    expect(removeButton).toHaveAccessibleName('Closing duplicate tabs');
+    expect(removeButton).toHaveAttribute('aria-busy', 'true');
+    expect(removeButton).toHaveClass('is-removing-duplicates');
+    expect(screen.queryByText('Closing 1 duplicate tab')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveDuplicateClose?.(duplicateCloseResult);
+      await Promise.resolve();
+    });
+
     expect(await screen.findByText('2 duplicate tabs removed.')).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Close duplicate tabs: 1 tab' });
+    expect(removeButton).toBeEnabled();
+    expect(removeButton).not.toHaveAttribute('aria-busy');
+    expect(removeButton).not.toHaveClass('is-removing-duplicates');
     const undoButton = screen.getByRole('button', { name: 'Undo' });
     expect(undoButton).toHaveAttribute('title', 'Restore closed duplicate tabs');
     await user.click(undoButton);
@@ -2305,7 +2503,7 @@ describe('ActiveWindowsPage', () => {
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
     expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup removes tabs labeled Will close.',
+      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.',
     );
     expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
     expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(
@@ -2431,8 +2629,10 @@ describe('ActiveWindowsPage', () => {
     );
     expect(screen.queryByText('Other keeper')).not.toBeInTheDocument();
     expect(screen.queryByText('Other mirrored copy')).not.toBeInTheDocument();
-    const closeButton = screen.getByRole('button', {
-      name: 'Close filtered duplicate tabs 1',
+    const closeButton = within(
+      screen.getByRole('group', { name: 'Duplicate tab actions' }),
+    ).getByRole('button', {
+      name: 'Close filtered duplicate tabs: 1 tab',
     });
     expect(closeButton).toHaveAttribute('title', 'Close filtered duplicate tabs');
     expect(
@@ -2482,8 +2682,10 @@ describe('ActiveWindowsPage', () => {
     expect(
       within(emptyState as HTMLElement).getByRole('button', { name: 'Clear filter' }),
     ).toHaveAttribute('title', 'Clear tab filter');
-    const closeButton = screen.getByRole('button', {
-      name: 'Close filtered duplicate tabs 0',
+    const closeButton = within(
+      screen.getByRole('group', { name: 'Duplicate tab actions' }),
+    ).getByRole('button', {
+      name: 'Close filtered duplicate tabs: 0 tabs',
     });
     expect(closeButton).toBeDisabled();
     const bannerCloseButton = within(
@@ -2499,7 +2701,11 @@ describe('ActiveWindowsPage', () => {
     expect(search).toHaveValue('');
     expect(await screen.findByText('Keep this tab')).toBeInTheDocument();
     expect(screen.getByText('Close this tab')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled();
+    expect(
+      within(screen.getByRole('group', { name: 'Duplicate tab actions' })).getByRole('button', {
+        name: 'Close duplicate tabs: 1 tab',
+      }),
+    ).toBeEnabled();
   });
 
   it('reports a genuinely empty duplicate plan without calling it a filter miss', async () => {
@@ -2641,7 +2847,9 @@ describe('ActiveWindowsPage', () => {
     ]);
     render(<ActiveWindowsPage service={service} settingsService={settingsService} />);
 
-    const removeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 1' });
+    const removeButton = await screen.findByRole('button', {
+      name: 'Close duplicate tabs: 1 tab',
+    });
     await user.click(removeButton);
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
@@ -2667,7 +2875,10 @@ describe('ActiveWindowsPage', () => {
     const settingsService = createSettingsService(DEFAULT_SETTINGS.deduplicationRules, true, false);
     render(<ActiveWindowsPage service={service} settingsService={settingsService} />);
 
-    expect(await screen.findByRole('button', { name: 'Close duplicate tabs 1' })).toBeEnabled();
+    const closeDuplicatesButton = await screen.findByRole('button', {
+      name: 'Close duplicate tabs: 1 tab',
+    });
+    await waitFor(() => expect(closeDuplicatesButton).toBeEnabled(), { timeout: 5_000 });
   });
 
   it('deduplicates different Notion views after the preset is enabled', async () => {
@@ -2681,7 +2892,7 @@ describe('ActiveWindowsPage', () => {
               createManagedTab({
                 active: true,
                 id: 101,
-                url: 'https://notion.com/p/acme/Project-Plan-3098e50b62b080f9a0a7f74cb093713f',
+                url: 'https://notion.com/p/acme/Project-Plan-00000000000000000000000000000000',
               }),
             ],
           }),
@@ -2693,13 +2904,13 @@ describe('ActiveWindowsPage', () => {
             tabs: [
               createManagedTab({
                 id: 201,
-                url: 'https://notion.com/p/acme/Project-Plan-3098e50b62b080f9a0a7f74cb093713f?showMoveTo=true#block-one',
+                url: 'https://notion.com/p/acme/Project-Plan-00000000000000000000000000000000?showMoveTo=true#block-one',
                 windowId: 2,
               }),
               createManagedTab({
                 id: 202,
                 index: 1,
-                url: 'https://notion.com/p/acme/Project-Plan-3098e50b62b080f9a0a7f74cb093713f?saveParent=true#block-two',
+                url: 'https://notion.com/p/acme/Project-Plan-00000000000000000000000000000000?saveParent=true#block-two',
                 windowId: 2,
               }),
             ],
@@ -2726,7 +2937,7 @@ describe('ActiveWindowsPage', () => {
       />,
     );
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 2' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs: 2 tabs' }));
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [201, 202] }),
@@ -3243,6 +3454,1171 @@ describe('ActiveWindowsPage', () => {
     expect(screen.queryByRole('dialog', { name: 'Save window' })).not.toBeInTheDocument();
     expect(screen.getByText('Saved "Project work".')).toBeInTheDocument();
     expect(saveTrigger).toHaveFocus();
+  });
+
+  it('keeps a saved window in closing state until it disappears from the live snapshot', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const finish = vi.mocked(requireFastClose(result).finish);
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    const selectClosingWindow = await screen.findByRole('checkbox', {
+      name: 'Select all visible tabs in Window 1',
+    });
+    await user.click(selectClosingWindow);
+    const sourceCard = selectClosingWindow.closest('article');
+    await user.click(
+      within(sourceCard as HTMLElement).getByRole('button', { name: 'Collapse Window 1' }),
+    );
+    expect(sourceCard).toHaveClass('is-collapsed');
+    await user.click(screen.getByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Save window' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Saved "Project work"\. .*closing Window 1/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(closingCard).toHaveClass('is-closing');
+    expect(closingCard).toHaveAttribute('aria-busy', 'true');
+    const closingStatus = within(closingCard as HTMLElement)
+      .getByText('Closing…')
+      .closest<HTMLElement>('.window-card-closing-status');
+    expect(closingStatus).toBeVisible();
+    expect(closingStatus).toHaveAttribute('role', 'status');
+    expect(closingStatus).toHaveAttribute('aria-live', 'polite');
+    expect(closingStatus).toHaveAttribute('aria-atomic', 'true');
+    expect(closingStatus).toHaveAccessibleName('Window 1, 2 tabs, closing');
+    await waitFor(() => expect(closingStatus).toHaveFocus());
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    const closingList = closingCard?.querySelector('.tab-list');
+    expect(closingList).toHaveClass('is-closing-snapshot');
+    expect(closingList).not.toHaveAttribute('hidden');
+    expect(closingCard).not.toHaveClass('is-collapsed');
+    expect(closingList).toHaveAttribute('inert');
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(closingCard as HTMLElement).getByText('Quarterly plan')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByRole('button', { name: 'Focus Quarterly plan' }),
+    ).toBeDisabled();
+    expect(closingCard?.querySelector('[draggable="true"]')).toBeNull();
+    expect(
+      within(closingCard as HTMLElement).queryByText('This window has no available tabs.'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).queryByRole('checkbox', {
+        name: 'Select all visible tabs in Window 1',
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).queryByRole('button', { name: 'Collapse Window 1' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).queryByRole('button', { name: 'Save Window 1' }),
+    ).not.toBeInTheDocument();
+    expect(selectClosingWindow).not.toBeInTheDocument();
+    expect(screen.getByTitle('Sort all A to Z')).toBeDisabled();
+    expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
+
+    act(() => listeners.forEach((listener) => listener()));
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? {
+              ...activeWindow,
+              tabs: activeWindow.tabs.filter((tab) => tab.id === 101),
+            }
+          : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(closingStatus).toHaveFocus();
+    expect(closingCard?.querySelector('.tab-list')).toBe(closingList);
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
+    expect(screen.queryByText(/1\/2/)).not.toBeInTheDocument();
+    expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1 ? { ...activeWindow, tabs: [] } : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(5));
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(
+      within(closingCard as HTMLElement).queryByText('This window has no available tabs.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    expect(
+      await screen.findByText('Saved "Project work" and closed Window 1.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 tabs? remain(?:s)? open/i)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: 'Undo Save & close for Project work from Window 1',
+        }),
+      ).toHaveFocus(),
+    );
+    expect(screen.queryByRole('button', { name: 'Focus Quarterly plan' })).not.toBeInTheDocument();
+    expect(screen.getByText('1 window · 1 tab')).toBeInTheDocument();
+  });
+
+  it('keeps duplicate preview unavailable while a saved window is closing', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(
+      createSaveWindowResult('Project work', true),
+    );
+    render(
+      <ActiveWindowsPage
+        savedWindowsService={savedWindowsService}
+        service={createDuplicateSelectionService()}
+      />,
+    );
+
+    const previewButton = await screen.findByRole('button', {
+      name: 'Show duplicate tabs only',
+    });
+    await waitFor(() => expect(previewButton).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(previewButton).toBeDisabled();
+    expect(screen.getByText('Closing…')).toBeInTheDocument();
+  });
+
+  it('undoes a completed Save & close by reopening and consuming the saved window', async () => {
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.restoreWindow).mockResolvedValue({
+      destinationWindowId: 9,
+      failures: [],
+      restoredTabCount: 2,
+      savedWindowRemoved: true,
+      warnings: [],
+    });
+    const { user } = await renderCompletedSaveAndClose(savedWindowsService);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    );
+
+    expect(savedWindowsService.restoreWindow).toHaveBeenCalledTimes(1);
+    expect(savedWindowsService.restoreWindow).toHaveBeenCalledWith('saved-1');
+    expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('Reopened "Project work" and removed it from Saved Windows.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps failed Undo tabs in Saved Windows without offering a duplicate restore', async () => {
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.restoreWindow).mockResolvedValue({
+      destinationWindowId: 9,
+      failures: [
+        {
+          message: 'This URL is blocked.',
+          order: 1,
+          title: 'Issue tracker',
+          url: 'https://issues.example.net/WEAVER-42',
+        },
+      ],
+      restoredTabCount: 1,
+      savedWindowRemoved: false,
+      warnings: [],
+    });
+    const { user } = await renderCompletedSaveAndClose(savedWindowsService);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Reopened 1 tab from "Project work". 1 tab could not be reopened. A recovery copy remains in Saved Windows. This URL is blocked.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    ).not.toBeInTheDocument();
+    expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
+  });
+
+  it('keeps Undo retryable when the saved window cannot be reopened', async () => {
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.restoreWindow).mockRejectedValue(
+      new Error('Restore unavailable.'),
+    );
+    const { user } = await renderCompletedSaveAndClose(savedWindowsService);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'The browser could not reopen "Project work". Check Saved Windows to see whether the saved copy is still available. Restore unavailable.',
+      ),
+    ).toBeInTheDocument();
+    const retryUndo = screen.getByRole('button', {
+      name: 'Undo Save & close for Project work from Window 1',
+    });
+    expect(retryUndo).toBeEnabled();
+    expect(retryUndo).toHaveFocus();
+    expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
+  });
+
+  it('keeps Undo retryable when no saved tabs could be reopened', async () => {
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.restoreWindow).mockResolvedValue({
+      destinationWindowId: 9,
+      failures: [
+        {
+          message: 'This URL is blocked.',
+          order: 0,
+          title: 'Quarterly plan',
+          url: 'https://docs.example.com/quarterly-plan',
+        },
+      ],
+      restoredTabCount: 0,
+      savedWindowRemoved: false,
+      warnings: [],
+    });
+    const { user } = await renderCompletedSaveAndClose(savedWindowsService);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'The browser could not reopen "Project work". Its saved copy remains in Saved Windows. This URL is blocked.',
+      ),
+    ).toBeInTheDocument();
+    const retryUndo = screen.getByRole('button', {
+      name: 'Undo Save & close for Project work from Window 1',
+    });
+    expect(retryUndo).toBeEnabled();
+    expect(retryUndo).toHaveFocus();
+    expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
+  });
+
+  it('does not offer Undo twice when reopening succeeds but saved-copy removal fails', async () => {
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.restoreWindow).mockResolvedValue({
+      destinationWindowId: 9,
+      failures: [],
+      restoredTabCount: 2,
+      savedWindowRemoved: false,
+      warnings: ['The restored window opened, but its saved copy could not be removed.'],
+    });
+    const { user } = await renderCompletedSaveAndClose(savedWindowsService);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Reopened "Project work", but its saved copy remains in Saved Windows. The restored window opened, but its saved copy could not be removed.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    ).not.toBeInTheDocument();
+    expect(savedWindowsService.deleteWindow).not.toHaveBeenCalled();
+  });
+
+  it('keeps the compact closing state visible when the matching filtered tab closes', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const finish = vi.mocked(requireFastClose(result).finish);
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    const filter = await screen.findByRole('searchbox', {
+      name: 'Filter tabs by title or URL',
+    });
+    await user.type(filter, 'Issue tracker');
+    await user.click(screen.getByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? { ...activeWindow, tabs: activeWindow.tabs.filter((tab) => tab.id === 101) }
+          : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(closingCard).toHaveClass('is-closing');
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(closingCard as HTMLElement).getByText('Quarterly plan')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
+    expect(screen.queryByText('No matching tabs')).not.toBeInTheDocument();
+  });
+
+  it('keeps the closing state until deferred final verification accepts completion', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    let resolveFinish:
+      | ((value: { completion: null; errorMessage: null; status: 'targets-closed' }) => void)
+      | undefined;
+    const finish = vi.fn(
+      () =>
+        new Promise<{
+          completion: null;
+          errorMessage: null;
+          status: 'targets-closed';
+        }>((resolve) => {
+          resolveFinish = resolve;
+        }),
+    );
+    result.sourceWindowClose = { ...sourceWindowClose, finish };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(closingCard).toHaveClass('is-closing');
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(screen.queryByText('No browser windows available')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveFinish?.({ completion: null, errorMessage: null, status: 'targets-closed' });
+      await Promise.resolve();
+    });
+
+    expect(
+      await screen.findByText('Saved "Project work" and closed Window 1.'),
+    ).toBeInTheDocument();
+  });
+
+  it('restores a changed source window after its compact closing state fails', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    const finish = vi.fn(() =>
+      Promise.resolve({
+        completion: null,
+        errorMessage:
+          'The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+        status: 'partial' as const,
+      }),
+    );
+    result.sourceWindowClose = { ...sourceWindowClose, finish };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(closingCard).toHaveClass('is-closing');
+    expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(closingCard as HTMLElement).getByText('Quarterly plan')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(closingCard as HTMLElement)
+          .getByText('Closing…')
+          .closest('.window-card-closing-status'),
+      ).toHaveFocus(),
+    );
+
+    const sourceWindow = currentSnapshot.windows.find((activeWindow) => activeWindow.id === 1);
+    if (!sourceWindow) {
+      throw new Error('Missing source window fixture');
+    }
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? {
+              ...activeWindow,
+              tabs: [
+                sourceWindow.tabs[0] as (typeof sourceWindow.tabs)[number],
+                createManagedTab({
+                  id: 103,
+                  index: 1,
+                  title: 'New work',
+                  url: 'https://new.example.com/',
+                  windowId: 1,
+                }),
+                createManagedTab({
+                  id: 104,
+                  index: 2,
+                  title: 'More new work',
+                  url: 'https://more.example.com/',
+                  windowId: 1,
+                }),
+              ],
+            }
+          : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        'Saved "Project work", but Window 1 did not finish closing. The source window gained or replaced a tab while it was closing, so Weaver left the remaining tabs open.',
+      ),
+    ).toBeInTheDocument();
+    const restoredCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(restoredCard).not.toHaveClass('is-closing');
+    expect(restoredCard).not.toHaveAttribute('aria-busy');
+    expect(restoredCard?.querySelector('.tab-list')).not.toBeNull();
+    expect(within(restoredCard as HTMLElement).getByText('3 tabs')).toBeInTheDocument();
+    expect(within(restoredCard as HTMLElement).queryByText('Closing…')).not.toBeInTheDocument();
+    expect(
+      within(restoredCard as HTMLElement).getByRole('button', { name: 'Save Window 1' }),
+    ).toBeEnabled();
+    expect(
+      within(restoredCard as HTMLElement).getByRole('button', { name: 'Focus New work' }),
+    ).toBeEnabled();
+    expect(
+      within(restoredCard as HTMLElement).getByRole('button', { name: 'Focus More new work' }),
+    ).toBeEnabled();
+    expect(screen.getByText('2 windows · 4 tabs')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTitle('Dismiss error')).toHaveFocus());
+  });
+
+  it('reconciles a rejected fast-close batch and unlocks the source card', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    const finish = vi.mocked(sourceWindowClose.finish);
+    result.sourceWindowClose = {
+      ...sourceWindowClose,
+      batchCompletion: Promise.resolve({ errorMessage: 'Tab is being dragged' }),
+    };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(
+      <ActiveWindowsPage savedWindowsService={savedWindowsService} service={createService()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(
+      await screen.findByText(
+        'Saved "Project work", but Window 1 did not finish closing. Tab is being dragged',
+      ),
+    ).toBeInTheDocument();
+    expect(finish).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled();
+  });
+
+  it('does not count a target tab moved to another window as closed', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const finish = vi.mocked(requireFastClose(result).finish);
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    const movedTab = currentSnapshot.windows
+      .find((activeWindow) => activeWindow.id === 1)
+      ?.tabs.find((tab) => tab.id === 102);
+    if (!movedTab) {
+      throw new Error('Missing moved tab fixture');
+    }
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? { ...activeWindow, tabs: activeWindow.tabs.filter((tab) => tab.id !== 102) }
+          : activeWindow.id === 2
+            ? {
+                ...activeWindow,
+                tabs: [
+                  ...activeWindow.tabs,
+                  { ...movedTab, index: activeWindow.tabs.length, windowId: 2 },
+                ],
+              }
+            : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
+    expect(finish).not.toHaveBeenCalled();
+  });
+
+  it('verifies a target that disappears from normal-window snapshots before reporting success', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    const finish = vi.fn(() =>
+      Promise.resolve({
+        completion: null,
+        errorMessage: 'A saved tab moved to another browser window, so Weaver left it open.',
+        status: 'partial' as const,
+      }),
+    );
+    result.sourceWindowClose = { ...sourceWindowClose, finish };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? { ...activeWindow, tabs: activeWindow.tabs.filter((tab) => tab.id !== 102) }
+          : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        'Saved "Project work", but Window 1 did not finish closing. A saved tab moved to another browser window, so Weaver left it open.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Saved "Project work" and closed Window 1.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled();
+  });
+
+  it('reports every source window when multiple saved windows finish closing together', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    });
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.saveWindow).mockImplementation(
+      (sourceWindowId, name, closeSource) => {
+        const result = createSaveWindowResult(name, closeSource, [], sourceWindowId);
+        return Promise.resolve({
+          ...result,
+          savedWindow: { ...result.savedWindow, id: `saved-${sourceWindowId}` },
+        });
+      },
+    );
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    const saveAndClose = async (windowLabel: string, name: string) => {
+      await user.click(screen.getByRole('button', { name: `Save ${windowLabel}` }));
+      const dialog = screen.getByRole('dialog', { name: 'Save window' });
+      await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), name);
+      await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+    };
+
+    await screen.findByRole('button', { name: 'Save Window 1' });
+    await saveAndClose('Window 1', 'First project');
+    await saveAndClose('Window 2', 'Second project');
+    const firstClosingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    const secondClosingCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
+    expect(within(firstClosingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(within(firstClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(firstClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    expect(within(secondClosingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    expect(within(secondClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(secondClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(1);
+
+    const remainingWindow = currentSnapshot.windows.find((activeWindow) => activeWindow.id === 2);
+    if (!remainingWindow) {
+      throw new Error('Missing second window fixture');
+    }
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: [{ ...remainingWindow, label: 'Window 1' }],
+    });
+    act(() => listeners.forEach((listener) => listener()));
+
+    expect(
+      await screen.findByText('Saved "First project" and closed Window 1.'),
+    ).toBeInTheDocument();
+    const remainingClosingCard = screen
+      .getByRole('heading', { name: 'Window 2' })
+      .closest('article');
+    expect(remainingClosingCard).toHaveClass('is-closing');
+    expect(remainingClosingCard).toHaveAttribute('aria-busy', 'true');
+    expect(within(remainingClosingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    expect(within(remainingClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(remainingClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(1);
+    expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
+
+    currentSnapshot = createActiveWindowsSnapshot({ windows: [] });
+    act(() => listeners.forEach((listener) => listener()));
+
+    expect(
+      await screen.findByText('Saved "Second project" and closed Window 2.'),
+    ).toBeInTheDocument();
+    const firstCompletion = screen
+      .getByText('Saved "First project" and closed Window 1.')
+      .closest<HTMLElement>('.window-close-completion-notice');
+    expect(firstCompletion).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Undo Save & close for/ })).toHaveLength(2);
+    expect(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for First project from Window 1',
+      }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Dismiss Save & close result for Second project from Window 2',
+      }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Second project from Window 2',
+      }),
+    ).toHaveFocus();
+
+    await user.click(
+      within(firstCompletion as HTMLElement).getByRole('button', {
+        name: 'Dismiss Save & close result for First project from Window 1',
+      }),
+    );
+
+    expect(
+      screen.queryByText('Saved "First project" and closed Window 1.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Saved "Second project" and closed Window 2.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Second project from Window 2',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('explains a slow browser close and offers to focus the source window', async () => {
+    const service = createService();
+    let currentSnapshot = await service.loadSnapshot();
+    const listeners = new Set<() => void>();
+    vi.mocked(service.loadSnapshot).mockClear();
+    vi.mocked(service.loadSnapshot).mockImplementation(() => Promise.resolve(currentSnapshot));
+    service.subscribe = vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    const savedWindowsService = createSavedWindowsService();
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Project work' },
+    });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.queryByText(/Saved "Project work"\. .*closing Window 1/i),
+    ).not.toBeInTheDocument();
+    const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
+    expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
+    act(() => {
+      vi.advanceTimersByTime(2_999);
+    });
+    expect(screen.queryByRole('button', { name: 'Focus window' })).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    const delayedNotice = screen.getByText(
+      'Saved "Project work". Still closing Window 1. A page may need extra time or confirmation.',
+    );
+    expect(delayedNotice).toBeInTheDocument();
+    const closingStatus = within(closingCard as HTMLElement)
+      .getByText('Closing…')
+      .closest<HTMLElement>('.window-card-closing-status');
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.map((activeWindow) =>
+        activeWindow.id === 1
+          ? { ...activeWindow, tabs: activeWindow.tabs.filter((tab) => tab.id === 101) }
+          : activeWindow,
+      ),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(delayedNotice).toBeInTheDocument();
+    expect(screen.queryByText(/1\/2|1 of 2/)).not.toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(closingStatus).toHaveFocus();
+    const focusWindowButton = screen.getByRole('button', { name: 'Focus window' });
+    expect(focusWindowButton).toHaveAttribute('title', 'Focus Window 1');
+    await act(async () => {
+      fireEvent.click(focusWindowButton);
+      await Promise.resolve();
+    });
+    expect(service.focusWindow).toHaveBeenCalledWith(1);
+
+    const dismissButton = screen.getByRole('button', { name: 'Dismiss' });
+    dismissButton.focus();
+    fireEvent.click(dismissButton);
+    await act(async () => Promise.resolve());
+    expect(dismissButton).not.toBeInTheDocument();
+    expect(closingStatus).toHaveFocus();
+
+    currentSnapshot = createActiveWindowsSnapshot({
+      windows: currentSnapshot.windows.filter((activeWindow) => activeWindow.id !== 1),
+    });
+    act(() => listeners.forEach((listener) => listener()));
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Saved "Project work" and closed Window 1.')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Undo Save & close for Project work from Window 1',
+      }),
+    ).toHaveFocus();
+  });
+
+  it('finishes a fast close after navigating away from Active Windows', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    let resolveBatch: ((value: { errorMessage: string | null }) => void) | undefined;
+    const batchCompletion = new Promise<{ errorMessage: string | null }>((resolve) => {
+      resolveBatch = resolve;
+    });
+    const finish = vi.fn(() =>
+      Promise.resolve({
+        completion: Promise.resolve({ errorMessage: null }),
+        errorMessage: null,
+        status: 'close-requested' as const,
+      }),
+    );
+    result.sourceWindowClose = { ...sourceWindowClose, batchCompletion, finish };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    const { unmount } = render(
+      <ActiveWindowsPage savedWindowsService={savedWindowsService} service={createService()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(finish).not.toHaveBeenCalled();
+    unmount();
+    await act(async () => {
+      resolveBatch?.({ errorMessage: null });
+      await batchCompletion;
+      await Promise.resolve();
+    });
+
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes a fast close when saving resolves after Active Windows unmounts', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const finish = vi.mocked(requireFastClose(result).finish);
+    let resolveSave: ((value: SaveWindowResult) => void) | undefined;
+    const savePromise = new Promise<SaveWindowResult>((resolve) => {
+      resolveSave = resolve;
+    });
+    vi.mocked(savedWindowsService.saveWindow).mockReturnValue(savePromise);
+    const { unmount } = render(
+      <ActiveWindowsPage savedWindowsService={savedWindowsService} service={createService()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(savedWindowsService.saveWindow).toHaveBeenCalledTimes(1);
+    expect(finish).not.toHaveBeenCalled();
+    unmount();
+    await act(async () => {
+      resolveSave?.(result);
+      await savePromise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(finish).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses browser-neutral recovery copy when saved tabs remain at the timeout', async () => {
+    const service = createService();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Project work', true);
+    const sourceWindowClose = requireFastClose(result);
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Project work' },
+    });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(sourceWindowClose.finish).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(sourceWindowClose.cancelFinalization).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(
+        'Saved "Project work", but your browser did not finish closing all saved tabs from Window 1. Weaver stopped before closing the final tab. Focus the window to check for a confirmation.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled();
+  });
+
+  it('unlocks the card when the accepted final-tab close is still pending at the timeout', async () => {
+    const service = createService();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Solo work', true, [], 2);
+    const sourceWindowClose = requireFastClose(result);
+    const neverSettles = new Promise<{ errorMessage: string | null }>(() => undefined);
+    const finish = vi.fn(() =>
+      Promise.resolve({
+        completion: neverSettles,
+        errorMessage: null,
+        status: 'close-requested' as const,
+      }),
+    );
+    const cancelFinalization = vi.fn();
+    result.sourceWindowClose = {
+      ...sourceWindowClose,
+      cancelFinalization,
+      finish,
+    };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Window 2' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Solo work' },
+    });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(finish).toHaveBeenCalledTimes(1);
+    const closingCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
+    expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
+    expect(within(closingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(cancelFinalization).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(
+        'Saved "Solo work", but your browser is still waiting to close the final tab in Window 2. Weaver unlocked the window; closing may still finish after you respond to a page confirmation.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 2' })).toBeEnabled();
+  });
+
+  it('stops an in-flight final verification without claiming the browser may still close the tab', async () => {
+    const service = createService();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Solo work', true, [], 2);
+    const sourceWindowClose = requireFastClose(result);
+    let resolveFinish:
+      | ((value: { completion: null; errorMessage: string; status: 'partial' }) => void)
+      | undefined;
+    const finishPending = new Promise<{
+      completion: null;
+      errorMessage: string;
+      status: 'partial';
+    }>((resolve) => {
+      resolveFinish = resolve;
+    });
+    const finish = vi.fn(() => finishPending);
+    const cancelFinalization = vi.fn();
+    result.sourceWindowClose = {
+      ...sourceWindowClose,
+      cancelFinalization,
+      finish,
+    };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Window 2' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Solo work' },
+    });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(finish).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(cancelFinalization).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(
+        'Saved "Solo work", but Weaver could not finish verifying the final tab in Window 2. Weaver stopped automatic closing and unlocked the window.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/closing may still finish after you respond/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 2' })).toBeEnabled();
+
+    await act(async () => {
+      resolveFinish?.({
+        completion: null,
+        errorMessage: 'Automatic final-tab closing stopped after the operation timed out.',
+        status: 'partial',
+      });
+      await Promise.resolve();
+    });
+  });
+
+  it('reports a rejected final-tab close request instead of leaving the card busy', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Solo work', true, [], 2);
+    const sourceWindowClose = requireFastClose(result);
+    result.sourceWindowClose = {
+      ...sourceWindowClose,
+      finish: vi.fn(() =>
+        Promise.resolve({
+          completion: Promise.resolve({ errorMessage: 'The page canceled closing' }),
+          errorMessage: null,
+          status: 'close-requested' as const,
+        }),
+      ),
+    };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(
+      <ActiveWindowsPage savedWindowsService={savedWindowsService} service={createService()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 2' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Solo work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(
+      await screen.findByText(
+        'Saved "Solo work", but Window 2 did not finish closing. The final saved tab could not be closed: The page canceled closing',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 2' })).toBeEnabled();
+  });
+
+  it('keeps the whole source card usable when fast-close preflight cannot verify every tab', async () => {
+    const user = userEvent.setup();
+    const savedWindowsService = createSavedWindowsService();
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(
+      createSaveWindowResult('Project work', false, [
+        'The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      ]),
+    );
+    render(
+      <ActiveWindowsPage savedWindowsService={savedWindowsService} service={createService()} />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Save Window 1' }));
+    const dialog = screen.getByRole('dialog', { name: 'Save window' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(within(dialog).getByRole('button', { name: 'Save & close' }));
+
+    expect(
+      screen.getByText(
+        'Saved "Project work". The window was saved, but not every source tab could be safely verified, so Weaver did not close any source tabs.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Closing…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled();
   });
 
   it('keeps the save dialog open when storage rejects Save & close', async () => {

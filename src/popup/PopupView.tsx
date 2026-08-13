@@ -293,7 +293,7 @@ export function Popup({
       }
       if (result.skippedChangedTabIds.length > 0) {
         issues.push(
-          `${result.skippedChangedTabIds.length} duplicate ${result.skippedChangedTabIds.length === 1 ? 'tab was' : 'tabs were'} left open because ${result.skippedChangedTabIds.length === 1 ? 'it or its keeper changed or is' : 'they or their keepers changed or are'} still loading.`,
+          `${result.skippedChangedTabIds.length} ${result.skippedChangedTabIds.length === 1 ? 'tab' : 'tabs'} left open because Weaver could not safely confirm ${result.skippedChangedTabIds.length === 1 ? 'it was' : 'they were'} still ${result.skippedChangedTabIds.length === 1 ? 'a duplicate' : 'duplicates'}.`,
         );
       }
       setActionError(issues.length > 0 ? issues.join(' ') : null);

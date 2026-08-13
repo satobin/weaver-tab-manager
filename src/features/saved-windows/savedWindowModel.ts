@@ -14,6 +14,7 @@ interface SavedTab {
   groupKey?: string;
   order: number;
   pinned: boolean;
+  savedAt?: string;
   title: string;
   url: string;
 }
@@ -127,6 +128,7 @@ function parseSavedTab(value: unknown): SavedTab | null {
     typeof value.title !== 'string' ||
     typeof value.pinned !== 'boolean' ||
     typeof value.active !== 'boolean' ||
+    (value.savedAt !== undefined && !isIsoTimestamp(value.savedAt)) ||
     (value.groupKey !== undefined && (typeof value.groupKey !== 'string' || !value.groupKey.trim()))
   ) {
     return null;
@@ -141,6 +143,9 @@ function parseSavedTab(value: unknown): SavedTab | null {
   };
   if (typeof value.groupKey === 'string') {
     tab.groupKey = value.groupKey.trim();
+  }
+  if (typeof value.savedAt === 'string') {
+    tab.savedAt = value.savedAt;
   }
   return tab;
 }
@@ -344,7 +349,7 @@ export function captureSavedWindow(
   [...(sourceWindow.tabs ?? [])]
     .sort((left, right) => left.index - right.index)
     .forEach((tab) => {
-      const url = tab.url ?? tab.pendingUrl ?? '';
+      const url = tab.pendingUrl || tab.url || '';
       if (!url) {
         warnings.push({
           message: 'A tab without an available URL was skipped.',
@@ -380,7 +385,8 @@ export function captureSavedWindow(
         active: tab.active && !activeCaptured,
         order: tabs.length,
         pinned: tab.pinned,
-        title: tab.title?.trim() || url,
+        savedAt: timestamp,
+        title: tab.pendingUrl ? url : tab.title?.trim() || url,
         url,
       };
       if (groupKey) {

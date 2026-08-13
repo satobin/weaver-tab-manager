@@ -6,7 +6,7 @@ import {
 } from '../../platform/chrome/restoredTabMetadata';
 import { mapWithConcurrency } from '../../shared/mapWithConcurrency';
 import {
-  canonicalizeTabUrl,
+  createTabUrlCanonicalizer,
   type DedupeRule,
   type DuplicateTabGroup,
 } from '../deduplication/deduplication';
@@ -258,16 +258,13 @@ function createRestorableTabFromChromeTab(
   };
 }
 
-function tabMatchesCanonicalKey(
+function getMatchingTabUrl(
   tab: chrome.tabs.Tab,
   expectedKey: string,
-  rules: readonly DedupeRule[],
-): boolean {
-  if (tab.status === 'loading' || (tab.pendingUrl?.trim() ?? '') !== '') {
-    return false;
-  }
-  const url = tab.url ?? '';
-  return url !== '' && canonicalizeTabUrl(url, rules).key === expectedKey;
+  canonicalize: ReturnType<typeof createTabUrlCanonicalizer>,
+): string | null {
+  const url = tab.pendingUrl?.trim() || tab.url?.trim() || '';
+  return url !== '' && canonicalize(url).key === expectedKey ? url : null;
 }
 
 interface CrossWindowMoveCompletion {
@@ -888,6 +885,7 @@ export function createChromeActiveWindowsService(
 
   return {
     async closeDuplicateTabs(request) {
+      const canonicalize = createTabUrlCanonicalizer(request.rules);
       const requestedTabIds = [...new Set(request.tabIds)];
       const requestedTabIdSet = new Set(requestedTabIds);
       const closedTabIds: number[] = [];
@@ -959,11 +957,11 @@ export function createChromeActiveWindowsService(
               if (liveTab.id !== tabId) {
                 return { state: 'changed' as const };
               }
+              if (liveTab.windowId !== snapshotTab.windowId) {
+                return { state: 'changed' as const };
+              }
               if (liveTab.pinned) {
                 return { state: 'pinned' as const };
-              }
-              if (liveTab.status === 'loading') {
-                return { state: 'changed' as const };
               }
               if (
                 shouldProtectAgentTabFromDuplicateCleanup(detectAgentAssociation(liveTab, null))
@@ -985,10 +983,11 @@ export function createChromeActiveWindowsService(
               ) {
                 return { state: 'agent-associated' as const };
               }
-              if (!tabMatchesCanonicalKey(liveTab, plannedGroup.key, request.rules)) {
+              const matchedUrl = getMatchingTabUrl(liveTab, plannedGroup.key, canonicalize);
+              if (!matchedUrl) {
                 return { state: 'changed' as const };
               }
-              return { state: 'eligible' as const };
+              return { matchedUrl, state: 'eligible' as const };
             };
 
             const firstCandidateCheck = await readCandidateAtMutationBoundary();
@@ -1001,11 +1000,16 @@ export function createChromeActiveWindowsService(
               if (keeperTabId === tabId || requestedTabIdSet.has(keeperTabId)) {
                 continue;
               }
+              const snapshotKeeper = snapshotTabsById.get(keeperTabId);
+              if (!snapshotKeeper) {
+                continue;
+              }
               try {
                 const keeper = await api.tabs.get(keeperTabId);
                 if (
                   keeper.id === keeperTabId &&
-                  tabMatchesCanonicalKey(keeper, plannedGroup.key, request.rules)
+                  keeper.windowId === snapshotKeeper.windowId &&
+                  getMatchingTabUrl(keeper, plannedGroup.key, canonicalize) !== null
                 ) {
                   hasLiveKeeper = true;
                   break;
@@ -1029,6 +1033,7 @@ export function createChromeActiveWindowsService(
               snapshotTab as chrome.tabs.Tab & { id: number },
               group,
             );
+            closedTab.url = finalCandidateCheck.matchedUrl;
             await api.tabs.remove(tabId);
             return { closed: true as const, closedTab, tabId };
           } catch (error) {

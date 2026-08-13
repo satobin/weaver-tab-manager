@@ -1,4 +1,4 @@
-import { Save, X, XCircle } from 'lucide-react';
+import { PanelTopClose, Save, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { type SaveWindowResult } from './savedWindowsService';
@@ -74,15 +74,18 @@ export function SaveWindowDialog({
     savingRef.current = true;
     setSavingAction(closeSource ? 'save-close' : 'save');
     setErrorMessage(null);
+    let result: SaveWindowResult;
     try {
-      const result = await onSave(name, closeSource);
-      onComplete(result);
+      result = await onSave(name, closeSource);
     } catch (error) {
       setErrorMessage(describeSaveError(error));
-    } finally {
       savingRef.current = false;
       setSavingAction(null);
+      return;
     }
+    savingRef.current = false;
+    setSavingAction(null);
+    onComplete(result);
   };
 
   return (
@@ -118,7 +121,7 @@ export function SaveWindowDialog({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void save(false);
+            void save(true);
           }}
         >
           <label className="save-window-name">
@@ -152,23 +155,23 @@ export function SaveWindowDialog({
               Cancel
             </button>
             <button
-              className="toolbar-button"
+              className="toolbar-button save-window-secondary-button"
               type="button"
-              title="Save this window and close it"
+              title="Save this window"
               disabled={savingAction !== null}
-              onClick={() => void save(true)}
+              onClick={() => void save(false)}
             >
-              <XCircle aria-hidden="true" size={16} />
-              <span>{savingAction === 'save-close' ? 'Saving...' : 'Save & close'}</span>
+              <Save aria-hidden="true" size={16} />
+              <span>{savingAction === 'save' ? 'Saving...' : 'Save'}</span>
             </button>
             <button
               className="toolbar-button primary-button"
               type="submit"
-              title="Save this window"
+              title="Save this window and close it"
               disabled={savingAction !== null}
             >
-              <Save aria-hidden="true" size={16} />
-              <span>{savingAction === 'save' ? 'Saving...' : 'Save'}</span>
+              <PanelTopClose aria-hidden="true" size={16} />
+              <span>{savingAction === 'save-close' ? 'Saving...' : 'Save & close'}</span>
             </button>
           </footer>
         </form>

@@ -65,6 +65,26 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
 }
 
 describe('WindowCard large-window rendering', () => {
+  it('renders a large inert closing snapshot', () => {
+    const initialWindow = createBenchmarkWindow();
+    const closingProps = createProps(initialWindow, false);
+    closingProps.closing = true;
+    const { container } = render(<WindowCard {...closingProps} />);
+
+    const card = container.querySelector('article');
+    const closingStatus = screen.getByText('Closing…').closest('.window-card-closing-status');
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('500 tabs')).toBeInTheDocument();
+    expect(closingStatus).toBeInTheDocument();
+    const closingList = container.querySelector('.tab-list');
+    expect(closingList).toHaveClass('is-closing-snapshot');
+    expect(closingList).toHaveAttribute('inert');
+    expect(container.querySelectorAll('.tab-list-item')).toHaveLength(BENCHMARK_TAB_COUNT);
+    expect(container.querySelector('[draggable="true"]')).toBeNull();
+    expect(container.querySelector('[data-tab-focus-id="1"]')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save Window 1' })).not.toBeInTheDocument();
+  });
+
   it('bounds collapsed DOM and renders the current 500-tab snapshot when expanded', () => {
     const initialWindow = createBenchmarkWindow();
     const collapsedProps = createProps(initialWindow, true);

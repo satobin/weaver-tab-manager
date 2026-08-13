@@ -124,7 +124,7 @@ describe('canonicalizeTabUrl', () => {
     const wildcard = createRule({ glob: '*.example.com/*', id: 'subdomains' });
 
     expect(canonicalizeTabUrl('https://example.com/path', [exact]).ruleId).toBe('exact-host');
-    expect(canonicalizeTabUrl('https://example.com.evil/path', [exact]).matchType).toBe('exact');
+    expect(canonicalizeTabUrl('https://example.com.invalid/path', [exact]).matchType).toBe('exact');
     expect(canonicalizeTabUrl('https://sub.example.com/path', [wildcard]).ruleId).toBe(
       'subdomains',
     );
@@ -132,7 +132,9 @@ describe('canonicalizeTabUrl', () => {
       'subdomains',
     );
     expect(canonicalizeTabUrl('https://example.com/path', [wildcard]).matchType).toBe('exact');
-    expect(canonicalizeTabUrl('https://notexample.com/path', [wildcard]).matchType).toBe('exact');
+    expect(canonicalizeTabUrl('https://not-example.invalid/path', [wildcard]).matchType).toBe(
+      'exact',
+    );
   });
 
   it('falls back to the exact raw URL for unmatched, non-web, and invalid URLs', () => {
@@ -150,43 +152,56 @@ describe('canonicalizeTabUrl', () => {
   it('ships opt-in Google and Notion rules without site-specific private tooling', () => {
     expect(DEFAULT_DEDUPLICATION_RULES.every((rule) => !rule.enabled)).toBe(true);
     const googleEdit = canonicalizeTabUrl(
-      'https://docs.google.com/document/d/doc-id/edit?tab=t.0',
+      'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/edit?tab=t.0',
       ENABLED_PUBLIC_RULES,
     );
     const googleHeading = canonicalizeTabUrl(
-      'https://docs.google.com/document/d/doc-id/edit#heading=h.one',
+      'https://docs.google.com/document/d/1ExampleDocumentId_0123456789AbCdEf/edit#heading=h.one',
       ENABLED_PUBLIC_RULES,
     );
     expect(googleEdit.key).toBe(googleHeading.key);
     expect(googleEdit.ruleId).toBe('builtin-google-docs');
     expect(
-      canonicalizeTabUrl('https://docs.google.com/forms/d/form-id/edit', ENABLED_PUBLIC_RULES)
-        .matchType,
+      canonicalizeTabUrl(
+        'https://docs.google.com/forms/d/1ExampleFormId_0123456789AbCdEf/edit',
+        ENABLED_PUBLIC_RULES,
+      ).matchType,
     ).toBe('exact');
     expect(
       canonicalizeTabUrl('https://mail.google.com/mail/u/0/', ENABLED_PUBLIC_RULES).matchType,
     ).toBe('exact');
 
     const notionOne = canonicalizeTabUrl(
-      'https://www.notion.so/workspace/Page-abc?pvs=4#block',
+      'https://www.notion.so/acme/Project-Plan-00000000000000000000000000000000?pvs=4#block',
       ENABLED_PUBLIC_RULES,
     );
     const notionTwo = canonicalizeTabUrl(
-      'https://www.notion.so/workspace/Page-abc?source=copy_link',
+      'https://www.notion.so/acme/Project-Plan-00000000000000000000000000000000?source=copy_link',
       ENABLED_PUBLIC_RULES,
     );
     expect(notionOne.key).toBe(notionTwo.key);
 
     const notionComOne = canonicalizeTabUrl(
-      'https://notion.com/p/acme/Project-Plan-3098e50b62b080f9a0a7f74cb093713f?showMoveTo=true#block-one',
+      'https://notion.com/p/acme/Project-Plan-00000000000000000000000000000000?showMoveTo=true#block-one',
       ENABLED_PUBLIC_RULES,
     );
     const notionComTwo = canonicalizeTabUrl(
-      'https://notion.com/p/acme/Project-Plan-3098e50b62b080f9a0a7f74cb093713f?saveParent=true#block-two',
+      'https://notion.com/p/acme/Project-Plan-00000000000000000000000000000000?saveParent=true#block-two',
       ENABLED_PUBLIC_RULES,
     );
     expect(notionComOne.key).toBe(notionComTwo.key);
     expect(notionComOne.ruleId).toBe('builtin-notion-com');
+
+    const notionAppOne = canonicalizeTabUrl(
+      'https://app.notion.com/p/acme/Project-Plan-00000000000000000000000000000000?showMoveTo=true#block-one',
+      ENABLED_PUBLIC_RULES,
+    );
+    const notionAppTwo = canonicalizeTabUrl(
+      'https://app.notion.com/p/acme/Project-Plan-00000000000000000000000000000000?saveParent=true#block-two',
+      ENABLED_PUBLIC_RULES,
+    );
+    expect(notionAppOne.key).toBe(notionAppTwo.key);
+    expect(notionAppOne.ruleId).toBe('builtin-notion-com');
 
     expect(
       canonicalizeTabUrl(
@@ -196,17 +211,39 @@ describe('canonicalizeTabUrl', () => {
     ).toBe('exact');
   });
 
+  it('limits the built-in notion.com alias to app.notion.com and enabled built-in rules', () => {
+    const notionComRule = DEFAULT_DEDUPLICATION_RULES.find(
+      (rule) => rule.id === 'builtin-notion-com',
+    );
+    expect(notionComRule).toBeDefined();
+    const enabledRule = { ...notionComRule!, enabled: true };
+    const appUrl =
+      'https://app.notion.com/p/acme/Project-Plan-00000000000000000000000000000000?view=one';
+
+    expect(canonicalizeTabUrl(appUrl, [enabledRule]).ruleId).toBe('builtin-notion-com');
+    expect(canonicalizeTabUrl(appUrl, [notionComRule!]).matchType).toBe('exact');
+    expect(
+      canonicalizeTabUrl(
+        'https://workspace.notion.com/p/acme/Project-Plan-00000000000000000000000000000000',
+        [enabledRule],
+      ).matchType,
+    ).toBe('exact');
+    expect(
+      canonicalizeTabUrl(appUrl, [{ ...enabledRule, glob: 'workspace.notion.com/*' }]).matchType,
+    ).toBe('exact');
+  });
+
   it.each([
-    ['document', 'builtin-google-docs'],
-    ['spreadsheets', 'builtin-google-sheets'],
-    ['presentation', 'builtin-google-slides'],
-  ] as const)('matches Google %s document identities with %s', (kind, ruleId) => {
+    ['document', '1ExampleDocumentId_0123456789AbCdEf', 'builtin-google-docs'],
+    ['spreadsheets', '1ExampleSpreadsheetId_0123456789AbCd', 'builtin-google-sheets'],
+    ['presentation', '1ExamplePresentationId_0123456789AbCd', 'builtin-google-slides'],
+  ] as const)('matches Google %s identity %s with %s', (kind, itemId, ruleId) => {
     const first = canonicalizeTabUrl(
-      `https://docs.google.com/${kind}/d/item-id/edit?view=one`,
+      `https://docs.google.com/${kind}/d/${itemId}/edit?view=one`,
       ENABLED_PUBLIC_RULES,
     );
     const second = canonicalizeTabUrl(
-      `https://docs.google.com/${kind}/d/item-id/preview#section`,
+      `https://docs.google.com/${kind}/d/${itemId}/preview#section`,
       ENABLED_PUBLIC_RULES,
     );
     expect(first.key).toBe(second.key);
