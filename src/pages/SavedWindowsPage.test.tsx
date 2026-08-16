@@ -235,11 +235,11 @@ describe('SavedWindowsPage', () => {
     expect(screen.getByRole('button', { name: 'Merge saved windows' })).toBeDisabled();
 
     await user.type(
-      screen.getByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      screen.getByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'missing',
     );
     expect(screen.getByRole('heading', { name: 'No saved windows' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'No saved tabs match' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'No saved items match' })).not.toBeInTheDocument();
   });
 
   it('renders saved-window totals in the shared header target', async () => {
@@ -390,7 +390,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} />);
 
     const search = await screen.findByRole('searchbox', {
-      name: 'Filter saved tabs by title or URL',
+      name: 'Filter saved windows, groups, and tabs',
     });
     await user.click(screen.getByRole('button', { name: 'Expand Research' }));
     await user.type(search, 'alpha');
@@ -431,7 +431,7 @@ describe('SavedWindowsPage', () => {
     expect(preview).toHaveAttribute('hidden');
 
     const search = screen.getByRole('searchbox', {
-      name: 'Filter saved tabs by title or URL',
+      name: 'Filter saved windows, groups, and tabs',
     });
     await user.type(search, 'plan');
 
@@ -525,7 +525,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
 
     const search = await screen.findByRole('searchbox', {
-      name: 'Filter saved tabs by title or URL',
+      name: 'Filter saved windows, groups, and tabs',
     });
     const selectFiltered = screen.getByRole('button', { name: 'Select filtered 2' });
     expect(selectFiltered).toBeDisabled();
@@ -575,7 +575,7 @@ describe('SavedWindowsPage', () => {
     expect(
       await screen.findByText('Removed 1 selected tab from Saved Windows.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'No saved tabs match' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No saved items match' })).toBeInTheDocument();
 
     const undo = screen.getByRole('button', { name: 'Undo' });
     await waitFor(() => expect(undo).toHaveFocus());
@@ -645,7 +645,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
 
     await user.type(
-      await screen.findByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'inbox',
     );
     await user.click(screen.getByRole('button', { name: 'Select filtered 1' }));
@@ -717,7 +717,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
 
     await user.type(
-      await screen.findByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
     await user.click(screen.getByRole('button', { name: 'Select filtered 2' }));
@@ -790,7 +790,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
 
     await user.type(
-      await screen.findByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
     await user.click(screen.getByRole('button', { name: 'Select filtered 2' }));
@@ -859,7 +859,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
 
     await user.type(
-      await screen.findByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
     await user.click(screen.getByRole('button', { name: 'Select filtered 1' }));
@@ -1149,7 +1149,7 @@ describe('SavedWindowsPage', () => {
     );
 
     await user.type(
-      await screen.findByRole('searchbox', { name: 'Filter saved tabs by title or URL' }),
+      await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'notion',
     );
     expect(
@@ -1545,7 +1545,7 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} />);
 
     const search = await screen.findByRole('searchbox', {
-      name: 'Filter saved tabs by title or URL',
+      name: 'Filter saved windows, groups, and tabs',
     });
     await user.type(search, 'plan');
     const removePlan = screen.getByRole('button', {
@@ -1572,7 +1572,7 @@ describe('SavedWindowsPage', () => {
     expect(service.openTab).not.toHaveBeenCalled();
     expect(search).toHaveValue('plan');
     expect(await screen.findByText('Removed "Plan" from "Research".')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'No saved tabs match' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No saved items match' })).toBeInTheDocument();
 
     const undo = screen.getByRole('button', { name: 'Undo' });
     await waitFor(() => expect(search).toHaveFocus());
@@ -1583,6 +1583,44 @@ describe('SavedWindowsPage', () => {
     expect(await screen.findByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('Restored "Plan" to "Research".')).toBeInTheDocument();
     expect(search).toHaveValue('plan');
+  });
+
+  it('consumes palette searches for saved windows and tab groups on the current route', async () => {
+    window.location.hash =
+      '#/saved-windows?groupKey=group-1&savedWindowId=saved-1&search=Untitled+group';
+    const savedWindow = createSavedWindow();
+    const service = createService([
+      {
+        ...savedWindow,
+        groups: savedWindow.groups.map((group) => ({ ...group, title: '' })),
+      },
+    ]);
+    render(<SavedWindowsPage service={service} />);
+
+    const search = await screen.findByRole('searchbox', {
+      name: 'Filter saved windows, groups, and tabs',
+    });
+    await waitFor(() => expect(search).toHaveValue('Untitled group'));
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('Untitled group')).toBeInTheDocument();
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/saved-windows');
+    expect(service.restoreWindow).not.toHaveBeenCalled();
+    expect(service.openTab).not.toHaveBeenCalled();
+
+    search.blur();
+    expect(search).not.toHaveFocus();
+    window.location.hash = '#/saved-windows?savedWindowId=saved-1&search=Research';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await waitFor(() => expect(search).toHaveValue('Research'));
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(window.location.hash).toBe('#/saved-windows');
+
+    search.blur();
+    window.location.hash = '#/saved-windows?savedWindowId=saved-1&search=Research';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await waitFor(() => expect(search).toHaveFocus());
   });
 
   it('keeps focus at the same list position after removing one saved tab', async () => {

@@ -60,6 +60,8 @@ pnpm run dev:test
 
 `pnpm run dev` is an alias for the same command. Vite writes the live unpacked extension to `local_builds/vite-test-unpacked/`. Use one of these package scripts rather than invoking bare Vite when you expect test branding; Vite's default `development` mode intentionally falls back to production branding.
 
+On managed Chrome profiles, **Load unpacked** can be disabled independently of signed test-CRX installation. If Chrome reports `Extension installation is blocked by policy`, an approved signed extension ID does not make the unpacked lane available. Use a development profile or device whose policy permits unpacked extensions, or stay on the signed test-CRX workflow.
+
 In a Chromium browser:
 
 1. Open `chrome://extensions`.

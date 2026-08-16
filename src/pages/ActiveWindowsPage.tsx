@@ -2119,8 +2119,15 @@ export function ActiveWindowsPage({
     (!duplicatePreviewMode && duplicatePlan.duplicateGroups.length === 0);
   const removeDuplicatesControl = (
     <div className="duplicate-preview-control">
-      <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
+      <div
+        className="duplicate-split-button"
+        id="active-duplicate-actions"
+        role="group"
+        aria-label="Duplicate tab actions"
+        tabIndex={-1}
+      >
         <button
+          id="close-duplicate-tabs-button"
           className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${isRemovingDuplicates ? ' is-removing-duplicates' : ''}`}
           type="button"
           aria-label={
@@ -2140,6 +2147,7 @@ export function ActiveWindowsPage({
           </span>
         </button>
         <button
+          id="open-duplicate-preview-button"
           className="toolbar-button topbar-duplicate-preview-button"
           type="button"
           aria-label="Show duplicate tabs only"
@@ -2161,9 +2169,17 @@ export function ActiveWindowsPage({
     </div>
   );
   const mergeControl = (
-    <div className="merge-control" ref={mergeControlRef}>
+    <div
+      className="merge-control"
+      id="active-merge-actions"
+      ref={mergeControlRef}
+      role="group"
+      aria-label="Merge windows"
+      tabIndex={-1}
+    >
       <button
         ref={mergeButtonRef}
+        id="merge-windows-button"
         className="toolbar-button topbar-merge-button"
         type="button"
         aria-label="Merge windows"

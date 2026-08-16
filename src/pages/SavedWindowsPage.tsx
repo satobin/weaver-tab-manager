@@ -25,6 +25,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { APP_ROUTES, getAppRouteSearchParams, parseAppRoute } from '../app/routes';
 import { getMergeDialogHorizontalOffset } from '../features/active-windows/mergeDialogPosition';
 import { formatTabLocation } from '../features/active-windows/model';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
@@ -351,6 +352,10 @@ export function SavedWindowsPage({
   const [renameValue, setRenameValue] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [paletteRevealTarget, setPaletteRevealTarget] = useState<{
+    groupKey: string | null;
+    savedWindowId: string;
+  } | null>(null);
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
@@ -395,6 +400,7 @@ export function SavedWindowsPage({
   const mergeControlRef = useRef<HTMLDivElement>(null);
   const duplicatePreviewButtonRef = useRef<HTMLButtonElement>(null);
   const moveTabsButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingPaletteSearchFocusRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectionAnchorByWindowRef = useRef(new Map<string, string>());
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -410,12 +416,45 @@ export function SavedWindowsPage({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const hasFilter = normalizedQuery.length > 0;
   const filteredWindows = useMemo(() => {
+    if (paletteRevealTarget) {
+      const savedWindow = windows.find(
+        (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
+      );
+      if (!savedWindow) {
+        return [];
+      }
+      if (paletteRevealTarget.groupKey === null) {
+        return [savedWindow];
+      }
+      const group = savedWindow.groups.find(
+        (candidate) => candidate.key === paletteRevealTarget.groupKey,
+      );
+      if (!group) {
+        return [];
+      }
+      return [
+        {
+          ...savedWindow,
+          groups: [group],
+          tabs: savedWindow.tabs.filter((tab) => tab.groupKey === group.key),
+        },
+      ];
+    }
     if (!normalizedQuery) {
       return windows;
     }
     return windows.flatMap((savedWindow) => {
-      const tabs = savedWindow.tabs.filter((tab) =>
-        `${tab.title}\n${tab.url}`.toLocaleLowerCase().includes(normalizedQuery),
+      const windowMatches = savedWindow.name.toLocaleLowerCase().includes(normalizedQuery);
+      const matchingGroupKeys = new Set(
+        savedWindow.groups
+          .filter((group) => group.title.toLocaleLowerCase().includes(normalizedQuery))
+          .map((group) => group.key),
+      );
+      const tabs = savedWindow.tabs.filter(
+        (tab) =>
+          windowMatches ||
+          (tab.groupKey !== undefined && matchingGroupKeys.has(tab.groupKey)) ||
+          `${tab.title}\n${tab.url}`.toLocaleLowerCase().includes(normalizedQuery),
       );
       if (tabs.length === 0) {
         return [];
@@ -431,7 +470,7 @@ export function SavedWindowsPage({
         },
       ];
     });
-  }, [normalizedQuery, windows]);
+  }, [normalizedQuery, paletteRevealTarget, windows]);
   const tabReferencesByKey = useMemo(() => {
     const references = new Map<string, SavedTabSelectionReference>();
     windows.forEach((savedWindow) => {
@@ -712,6 +751,7 @@ export function SavedWindowsPage({
   };
 
   const updateQuery = (nextQuery: string) => {
+    setPaletteRevealTarget(null);
     setQuery(nextQuery);
     if (!nextQuery.trim()) {
       setCollapsedFilterIds(new Set());
@@ -776,6 +816,48 @@ export function SavedWindowsPage({
       queueMicrotask(() => duplicatePreviewButtonRef.current?.focus());
     }
   }, []);
+
+  useEffect(() => {
+    const consumePaletteSearch = () => {
+      if (parseAppRoute(window.location.hash) !== APP_ROUTES.savedWindows) {
+        return;
+      }
+      const searchParams = getAppRouteSearchParams(window.location.hash);
+      const search = searchParams.get('search');
+      const savedWindowId = searchParams.get('savedWindowId');
+      const groupKey = searchParams.get('groupKey');
+      if (search === null && savedWindowId === null) {
+        return;
+      }
+      closeMergeDialog(false);
+      closeMoveDialog(false);
+      clearTabSelection();
+      exitDuplicatePreview(false);
+      setDeletingId(null);
+      setRenamingId(null);
+      setCollapsedFilterIds(new Set());
+      setPaletteRevealTarget(savedWindowId === null ? null : { groupKey, savedWindowId });
+      setQuery(search ?? '');
+      pendingPaletteSearchFocusRef.current = true;
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}${APP_ROUTES.savedWindows}`,
+      );
+    };
+
+    consumePaletteSearch();
+    window.addEventListener('hashchange', consumePaletteSearch);
+    return () => window.removeEventListener('hashchange', consumePaletteSearch);
+  }, [clearTabSelection, closeMergeDialog, closeMoveDialog, exitDuplicatePreview]);
+
+  useEffect(() => {
+    if (status !== 'ready' || !pendingPaletteSearchFocusRef.current) {
+      return;
+    }
+    pendingPaletteSearchFocusRef.current = false;
+    queueMicrotask(() => searchInputRef.current?.focus({ preventScroll: true }));
+  }, [paletteRevealTarget, query, status]);
 
   useEffect(() => {
     if (!mergeDialogOpen) {
@@ -1365,8 +1447,15 @@ export function SavedWindowsPage({
   const bulkActionControls = (
     <div className="topbar-window-actions">
       <div className="duplicate-preview-control">
-        <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
+        <div
+          className="duplicate-split-button"
+          id="saved-duplicate-actions"
+          role="group"
+          aria-label="Duplicate tab actions"
+          tabIndex={-1}
+        >
           <button
+            id="remove-saved-duplicate-tabs-button"
             className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${removingDuplicates ? ' is-removing-duplicates' : ''}`}
             type="button"
             aria-label={
@@ -1393,6 +1482,7 @@ export function SavedWindowsPage({
           </button>
           <button
             ref={duplicatePreviewButtonRef}
+            id="saved-duplicate-preview-button"
             className="toolbar-button topbar-duplicate-preview-button"
             type="button"
             aria-label="Show saved duplicate tabs only"
@@ -1418,9 +1508,17 @@ export function SavedWindowsPage({
         </div>
       </div>
 
-      <div className="merge-control" ref={mergeControlRef}>
+      <div
+        className="merge-control"
+        id="saved-merge-actions"
+        ref={mergeControlRef}
+        role="group"
+        aria-label="Merge saved windows"
+        tabIndex={-1}
+      >
         <button
           ref={mergeButtonRef}
+          id="merge-saved-windows-button"
           className={`toolbar-button topbar-merge-button${mergingSavedWindows ? ' is-merging-saved-windows' : ''}`}
           type="button"
           aria-label={
@@ -1499,14 +1597,14 @@ export function SavedWindowsPage({
         <div className="active-toolbar-main">
           <label className="window-search">
             <Search aria-hidden="true" size={17} />
-            <span className="sr-only">Filter saved tabs by title or URL</span>
+            <span className="sr-only">Filter saved windows, groups, and tabs</span>
             <input
               ref={searchInputRef}
               type="text"
               role="searchbox"
               value={query}
               placeholder="Filter tabs"
-              title="Filter saved tabs by title or URL"
+              title="Filter saved windows, groups, and tabs"
               disabled={status !== 'ready' || operation !== null || duplicatePreviewMode}
               onChange={(event) => updateQuery(event.target.value)}
             />
@@ -1801,8 +1899,8 @@ export function SavedWindowsPage({
       displayedWindows.length === 0 ? (
         <div className="filter-empty">
           <Search aria-hidden="true" size={24} />
-          <h3>No saved tabs match</h3>
-          <p>Try another title or URL.</p>
+          <h3>No saved items match</h3>
+          <p>Try another window, group, tab title, or URL.</p>
           <button
             type="button"
             onClick={() => {

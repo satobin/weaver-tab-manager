@@ -244,6 +244,105 @@ describe('App', () => {
     expect(savedWindowsService.load).not.toHaveBeenCalled();
   });
 
+  it('loads full search sources only when the command palette opens', async () => {
+    window.location.hash = APP_ROUTES.about;
+    const activeWindowsService = createService(2);
+    const savedWindowsService = createSavedService(3);
+    render(
+      <App activeWindowsService={activeWindowsService} savedWindowsService={savedWindowsService} />,
+    );
+
+    const trigger = await screen.findByRole('button', { name: 'Search Weaver' });
+    expect(trigger).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K');
+    expect(activeWindowsService.loadSnapshot).not.toHaveBeenCalled();
+    expect(savedWindowsService.load).not.toHaveBeenCalled();
+
+    trigger.focus();
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    expect(within(dialog).getByRole('combobox', { name: 'Search Weaver' })).toHaveFocus();
+    expect(activeWindowsService.loadSnapshot).toHaveBeenCalledOnce();
+    expect(savedWindowsService.load).toHaveBeenCalledOnce();
+
+    fireEvent.keyDown(within(dialog).getByRole('combobox'), { key: 'Escape' });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
+  });
+
+  it('moves focus to safe page targets for command-palette navigation', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
+    render(
+      <App activeWindowsService={createService()} savedWindowsService={createSavedService(1)} />,
+    );
+    await screen.findByRole('heading', { name: 'Active Windows', level: 1 });
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    await user.click(within(dialog).getByRole('option', { name: /^Merge windows\./u }));
+
+    const mergeActions = await screen.findByRole('group', { name: 'Merge windows' });
+    await waitFor(() => expect(mergeActions).toHaveFocus());
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    const reopenedDialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    await user.click(within(reopenedDialog).getByRole('option', { name: /^About Weaver\./u }));
+
+    const aboutHeading = await screen.findByRole('heading', { name: 'About Weaver', level: 1 });
+    await waitFor(() => expect(aboutHeading).toHaveFocus());
+    expect(window.location.hash).toBe(APP_ROUTES.about);
+  });
+
+  it('uses the empty-query Saved Windows shortcut and focuses its page title', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    render(
+      <App activeWindowsService={createService()} savedWindowsService={createSavedService(1)} />,
+    );
+    await screen.findByRole('heading', { name: 'Active Windows', level: 1 });
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    const input = within(dialog).getByRole('combobox', { name: 'Search Weaver' });
+    expect(input).toHaveValue('');
+    expect(within(dialog).getByRole('option', { name: /^Saved Windows\./u })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Meta+6 Control+6',
+    );
+
+    fireEvent.keyDown(input, { key: '6', metaKey: true });
+
+    const savedWindowsHeading = await screen.findByRole('heading', {
+      name: 'Saved Windows',
+      level: 1,
+    });
+    expect(window.location.hash).toBe(APP_ROUTES.savedWindows);
+    expect(savedWindowsHeading.tagName).toBe('H1');
+    expect(savedWindowsHeading).toHaveAttribute('tabindex', '-1');
+    expect(savedWindowsHeading).toHaveClass('programmatic-focus-target');
+    await waitFor(() => expect(savedWindowsHeading).toHaveFocus());
+  });
+
+  it('closes the command palette without clearing Active Windows selection', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
+    render(
+      <App activeWindowsService={createService()} savedWindowsService={createSavedService(1)} />,
+    );
+
+    const selectTab = await screen.findByRole('checkbox', { name: 'Select Example tab' });
+    await user.click(selectTab);
+    expect(selectTab).toBeChecked();
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    await screen.findByRole('dialog', { name: 'Search Weaver' });
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
+    expect(selectTab).toBeChecked();
+  });
+
   it('uses the Saved Windows page load for its sidebar count', async () => {
     window.location.hash = APP_ROUTES.savedWindows;
     const savedWindowsService = createSavedService(2);

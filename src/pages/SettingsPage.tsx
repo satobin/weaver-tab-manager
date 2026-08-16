@@ -76,7 +76,11 @@ export function SettingsPage({
       </h2>
 
       <div className="settings-layout">
-        <div className="settings-group appearance-settings-group">
+        <div
+          className="settings-group appearance-settings-group"
+          id="settings-appearance"
+          tabIndex={-1}
+        >
           <div>
             <h3>Appearance</h3>
             <p>Choose a color scheme. System default follows your device appearance.</p>
@@ -91,7 +95,7 @@ export function SettingsPage({
 
         <KeyboardShortcutsSetting />
 
-        <div className="settings-group">
+        <div className="settings-group" id="settings-show-tab-urls" tabIndex={-1}>
           <div>
             <h3>Show tab URLs</h3>
             <p>Show URLs below tab titles in Active Windows. Turn this off for denser cards.</p>

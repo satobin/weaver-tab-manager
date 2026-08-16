@@ -149,7 +149,9 @@ export function KeyboardShortcutsSetting() {
   return (
     <section
       className="settings-group keyboard-shortcuts-settings-group"
+      id="settings-keyboard-shortcuts"
       aria-labelledby="keyboard-shortcuts-heading"
+      tabIndex={-1}
     >
       <header className="keyboard-shortcuts-header">
         <div className="keyboard-shortcuts-copy">

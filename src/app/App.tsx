@@ -9,6 +9,7 @@ import {
   createChromeActiveWindowsService,
   type ActiveWindowsService,
 } from '../features/active-windows/chromeActiveWindowsService';
+import { CommandPalette } from '../features/command-palette/CommandPalette';
 import {
   createSavedWindowsService,
   type SavedWindowsService,
@@ -17,7 +18,7 @@ import { AppearanceControl } from '../features/settings/AppearanceControl';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useAppearance } from '../features/settings/useAppearance';
 import { useSettings } from '../features/settings/useSettings';
-import { APP_ROUTES, type AppRoute } from './routes';
+import { APP_ROUTES, getAppRouteSearchParams, parseAppRoute, type AppRoute } from './routes';
 import { useHashRoute } from './useHashRoute';
 import { useActiveWindowCount, useSavedWindowCount } from './useNavigationCounts';
 
@@ -34,6 +35,64 @@ const PAGE_TITLES: Record<AppRoute, string> = {
   [APP_ROUTES.settings]: 'Settings',
   [APP_ROUTES.about]: 'About Weaver',
 };
+
+function FocusIntentObserver() {
+  useEffect(() => {
+    let requestId = 0;
+    let timeoutId: number | undefined;
+    const consumeFocusIntent = () => {
+      const searchParams = getAppRouteSearchParams(window.location.hash);
+      const targetId = searchParams.get('focus');
+      if (!targetId) {
+        return;
+      }
+      const route = parseAppRoute(window.location.hash);
+      searchParams.delete('focus');
+      const remainingQuery = searchParams.toString();
+      const nextHash = remainingQuery ? `${route}?${remainingQuery}` : route;
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}${nextHash}`,
+      );
+      const currentRequestId = ++requestId;
+      let attempts = 0;
+      const focusTarget = () => {
+        if (currentRequestId !== requestId) {
+          return;
+        }
+        const target = document.getElementById(targetId);
+        if (target instanceof HTMLElement) {
+          const unavailable = target.matches(':disabled, [aria-disabled="true"]');
+          if (!unavailable) {
+            target.scrollIntoView?.({ block: 'center' });
+            target.focus({ preventScroll: true });
+            if (document.activeElement === target) {
+              return;
+            }
+          }
+        }
+        attempts += 1;
+        if (attempts < 20) {
+          timeoutId = window.setTimeout(focusTarget, 25);
+        }
+      };
+      queueMicrotask(focusTarget);
+    };
+
+    consumeFocusIntent();
+    window.addEventListener('hashchange', consumeFocusIntent);
+    return () => {
+      requestId += 1;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+      window.removeEventListener('hashchange', consumeFocusIntent);
+    };
+  }, []);
+
+  return null;
+}
 
 function SavedWindowCountObserver({
   onCountChange,
@@ -143,6 +202,7 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
 
   return (
     <div className="app-shell">
+      <FocusIntentObserver />
       {route !== APP_ROUTES.savedWindows ? (
         <SavedWindowCountObserver
           onCountChange={setNavigationSavedWindowCount}
@@ -192,7 +252,9 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
 
       <header className="topbar">
         <div className="topbar-heading">
-          <h1>{PAGE_TITLES[route]}</h1>
+          <h1 className="programmatic-focus-target" id="page-title" tabIndex={-1}>
+            {PAGE_TITLES[route]}
+          </h1>
           <div className="topbar-page-status" ref={setHeaderPortalTarget} />
         </div>
         <div className="topbar-actions">
@@ -202,6 +264,10 @@ export function App({ activeWindowsService, savedWindowsService, settingsService
               <span className="sr-only">{errorMessage}</span>
             </span>
           ) : null}
+          <CommandPalette
+            activeWindowsService={resolvedActiveWindowsService}
+            savedWindowsService={resolvedSavedWindowsService}
+          />
           <div className="topbar-page-actions" ref={setActionPortalTarget} />
           <AppearanceControl
             disabled={isLoading || savingSettings.has('colorMode')}

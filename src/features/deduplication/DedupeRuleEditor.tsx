@@ -403,7 +403,12 @@ export function DedupeRuleEditor({
   };
 
   return (
-    <section className="settings-rule-section" aria-labelledby="dedupe-rules-heading">
+    <section
+      className="settings-rule-section"
+      id="settings-duplicate-matching"
+      aria-labelledby="dedupe-rules-heading"
+      tabIndex={-1}
+    >
       <header className="settings-rule-heading">
         <div>
           <h3 id="dedupe-rules-heading">Advanced duplicate matching</h3>
