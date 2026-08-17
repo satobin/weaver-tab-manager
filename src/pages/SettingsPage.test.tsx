@@ -9,6 +9,7 @@ import {
   DEFAULT_SETTINGS,
   type SettingsService,
 } from '../features/settings/settingsService';
+import { SETTINGS_FOCUS_TARGETS } from '../features/settings/settingsFocusTargets';
 import {
   createActiveWindowsSnapshot,
   createManagedTab,
@@ -176,6 +177,41 @@ describe('SettingsPage', () => {
     expect(
       screen.queryByRole('switch', { name: 'Preserve groups when sorting' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('exposes labelled focus destinations for command-palette settings results', async () => {
+    render(
+      <SettingsPage
+        activeWindowsService={createActiveWindowsDataSource()}
+        service={createService()}
+      />,
+    );
+
+    const destinations = [
+      [screen.getByRole('region', { name: 'Appearance' }), SETTINGS_FOCUS_TARGETS.appearance],
+      [
+        screen.getByRole('region', { name: 'Keyboard shortcuts' }),
+        SETTINGS_FOCUS_TARGETS.keyboardShortcuts,
+      ],
+      [screen.getByRole('region', { name: 'Show tab URLs' }), SETTINGS_FOCUS_TARGETS.showTabUrls],
+      [
+        screen.getByRole('region', { name: 'Advanced duplicate matching' }),
+        SETTINGS_FOCUS_TARGETS.duplicateMatching,
+      ],
+      [
+        await screen.findByRole('group', { name: 'Google Docs, Sheets & Slides' }),
+        SETTINGS_FOCUS_TARGETS.googleUrlMatching,
+      ],
+      [screen.getByRole('group', { name: 'Notion' }), SETTINGS_FOCUS_TARGETS.notionUrlMatching],
+      [screen.getByRole('group', { name: 'Custom rules' }), SETTINGS_FOCUS_TARGETS.customUrlRules],
+    ] as const;
+
+    destinations.forEach(([destination, id]) => {
+      expect(destination).toHaveAttribute('id', id);
+      expect(destination).toHaveAttribute('tabindex', '-1');
+      expect(destination).toHaveAccessibleName();
+      expect(destination).toHaveAccessibleDescription();
+    });
   });
 
   it('lists live keyboard shortcuts as sub-rows below their heading and description', async () => {

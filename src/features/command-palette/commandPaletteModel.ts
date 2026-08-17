@@ -5,6 +5,7 @@ import {
   type TabGroupColor,
 } from '../active-windows/model';
 import { type SavedWindow } from '../saved-windows/savedWindowModel';
+import { SETTINGS_FOCUS_TARGETS } from '../settings/settingsFocusTargets';
 
 export const COMMAND_PALETTE_SECTION_ORDER = [
   'open-tabs',
@@ -188,7 +189,9 @@ function createStaticCandidates(): Candidate[] {
   return [
     createCandidate({
       action: {
-        hash: createAppRouteQuery(APP_ROUTES.settings, { focus: 'settings-appearance' }),
+        hash: createAppRouteQuery(APP_ROUTES.settings, {
+          focus: SETTINGS_FOCUS_TARGETS.appearance,
+        }),
         type: 'navigate',
       },
       aliases: ['theme', 'dark mode', 'light mode', 'color scheme'],
@@ -201,7 +204,7 @@ function createStaticCandidates(): Candidate[] {
     createCandidate({
       action: {
         hash: createAppRouteQuery(APP_ROUTES.settings, {
-          focus: 'settings-keyboard-shortcuts',
+          focus: SETTINGS_FOCUS_TARGETS.keyboardShortcuts,
         }),
         type: 'navigate',
       },
@@ -214,7 +217,9 @@ function createStaticCandidates(): Candidate[] {
     }),
     createCandidate({
       action: {
-        hash: createAppRouteQuery(APP_ROUTES.settings, { focus: 'settings-show-tab-urls' }),
+        hash: createAppRouteQuery(APP_ROUTES.settings, {
+          focus: SETTINGS_FOCUS_TARGETS.showTabUrls,
+        }),
         type: 'navigate',
       },
       aliases: ['addresses', 'domains'],
@@ -227,7 +232,7 @@ function createStaticCandidates(): Candidate[] {
     createCandidate({
       action: {
         hash: createAppRouteQuery(APP_ROUTES.settings, {
-          focus: 'settings-duplicate-matching',
+          focus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
         }),
         type: 'navigate',
       },
@@ -241,7 +246,8 @@ function createStaticCandidates(): Candidate[] {
     createCandidate({
       action: {
         hash: createAppRouteQuery(APP_ROUTES.settings, {
-          focus: 'settings-duplicate-matching',
+          fallbackFocus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
+          focus: SETTINGS_FOCUS_TARGETS.notionUrlMatching,
         }),
         type: 'navigate',
       },
@@ -255,7 +261,8 @@ function createStaticCandidates(): Candidate[] {
     createCandidate({
       action: {
         hash: createAppRouteQuery(APP_ROUTES.settings, {
-          focus: 'settings-duplicate-matching',
+          fallbackFocus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
+          focus: SETTINGS_FOCUS_TARGETS.googleUrlMatching,
         }),
         type: 'navigate',
       },
@@ -269,7 +276,8 @@ function createStaticCandidates(): Candidate[] {
     createCandidate({
       action: {
         hash: createAppRouteQuery(APP_ROUTES.settings, {
-          focus: 'settings-duplicate-matching',
+          fallbackFocus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
+          focus: SETTINGS_FOCUS_TARGETS.customUrlRules,
         }),
         type: 'navigate',
       },

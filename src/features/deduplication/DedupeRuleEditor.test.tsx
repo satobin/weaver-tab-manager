@@ -726,6 +726,36 @@ describe('DedupeRuleEditor', () => {
     expect(savedRules?.slice(3).every((rule) => !rule.enabled)).toBe(true);
   });
 
+  it('exposes a partially enabled preset as mixed and enables the full preset on click', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn<(rules: readonly DedupeRule[]) => Promise<boolean>>(() =>
+      Promise.resolve(true),
+    );
+    const partiallyEnabledRules = DEFAULT_DEDUPLICATION_RULES.map((rule, index) => ({
+      ...rule,
+      enabled: index === 0,
+    }));
+    render(
+      <DedupeRuleEditor
+        advancedDuplicateMatchingEnabled
+        disabled={false}
+        onSave={onSave}
+        rules={partiallyEnabledRules}
+      />,
+    );
+
+    const googlePreset = screen.getByRole('switch', {
+      name: 'Google Docs, Sheets & Slides preset, partially enabled',
+    });
+    expect(googlePreset).toHaveAttribute('aria-checked', 'false');
+    expect(googlePreset).toHaveAttribute('data-state', 'mixed');
+
+    await user.click(googlePreset);
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0].slice(0, 3).every((rule) => rule.enabled)).toBe(true);
+  });
+
   it('shows every supported preset URL format in accessible popovers', async () => {
     const user = userEvent.setup();
     const clickOnlyUser = userEvent.setup({ skipHover: true });

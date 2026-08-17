@@ -39,9 +39,8 @@ export function AboutPage() {
               <div>
                 <h4>Saves locally in your browser</h4>
                 <p>
-                  Saved windows, settings, and custom rules stay in your browser. Recently restored
-                  tabs may temporarily keep their saved titles and URLs in memory until their pages
-                  load, the tabs navigate or close, or the browser exits.
+                  Saved windows, settings, and custom rules stay in this browser profile and are not
+                  synced between devices.
                 </p>
               </div>
             </article>

@@ -1609,6 +1609,7 @@ describe('SavedWindowsPage', () => {
   });
 
   it('consumes palette searches for saved windows and tab groups on the current route', async () => {
+    const { restore, scrollIntoView } = installScrollIntoViewMock();
     window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
       groupKey: 'group-1',
       savedWindowId: 'saved-1',
@@ -1622,40 +1623,49 @@ describe('SavedWindowsPage', () => {
         groups: savedWindow.groups.map((group) => ({ ...group, title: '' })),
       },
     ]);
-    render(<SavedWindowsPage service={service} />);
+    try {
+      render(<SavedWindowsPage service={service} />);
 
-    const search = await screen.findByRole('searchbox', {
-      name: 'Filter saved windows, groups, and tabs',
-    });
-    await waitFor(() => expect(search).toHaveValue('Untitled group'));
-    await waitFor(() => expect(search).toHaveFocus());
-    expect(screen.getByText('Research')).toBeInTheDocument();
-    expect(screen.getByText('Untitled group')).toBeInTheDocument();
-    expect(screen.getByText('Plan')).toBeInTheDocument();
-    expect(window.location.hash).toBe('#/saved-windows');
-    expect(service.restoreWindow).not.toHaveBeenCalled();
-    expect(service.openTab).not.toHaveBeenCalled();
+      const search = await screen.findByRole('searchbox', {
+        name: 'Filter saved windows, groups, and tabs',
+      });
+      await waitFor(() => expect(search).toHaveValue('Untitled group'));
+      await waitFor(() => expect(search).toHaveFocus());
+      expect(screen.getByText('Research')).toBeInTheDocument();
+      const groupHeading = screen.getByText('Untitled group').closest('.saved-group-heading');
+      expect(groupHeading).toHaveClass('is-palette-reveal');
+      expect(screen.getByText('Plan')).toBeInTheDocument();
+      expect(
+        screen.getByText('Showing Research with Untitled group highlighted.'),
+      ).toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoView.mock.contexts).toContain(groupHeading));
+      expect(window.location.hash).toBe('#/saved-windows');
+      expect(service.restoreWindow).not.toHaveBeenCalled();
+      expect(service.openTab).not.toHaveBeenCalled();
 
-    search.blur();
-    expect(search).not.toHaveFocus();
-    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
-      savedWindowId: 'saved-1',
-      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
-      search: 'Research',
-    });
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await waitFor(() => expect(search).toHaveValue('Research'));
-    await waitFor(() => expect(search).toHaveFocus());
-    expect(window.location.hash).toBe('#/saved-windows');
+      search.blur();
+      expect(search).not.toHaveFocus();
+      window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+        savedWindowId: 'saved-1',
+        savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+        search: 'Research',
+      });
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await waitFor(() => expect(search).toHaveValue('Research'));
+      await waitFor(() => expect(search).toHaveFocus());
+      expect(window.location.hash).toBe('#/saved-windows');
 
-    search.blur();
-    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
-      savedWindowId: 'saved-1',
-      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
-      search: 'Research',
-    });
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-    await waitFor(() => expect(search).toHaveFocus());
+      search.blur();
+      window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+        savedWindowId: 'saved-1',
+        savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+        search: 'Research',
+      });
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      await waitFor(() => expect(search).toHaveFocus());
+    } finally {
+      restore();
+    }
   });
 
   it('reveals the exact versioned saved tab without opening it', async () => {

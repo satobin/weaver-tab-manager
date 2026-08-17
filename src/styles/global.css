@@ -2025,6 +2025,22 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   background: var(--surface);
 }
 
+.settings-group[tabindex='-1']:focus,
+.dedupe-preset-row[tabindex='-1']:focus,
+.dedupe-custom-heading[tabindex='-1']:focus {
+  --text-muted: var(--control-text);
+  outline: 0;
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.settings-group[tabindex='-1'],
+.settings-rule-section[tabindex='-1'],
+.dedupe-preset-row[tabindex='-1'],
+.dedupe-custom-heading[tabindex='-1'] {
+  scroll-margin-block: 16px;
+}
+
 .settings-group h3 {
   margin: 0 0 3px;
   font-size: 14px;
@@ -2289,6 +2305,25 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   right: 19px;
 }
 
+.switch[data-state='mixed'] {
+  background: var(--toggle-off);
+}
+
+.switch[data-state='mixed'] > span:first-child {
+  right: 11px;
+}
+
+.switch[data-state='mixed'] > span:first-child::after {
+  position: absolute;
+  top: 6px;
+  right: 3px;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--toggle-off) 65%, black);
+  content: '';
+}
+
 .switch:disabled {
   cursor: not-allowed;
 }
@@ -2305,6 +2340,20 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface);
+}
+
+.settings-rule-section[tabindex='-1']:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .settings-group[tabindex='-1']:focus,
+  .dedupe-preset-row[tabindex='-1']:focus,
+  .dedupe-custom-heading[tabindex='-1']:focus {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 .settings-rule-heading {
@@ -2404,10 +2453,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   box-shadow: inset 3px 0 0 transparent;
-}
-
-.dedupe-preset-row.is-enabled {
-  box-shadow: inset 3px 0 0 var(--success-strong);
 }
 
 .dedupe-preset-control {
@@ -4067,8 +4112,11 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .saved-tab-open-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
+  cursor: default;
+}
+
+.saved-tab-open-button:disabled .saved-tab-open-icon {
+  opacity: 0.5;
 }
 
 .saved-tab-copy-url-button {

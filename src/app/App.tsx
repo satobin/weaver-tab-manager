@@ -36,6 +36,9 @@ const PAGE_TITLES: Record<AppRoute, string> = {
   [APP_ROUTES.about]: 'About Weaver',
 };
 
+const FOCUS_TARGET_RETRY_LIMIT = 20;
+const FOCUS_READINESS_RETRY_LIMIT = 200;
+
 function FocusIntentObserver() {
   useEffect(() => {
     let requestId = 0;
@@ -46,8 +49,10 @@ function FocusIntentObserver() {
       if (!targetId) {
         return;
       }
+      const fallbackTargetId = searchParams.get('fallbackFocus');
       const route = parseAppRoute(window.location.hash);
       searchParams.delete('focus');
+      searchParams.delete('fallbackFocus');
       const remainingQuery = searchParams.toString();
       const nextHash = remainingQuery ? `${route}?${remainingQuery}` : route;
       window.history.replaceState(
@@ -57,23 +62,42 @@ function FocusIntentObserver() {
       );
       const currentRequestId = ++requestId;
       let attempts = 0;
+      const tryFocus = (target: HTMLElement): boolean => {
+        if (target.matches(':disabled, [aria-disabled="true"]')) {
+          return false;
+        }
+        target.scrollIntoView?.({ block: 'center' });
+        target.focus({ preventScroll: true });
+        return document.activeElement === target;
+      };
       const focusTarget = () => {
         if (currentRequestId !== requestId) {
           return;
         }
         const target = document.getElementById(targetId);
-        if (target instanceof HTMLElement) {
-          const unavailable = target.matches(':disabled, [aria-disabled="true"]');
-          if (!unavailable) {
-            target.scrollIntoView?.({ block: 'center' });
-            target.focus({ preventScroll: true });
-            if (document.activeElement === target) {
-              return;
-            }
-          }
+        if (target instanceof HTMLElement && tryFocus(target)) {
+          return;
         }
         attempts += 1;
-        if (attempts < 20) {
+        if (fallbackTargetId) {
+          const fallbackTarget = document.getElementById(fallbackTargetId);
+          if (fallbackTarget instanceof HTMLElement) {
+            const fallbackReady =
+              fallbackTarget.dataset.commandPaletteFocusReady !== 'false' ||
+              attempts >= FOCUS_READINESS_RETRY_LIMIT;
+            if (fallbackReady) {
+              if (tryFocus(fallbackTarget)) {
+                return;
+              }
+              if (attempts >= FOCUS_READINESS_RETRY_LIMIT) {
+                return;
+              }
+            }
+            timeoutId = window.setTimeout(focusTarget, 25);
+            return;
+          }
+        }
+        if (attempts < FOCUS_TARGET_RETRY_LIMIT) {
           timeoutId = window.setTimeout(focusTarget, 25);
         }
       };

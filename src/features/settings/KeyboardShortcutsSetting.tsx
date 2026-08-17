@@ -6,6 +6,7 @@ import {
   OPEN_MANAGER_COMMAND,
   openExtensionShortcutSettings,
 } from '../../platform/chrome/extensionShortcuts';
+import { SETTINGS_FOCUS_TARGETS } from './settingsFocusTargets';
 
 type CommandsApi = Pick<typeof chrome.commands, 'getAll'>;
 
@@ -149,8 +150,9 @@ export function KeyboardShortcutsSetting() {
   return (
     <section
       className="settings-group keyboard-shortcuts-settings-group"
-      id="settings-keyboard-shortcuts"
+      id={SETTINGS_FOCUS_TARGETS.keyboardShortcuts}
       aria-labelledby="keyboard-shortcuts-heading"
+      aria-describedby="keyboard-shortcuts-description"
       tabIndex={-1}
     >
       <header className="keyboard-shortcuts-header">

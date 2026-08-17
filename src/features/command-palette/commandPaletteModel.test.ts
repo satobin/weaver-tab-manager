@@ -373,23 +373,52 @@ describe('buildCommandPaletteSections', () => {
 
   it('keeps the approved Settings command inventory searchable', () => {
     const expectedSettings = [
-      ['Appearance', 'setting:appearance'],
-      ['Keyboard shortcuts', 'setting:keyboard-shortcuts'],
-      ['Show tab URLs', 'setting:show-tab-urls'],
-      ['Advanced duplicate matching', 'setting:advanced-duplicate-matching'],
-      ['Notion URL matching', 'setting:notion-url-matching'],
-      ['Google file URL matching', 'setting:google-url-matching'],
-      ['Custom URL rules', 'setting:custom-url-rules'],
+      ['Appearance', 'setting:appearance', 'settings-appearance', null],
+      ['Keyboard shortcuts', 'setting:keyboard-shortcuts', 'settings-keyboard-shortcuts', null],
+      ['Show tab URLs', 'setting:show-tab-urls', 'settings-show-tab-urls', null],
+      [
+        'Advanced duplicate matching',
+        'setting:advanced-duplicate-matching',
+        'settings-duplicate-matching',
+        null,
+      ],
+      [
+        'Notion URL matching',
+        'setting:notion-url-matching',
+        'settings-notion-url-matching',
+        'settings-duplicate-matching',
+      ],
+      [
+        'Google file URL matching',
+        'setting:google-url-matching',
+        'settings-google-url-matching',
+        'settings-duplicate-matching',
+      ],
+      [
+        'Custom URL rules',
+        'setting:custom-url-rules',
+        'settings-custom-url-rules',
+        'settings-duplicate-matching',
+      ],
     ] as const;
 
-    expectedSettings.forEach(([query, expectedId]) => {
+    expectedSettings.forEach(([query, expectedId, expectedFocus, expectedFallbackFocus]) => {
       const settings = buildCommandPaletteSections({
         activeSnapshot: null,
         query,
         savedWindows: [],
       }).find((section) => section.id === 'settings');
+      const result = settings?.results.find((candidate) => candidate.id === expectedId);
 
       expect(settings?.results[0]?.id).toBe(expectedId);
+      expect(result?.action.type).toBe('navigate');
+      if (result?.action.type !== 'navigate') {
+        throw new Error(`${expectedId} did not create a navigation result.`);
+      }
+      expect(parseAppRoute(result.action.hash)).toBe(APP_ROUTES.settings);
+      const searchParams = getAppRouteSearchParams(result.action.hash);
+      expect(searchParams.get('focus')).toBe(expectedFocus);
+      expect(searchParams.get('fallbackFocus')).toBe(expectedFallbackFocus);
     });
   });
 });

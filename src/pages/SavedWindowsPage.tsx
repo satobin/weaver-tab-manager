@@ -50,6 +50,10 @@ import {
   type SavedWindowsMutationUndo,
   type SavedWindowsService,
 } from '../features/saved-windows/savedWindowsService';
+import {
+  resolveSavedWindowReveal,
+  type SavedWindowRevealRequest,
+} from '../features/saved-windows/savedWindowReveal';
 import { useSavedWindows } from '../features/saved-windows/useSavedWindows';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useSettings } from '../features/settings/useSettings';
@@ -86,13 +90,6 @@ interface SavedWindowNotice {
 
 type SavedDuplicatePreviewOutcome = 'close' | 'keep';
 type SavedWindowSortSelection = Pick<TabSortOptions, 'criterion' | 'direction'>;
-
-interface PaletteRevealTarget {
-  groupKey: string | null;
-  savedWindowId: string;
-  savedWindowUpdatedAt: string | null;
-  tabOrder: number | null;
-}
 
 const DEFAULT_SAVED_WINDOW_SORT_SELECTION: SavedWindowSortSelection = {
   criterion: 'title',
@@ -379,7 +376,9 @@ export function SavedWindowsPage({
   const [renameValue, setRenameValue] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [paletteRevealTarget, setPaletteRevealTarget] = useState<PaletteRevealTarget | null>(null);
+  const [paletteRevealTarget, setPaletteRevealTarget] = useState<SavedWindowRevealRequest | null>(
+    null,
+  );
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
@@ -440,37 +439,15 @@ export function SavedWindowsPage({
   );
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const hasFilter = normalizedQuery.length > 0;
+  const paletteRevealResolution = useMemo(
+    () => (paletteRevealTarget ? resolveSavedWindowReveal(windows, paletteRevealTarget) : null),
+    [paletteRevealTarget, windows],
+  );
   const filteredWindows = useMemo(() => {
-    if (paletteRevealTarget) {
-      const savedWindow = windows.find(
-        (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
-      );
-      if (!savedWindow) {
-        return [];
-      }
-      const versionMatches =
-        paletteRevealTarget.savedWindowUpdatedAt === null ||
-        paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
-      if (
-        paletteRevealTarget.tabOrder !== null ||
-        paletteRevealTarget.groupKey === null ||
-        !versionMatches
-      ) {
-        return [savedWindow];
-      }
-      const group = savedWindow.groups.find(
-        (candidate) => candidate.key === paletteRevealTarget.groupKey,
-      );
-      if (!group) {
-        return [savedWindow];
-      }
-      return [
-        {
-          ...savedWindow,
-          groups: [group],
-          tabs: savedWindow.tabs.filter((tab) => tab.groupKey === group.key),
-        },
-      ];
+    if (paletteRevealResolution) {
+      return paletteRevealResolution.kind === 'missing-window'
+        ? []
+        : [paletteRevealResolution.displayWindow];
     }
     if (!normalizedQuery) {
       return windows;
@@ -502,7 +479,7 @@ export function SavedWindowsPage({
         },
       ];
     });
-  }, [normalizedQuery, paletteRevealTarget, windows]);
+  }, [normalizedQuery, paletteRevealResolution, windows]);
   const tabReferencesByKey = useMemo(() => {
     const references = new Map<string, SavedTabSelectionReference>();
     windows.forEach((savedWindow) => {
@@ -868,6 +845,14 @@ export function SavedWindowsPage({
       if (search === null && savedWindowId === null) {
         return;
       }
+      const nextPaletteRevealTarget: SavedWindowRevealRequest | null =
+        savedWindowId === null
+          ? null
+          : tabOrder !== null
+            ? { kind: 'tab', savedWindowId, savedWindowUpdatedAt, tabOrder }
+            : groupKey !== null
+              ? { groupKey, kind: 'group', savedWindowId, savedWindowUpdatedAt }
+              : { kind: 'window', savedWindowId, savedWindowUpdatedAt };
       closeMergeDialog(false);
       closeMoveDialog(false);
       clearTabSelection();
@@ -875,10 +860,8 @@ export function SavedWindowsPage({
       setDeletingId(null);
       setRenamingId(null);
       setCollapsedFilterIds(new Set());
-      setPaletteRevealTarget(
-        savedWindowId === null ? null : { groupKey, savedWindowId, savedWindowUpdatedAt, tabOrder },
-      );
-      setQuery(savedWindowId !== null && tabOrder !== null ? '' : (search ?? ''));
+      setPaletteRevealTarget(nextPaletteRevealTarget);
+      setQuery(nextPaletteRevealTarget?.kind === 'tab' ? '' : (search ?? ''));
       pendingPaletteRevealScrollRef.current = savedWindowId !== null;
       pendingPaletteSearchFocusRef.current = true;
       window.history.replaceState(
@@ -902,34 +885,27 @@ export function SavedWindowsPage({
   }, [paletteRevealTarget, query, status]);
 
   useEffect(() => {
-    if (status !== 'ready' || !paletteRevealTarget || !pendingPaletteRevealScrollRef.current) {
+    if (status !== 'ready' || !paletteRevealResolution || !pendingPaletteRevealScrollRef.current) {
       return;
     }
     pendingPaletteRevealScrollRef.current = false;
-    const savedWindow = windows.find(
-      (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
-    );
-    if (!savedWindow) {
+    if (paletteRevealResolution.kind === 'missing-window') {
       return;
     }
-    const versionMatches =
-      paletteRevealTarget.savedWindowUpdatedAt === null ||
-      paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
-    const tabMatches =
-      versionMatches &&
-      paletteRevealTarget.tabOrder !== null &&
-      savedWindow.tabs.some((tab) => tab.order === paletteRevealTarget.tabOrder);
-    const groupMatches =
-      versionMatches &&
-      paletteRevealTarget.groupKey !== null &&
-      savedWindow.groups.some((group) => group.key === paletteRevealTarget.groupKey);
-    const targetId = tabMatches
-      ? getPaletteSavedTabTargetId(savedWindow.id, paletteRevealTarget.tabOrder as number)
-      : groupMatches
-        ? getPaletteSavedGroupTargetId(savedWindow.id, paletteRevealTarget.groupKey as string)
-        : getPaletteSavedWindowTargetId(savedWindow.id);
+    const targetId =
+      paletteRevealResolution.kind === 'tab'
+        ? getPaletteSavedTabTargetId(
+            paletteRevealResolution.sourceWindow.id,
+            paletteRevealResolution.tab.order,
+          )
+        : paletteRevealResolution.kind === 'group'
+          ? getPaletteSavedGroupTargetId(
+              paletteRevealResolution.sourceWindow.id,
+              paletteRevealResolution.group.key,
+            )
+          : getPaletteSavedWindowTargetId(paletteRevealResolution.sourceWindow.id);
     queueMicrotask(() => document.getElementById(targetId)?.scrollIntoView?.({ block: 'center' }));
-  }, [paletteRevealTarget, status, windows]);
+  }, [paletteRevealResolution, status]);
 
   useEffect(() => {
     if (!mergeDialogOpen) {
@@ -1508,31 +1484,16 @@ export function SavedWindowsPage({
   const compactTotalSummary =
     status === 'loading' ? 'Loading' : `${windows.length}s · ${savedTabCount}t`;
   const paletteRevealAnnouncement = (() => {
-    if (!paletteRevealTarget) {
+    if (!paletteRevealResolution || paletteRevealResolution.kind === 'missing-window') {
       return null;
     }
-    const savedWindow = windows.find(
-      (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
-    );
-    if (!savedWindow) {
-      return null;
+    if (paletteRevealResolution.kind === 'tab') {
+      return `Showing ${paletteRevealResolution.sourceWindow.name} with ${paletteRevealResolution.tab.title} highlighted.`;
     }
-    const versionMatches =
-      paletteRevealTarget.savedWindowUpdatedAt === null ||
-      paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
-    const tab = versionMatches
-      ? savedWindow.tabs.find((candidate) => candidate.order === paletteRevealTarget.tabOrder)
-      : undefined;
-    if (tab) {
-      return `Showing ${savedWindow.name} with ${tab.title} highlighted.`;
+    if (paletteRevealResolution.kind === 'group') {
+      return `Showing ${paletteRevealResolution.sourceWindow.name} with ${paletteRevealResolution.group.title || 'Untitled group'} highlighted.`;
     }
-    const group = versionMatches
-      ? savedWindow.groups.find((candidate) => candidate.key === paletteRevealTarget.groupKey)
-      : undefined;
-    if (group) {
-      return `Showing ${savedWindow.name} with ${group.title || 'Untitled group'} highlighted.`;
-    }
-    return `Showing saved window ${savedWindow.name}.`;
+    return `Showing saved window ${paletteRevealResolution.sourceWindow.name}.`;
   })();
   const headerStatus = (
     <div className="saved-window-header-status">
@@ -2026,32 +1987,16 @@ export function SavedWindowsPage({
             const sourceSavedWindow =
               windows.find((candidate) => candidate.id === savedWindow.id) ?? savedWindow;
             const paletteRevealForWindow =
-              paletteRevealTarget?.savedWindowId === sourceSavedWindow.id
-                ? paletteRevealTarget
+              paletteRevealResolution &&
+              paletteRevealResolution.kind !== 'missing-window' &&
+              paletteRevealResolution.sourceWindow.id === sourceSavedWindow.id
+                ? paletteRevealResolution
                 : null;
-            const paletteRevealVersionMatches =
-              paletteRevealForWindow !== null &&
-              (paletteRevealForWindow.savedWindowUpdatedAt === null ||
-                paletteRevealForWindow.savedWindowUpdatedAt === sourceSavedWindow.updatedAt);
             const paletteRevealTabOrder =
-              paletteRevealVersionMatches &&
-              paletteRevealForWindow.tabOrder !== null &&
-              sourceSavedWindow.tabs.some((tab) => tab.order === paletteRevealForWindow.tabOrder)
-                ? paletteRevealForWindow.tabOrder
-                : null;
+              paletteRevealForWindow?.kind === 'tab' ? paletteRevealForWindow.tab.order : null;
             const paletteRevealGroupKey =
-              paletteRevealVersionMatches &&
-              paletteRevealForWindow.groupKey !== null &&
-              sourceSavedWindow.groups.some(
-                (group) => group.key === paletteRevealForWindow.groupKey,
-              )
-                ? paletteRevealForWindow.groupKey
-                : null;
-            const paletteRevealedWindow =
-              paletteRevealForWindow !== null &&
-              ((paletteRevealForWindow.groupKey === null &&
-                paletteRevealForWindow.tabOrder === null) ||
-                (paletteRevealTabOrder === null && paletteRevealGroupKey === null));
+              paletteRevealForWindow?.kind === 'group' ? paletteRevealForWindow.group.key : null;
+            const paletteRevealedWindow = paletteRevealForWindow?.kind === 'window';
             const expanded = duplicatePreviewMode
               ? true
               : paletteRevealForWindow

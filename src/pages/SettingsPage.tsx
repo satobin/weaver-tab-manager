@@ -9,6 +9,7 @@ import { DedupeRuleEditor } from '../features/deduplication/DedupeRuleEditor';
 import { AppearanceControl } from '../features/settings/AppearanceControl';
 import { KeyboardShortcutsSetting } from '../features/settings/KeyboardShortcutsSetting';
 import { SettingSwitch } from '../features/settings/SettingSwitch';
+import { SETTINGS_FOCUS_TARGETS } from '../features/settings/settingsFocusTargets';
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useSettings } from '../features/settings/useSettings';
 
@@ -76,14 +77,18 @@ export function SettingsPage({
       </h2>
 
       <div className="settings-layout">
-        <div
+        <section
           className="settings-group appearance-settings-group"
-          id="settings-appearance"
+          id={SETTINGS_FOCUS_TARGETS.appearance}
+          aria-labelledby="settings-appearance-heading"
+          aria-describedby="settings-appearance-description"
           tabIndex={-1}
         >
           <div>
-            <h3>Appearance</h3>
-            <p>Choose a color scheme. System default follows your device appearance.</p>
+            <h3 id="settings-appearance-heading">Appearance</h3>
+            <p id="settings-appearance-description">
+              Choose a color scheme. System default follows your device appearance.
+            </p>
           </div>
           <AppearanceControl
             disabled={isLoading || savingSettings.has('colorMode')}
@@ -91,14 +96,22 @@ export function SettingsPage({
             presentation="segmented"
             value={settings.colorMode}
           />
-        </div>
+        </section>
 
         <KeyboardShortcutsSetting />
 
-        <div className="settings-group" id="settings-show-tab-urls" tabIndex={-1}>
+        <section
+          className="settings-group"
+          id={SETTINGS_FOCUS_TARGETS.showTabUrls}
+          aria-labelledby="settings-show-tab-urls-heading"
+          aria-describedby="settings-show-tab-urls-description"
+          tabIndex={-1}
+        >
           <div>
-            <h3>Show tab URLs</h3>
-            <p>Show URLs below tab titles in Active Windows. Turn this off for denser cards.</p>
+            <h3 id="settings-show-tab-urls-heading">Show tab URLs</h3>
+            <p id="settings-show-tab-urls-description">
+              Show URLs below tab titles in Active Windows. Turn this off for denser cards.
+            </p>
           </div>
           <SettingSwitch
             checked={settings.showTabUrls}
@@ -106,7 +119,7 @@ export function SettingsPage({
             label="Show tab URLs"
             onChange={(checked) => void setShowTabUrls(checked)}
           />
-        </div>
+        </section>
       </div>
 
       {errorMessage ? (
@@ -121,6 +134,7 @@ export function SettingsPage({
           isLoading || savingSettings.has('advancedDuplicateMatchingEnabled')
         }
         disabled={isLoading || savingSettings.has('deduplicationRules')}
+        focusTargetsReady={!isLoading}
         onAdvancedDuplicateMatchingEnabledChange={setAdvancedDuplicateMatchingEnabled}
         onSave={setDeduplicationRules}
         preview={preview}

@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SettingSwitch } from '../settings/SettingSwitch';
+import { SETTINGS_FOCUS_TARGETS } from '../settings/settingsFocusTargets';
 import {
   type DedupeRule,
   cloneDedupeRules,
@@ -59,6 +60,7 @@ interface DedupeRuleEditorProps {
   advancedDuplicateMatchingEnabled?: boolean | undefined;
   advancedDuplicateMatchingToggleDisabled?: boolean | undefined;
   disabled: boolean;
+  focusTargetsReady?: boolean | undefined;
   onAdvancedDuplicateMatchingEnabledChange?: ((enabled: boolean) => Promise<boolean>) | undefined;
   onSave: (rules: readonly DedupeRule[]) => Promise<boolean>;
   preview?: DedupeRulePreviewInput | undefined;
@@ -141,6 +143,7 @@ export function DedupeRuleEditor({
   advancedDuplicateMatchingEnabled = false,
   advancedDuplicateMatchingToggleDisabled = false,
   disabled,
+  focusTargetsReady = true,
   onAdvancedDuplicateMatchingEnabledChange = () => Promise.resolve(true),
   onSave,
   preview = EMPTY_PREVIEW,
@@ -405,14 +408,16 @@ export function DedupeRuleEditor({
   return (
     <section
       className="settings-rule-section"
-      id="settings-duplicate-matching"
+      id={SETTINGS_FOCUS_TARGETS.duplicateMatching}
       aria-labelledby="dedupe-rules-heading"
+      aria-describedby="dedupe-rules-description"
+      data-command-palette-focus-ready={focusTargetsReady ? 'true' : 'false'}
       tabIndex={-1}
     >
       <header className="settings-rule-heading">
         <div>
           <h3 id="dedupe-rules-heading">Advanced duplicate matching</h3>
-          <p>
+          <p id="dedupe-rules-description">
             {advancedDuplicateMatchingEnabled
               ? 'Exact full-URL duplicates always match. Google, Notion, and custom rules can also identify different views of the same content.'
               : 'Exact full-URL duplicates always match. Turn this on to also match different views using Google, Notion, and custom rules.'}
@@ -465,15 +470,26 @@ export function DedupeRuleEditor({
           <div className="dedupe-preset-list" aria-label="Built-in duplicate matching">
             {BUILT_IN_DEDUPE_PRESETS.map((preset) => {
               const state = getPresetState(preset, rules);
+              const focusTargetId =
+                preset.id === 'notion'
+                  ? SETTINGS_FOCUS_TARGETS.notionUrlMatching
+                  : SETTINGS_FOCUS_TARGETS.googleUrlMatching;
+              const titleId = `${focusTargetId}-title`;
+              const descriptionId = `${focusTargetId}-description`;
               return (
                 <div
-                  className={`dedupe-preset-row${state.allEnabled || state.partial ? ' is-enabled' : ''}`}
+                  className="dedupe-preset-row"
+                  id={focusTargetId}
+                  role="group"
+                  aria-labelledby={titleId}
+                  aria-describedby={descriptionId}
+                  tabIndex={-1}
                   key={preset.id}
                 >
                   <div className="dedupe-preset-control">
                     <span className="dedupe-preset-copy">
                       <span className="dedupe-preset-title">
-                        <strong>{preset.name}</strong>
+                        <strong id={titleId}>{preset.name}</strong>
                         <DedupePresetFormatsTooltip
                           onClose={() =>
                             setActivePresetFormatsId((current) =>
@@ -485,13 +501,14 @@ export function DedupeRuleEditor({
                           preset={preset}
                         />
                       </span>
-                      <small>{preset.description}</small>
+                      <small id={descriptionId}>{preset.description}</small>
                     </span>
                   </div>
                   <SettingSwitch
                     checked={state.allEnabled}
                     disabled={interactionDisabled}
                     label={`${preset.name} preset`}
+                    mixed={state.partial}
                     onChange={() => void togglePreset(preset)}
                   />
                 </div>
@@ -500,7 +517,14 @@ export function DedupeRuleEditor({
           </div>
 
           <div className="dedupe-custom-section">
-            <div className="dedupe-custom-heading">
+            <div
+              className="dedupe-custom-heading"
+              id={SETTINGS_FOCUS_TARGETS.customUrlRules}
+              role="group"
+              aria-labelledby="dedupe-custom-rules-heading"
+              aria-describedby="dedupe-custom-rules-description"
+              tabIndex={-1}
+            >
               <button
                 className="dedupe-custom-toggle"
                 type="button"
@@ -510,10 +534,12 @@ export function DedupeRuleEditor({
               >
                 <span className="dedupe-custom-toggle-copy">
                   <span className="dedupe-custom-toggle-title">
-                    <strong>Custom rules</strong>
+                    <strong id="dedupe-custom-rules-heading">Custom rules</strong>
                     <ChevronDown aria-hidden="true" size={16} />
                   </span>
-                  <small>Define matching for another site.</small>
+                  <small id="dedupe-custom-rules-description">
+                    Define matching for another site.
+                  </small>
                 </span>
                 <span className="dedupe-custom-rule-count">
                   {pluralize(customRules.length, 'rule')}

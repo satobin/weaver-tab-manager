@@ -9,14 +9,16 @@ import {
   type ColorMode,
   DEFAULT_SETTINGS,
   type SettingsService,
+  type WeaverSettings,
 } from '../features/settings/settingsService';
+import { SETTINGS_FOCUS_TARGETS } from '../features/settings/settingsFocusTargets';
 import {
   createActiveWindowsSnapshot,
   createManagedTab,
   createManagedWindow,
 } from '../test/activeWindowsFixtures';
 import { App } from './App';
-import { APP_ROUTES } from './routes';
+import { APP_ROUTES, createAppRouteQuery } from './routes';
 
 function createService(windowCount = 1): ActiveWindowsService {
   const snapshot =
@@ -172,8 +174,8 @@ function createSavedService(windowCount: number): SavedWindowsService {
   };
 }
 
-function createSettingsService() {
-  let settings = DEFAULT_SETTINGS;
+function createSettingsService(overrides: Partial<typeof DEFAULT_SETTINGS> = {}) {
+  let settings = { ...DEFAULT_SETTINGS, ...overrides };
   const listeners = new Set<(nextSettings: typeof settings) => void>();
   const notify = () => listeners.forEach((listener) => listener(settings));
   const setColorMode = vi.fn((colorMode: ColorMode) => {
@@ -321,6 +323,106 @@ describe('App', () => {
     });
     expect(window.location.hash).toBe(APP_ROUTES.savedWindows);
     await waitFor(() => expect(savedWindowsHeading).toHaveFocus());
+  });
+
+  it('focuses the complete Settings section selected from the palette', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
+    const settings = createSettingsService();
+    render(
+      <App
+        activeWindowsService={createService()}
+        savedWindowsService={createSavedService(1)}
+        settingsService={settings.service}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Active Windows', level: 1 });
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    await user.type(within(dialog).getByRole('combobox'), 'keyboard shortcuts');
+    await user.click(within(dialog).getByRole('option', { name: /^Keyboard shortcuts\./u }));
+
+    const shortcuts = await screen.findByRole('region', { name: 'Keyboard shortcuts' });
+    await waitFor(() => expect(shortcuts).toHaveFocus());
+    expect(window.location.hash).toBe(APP_ROUTES.settings);
+  });
+
+  it('focuses the exact duplicate-matching option selected from the palette', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
+    const settings = createSettingsService({ advancedDuplicateMatchingEnabled: true });
+    render(
+      <App
+        activeWindowsService={createService()}
+        savedWindowsService={createSavedService(1)}
+        settingsService={settings.service}
+      />,
+    );
+    await screen.findByRole('heading', { name: 'Active Windows', level: 1 });
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    await user.type(within(dialog).getByRole('combobox'), 'notion url matching');
+    await user.click(within(dialog).getByRole('option', { name: /^Notion URL matching\./u }));
+
+    const notion = await screen.findByRole('group', { name: 'Notion' });
+    await waitFor(() => expect(notion).toHaveFocus());
+    expect(screen.getByRole('region', { name: 'Advanced duplicate matching' })).not.toHaveFocus();
+    expect(window.location.hash).toBe(APP_ROUTES.settings);
+  });
+
+  it('waits for Settings to load before choosing an exact-child fallback', async () => {
+    vi.useFakeTimers();
+    try {
+      window.location.hash = createAppRouteQuery(APP_ROUTES.settings, {
+        fallbackFocus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
+        focus: SETTINGS_FOCUS_TARGETS.notionUrlMatching,
+      });
+      const settings = createSettingsService({ advancedDuplicateMatchingEnabled: true });
+      let resolveLoad: ((value: WeaverSettings) => void) | undefined;
+      const loadPromise = new Promise<WeaverSettings>((resolve) => {
+        resolveLoad = resolve;
+      });
+      settings.service.load = vi.fn(() => loadPromise);
+      render(<App activeWindowsService={createService()} settingsService={settings.service} />);
+
+      const duplicateMatching = screen.getByRole('region', {
+        name: 'Advanced duplicate matching',
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(600));
+      expect(duplicateMatching).not.toHaveFocus();
+      expect(screen.queryByRole('group', { name: 'Notion' })).not.toBeInTheDocument();
+
+      await act(async () => {
+        resolveLoad?.({ ...DEFAULT_SETTINGS, advancedDuplicateMatchingEnabled: true });
+        await loadPromise;
+        await Promise.resolve();
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(25));
+
+      expect(screen.getByRole('group', { name: 'Notion' })).toHaveFocus();
+      expect(duplicateMatching).not.toHaveFocus();
+      expect(window.location.hash).toBe(APP_ROUTES.settings);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the duplicate-matching section when a child option is unavailable', async () => {
+    window.location.hash = createAppRouteQuery(APP_ROUTES.settings, {
+      fallbackFocus: SETTINGS_FOCUS_TARGETS.duplicateMatching,
+      focus: SETTINGS_FOCUS_TARGETS.notionUrlMatching,
+    });
+    const settings = createSettingsService({ advancedDuplicateMatchingEnabled: false });
+    render(<App activeWindowsService={createService()} settingsService={settings.service} />);
+
+    const duplicateMatching = await screen.findByRole('region', {
+      name: 'Advanced duplicate matching',
+    });
+    await waitFor(() => expect(duplicateMatching).toHaveFocus(), { timeout: 1_500 });
+    expect(screen.queryByRole('group', { name: 'Notion' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe(APP_ROUTES.settings);
   });
 
   it('closes the command palette without clearing Active Windows selection', async () => {
@@ -617,7 +719,9 @@ describe('App', () => {
       'For other questions, email weavertabmanager@gmail.com.',
     );
     expect(
-      screen.getByText(/saved windows, settings, and custom rules stay in your browser/i),
+      screen.getByText(
+        'Saved windows, settings, and custom rules stay in this browser profile and are not synced between devices.',
+      ),
     ).toBeVisible();
     expect(screen.getByText(/does not send your tab list.*off your device/i)).toBeVisible();
     expect(screen.queryByText(/Chrome may retrieve a site's icon/i)).not.toBeInTheDocument();
