@@ -13,7 +13,7 @@ export type AppRoute = (typeof APP_ROUTES)[keyof typeof APP_ROUTES];
 export type AppLaunchRoute = (typeof APP_LAUNCH_ROUTES)[keyof typeof APP_LAUNCH_ROUTES];
 export type AppNavigationRoute = AppRoute | AppLaunchRoute;
 
-export type AppRouteQueryValue = string | number | boolean;
+type AppRouteQueryValue = string | number | boolean;
 
 const ROUTE_SET = new Set<AppRoute>(Object.values(APP_ROUTES));
 const LAUNCH_ROUTE_SET = new Set<AppLaunchRoute>(Object.values(APP_LAUNCH_ROUTES));
@@ -28,13 +28,6 @@ export function parseAppNavigationRoute(hash: string): AppNavigationRoute {
   return LAUNCH_ROUTE_SET.has(hash as AppLaunchRoute)
     ? (hash as AppLaunchRoute)
     : parseAppRoute(hash);
-}
-
-export function isDuplicateTabsLaunchRoute(hash: string): boolean {
-  return (
-    parseAppRoute(hash) === APP_ROUTES.windows &&
-    getAppRouteSearchParams(hash).get('view') === 'duplicates'
-  );
 }
 
 export function createAppRouteQuery(

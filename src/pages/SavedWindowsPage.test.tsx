@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { APP_ROUTES, createAppRouteQuery } from '../app/routes';
 import { type TabSortOptions } from '../features/active-windows/tabSort';
 import { type SavedWindow } from '../features/saved-windows/savedWindowModel';
 import {
@@ -1608,8 +1609,12 @@ describe('SavedWindowsPage', () => {
   });
 
   it('consumes palette searches for saved windows and tab groups on the current route', async () => {
-    window.location.hash =
-      '#/saved-windows?groupKey=group-1&savedWindowId=saved-1&search=Untitled+group';
+    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+      groupKey: 'group-1',
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+      search: 'Untitled group',
+    });
     const savedWindow = createSavedWindow();
     const service = createService([
       {
@@ -1633,26 +1638,38 @@ describe('SavedWindowsPage', () => {
 
     search.blur();
     expect(search).not.toHaveFocus();
-    window.location.hash = '#/saved-windows?savedWindowId=saved-1&search=Research';
+    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+      search: 'Research',
+    });
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     await waitFor(() => expect(search).toHaveValue('Research'));
     await waitFor(() => expect(search).toHaveFocus());
     expect(window.location.hash).toBe('#/saved-windows');
 
     search.blur();
-    window.location.hash = '#/saved-windows?savedWindowId=saved-1&search=Research';
+    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+      search: 'Research',
+    });
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     await waitFor(() => expect(search).toHaveFocus());
   });
 
   it('reveals the exact versioned saved tab without opening it', async () => {
+    const user = userEvent.setup();
     const { restore, scrollIntoView } = installScrollIntoViewMock();
     const service = createService();
-    window.location.hash =
-      '#/saved-windows?savedWindowId=saved-1&savedWindowUpdatedAt=2026-07-10T20%3A00%3A00.000Z&search=Plan&tabOrder=1';
+    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-07-10T20:00:00.000Z',
+      tabOrder: 1,
+    });
 
     try {
-      render(<SavedWindowsPage service={service} />);
+      const { container } = render(<SavedWindowsPage service={service} />);
 
       const card = await screen.findByRole('article', { name: 'Research' });
       const target = within(card).getByRole('button', { name: 'Open Plan in a new tab' });
@@ -1676,6 +1693,14 @@ describe('SavedWindowsPage', () => {
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
       expect(service.openTab).not.toHaveBeenCalled();
       expect(window.location.hash).toBe('#/saved-windows');
+
+      await user.click(within(card).getByRole('button', { name: 'Collapse Research' }));
+      expect(card).toHaveClass('is-collapsed');
+      expect(within(card).getByRole('button', { name: 'Expand Research' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      expect(container.querySelector('.tab-list-item.is-palette-reveal')).not.toBeInTheDocument();
     } finally {
       restore();
     }
@@ -1684,8 +1709,11 @@ describe('SavedWindowsPage', () => {
   it('does not highlight the current tab at a stale saved-tab order', async () => {
     const { restore, scrollIntoView } = installScrollIntoViewMock();
     const service = createService();
-    window.location.hash =
-      '#/saved-windows?savedWindowId=saved-1&savedWindowUpdatedAt=2026-07-10T19%3A00%3A00.000Z&search=Plan&tabOrder=0';
+    window.location.hash = createAppRouteQuery(APP_ROUTES.savedWindows, {
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-07-10T19:00:00.000Z',
+      tabOrder: 0,
+    });
 
     try {
       const { container } = render(<SavedWindowsPage service={service} />);
@@ -1705,125 +1733,6 @@ describe('SavedWindowsPage', () => {
     } finally {
       restore();
     }
-  });
-
-  it('opens the saved duplicate review from a palette view request', async () => {
-    const duplicate = createSavedWindow({
-      groups: [],
-      id: 'saved-2',
-      name: 'Reference',
-      tabs: [
-        {
-          active: true,
-          order: 0,
-          pinned: false,
-          title: 'Reference plan',
-          url: 'https://docs.example.com/plan',
-        },
-      ],
-      updatedAt: '2026-07-10T21:00:00.000Z',
-    });
-    window.location.hash = '#/saved-windows?view=duplicates';
-
-    render(
-      <SavedWindowsPage
-        service={createService([createSavedWindow(), duplicate])}
-        settingsService={createSettingsService()}
-      />,
-    );
-
-    expect(await screen.findByRole('status', { name: 'Saved duplicate tabs view' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Show saved duplicate tabs only' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    expect(window.location.hash).toBe('#/saved-windows');
-  });
-
-  it('retains a saved duplicate view intent until settings load, then focuses the preview', async () => {
-    const duplicate = createSavedWindow({
-      groups: [],
-      id: 'saved-2',
-      name: 'Reference',
-      tabs: [
-        {
-          active: true,
-          order: 0,
-          pinned: false,
-          title: 'Reference plan',
-          url: 'https://docs.example.com/plan',
-        },
-      ],
-      updatedAt: '2026-07-10T21:00:00.000Z',
-    });
-    const loadedSettings: WeaverSettings = {
-      ...DEFAULT_SETTINGS,
-      deduplicationRules: DEFAULT_SETTINGS.deduplicationRules.map((rule) => ({ ...rule })),
-    };
-    const deferredSettings = createDeferred<WeaverSettings>();
-    const settingsService = createSettingsService();
-    vi.mocked(settingsService.load).mockReturnValue(deferredSettings.promise);
-    window.location.hash = '#/saved-windows?view=duplicates';
-
-    render(
-      <SavedWindowsPage
-        service={createService([createSavedWindow(), duplicate])}
-        settingsService={settingsService}
-      />,
-    );
-
-    await screen.findByRole('status', { name: '2 saved windows · 3 tabs' });
-    const previewButton = screen.getByRole('button', {
-      name: 'Show saved duplicate tabs only',
-    });
-    expect(previewButton).toBeDisabled();
-    expect(previewButton).toHaveAttribute('aria-pressed', 'false');
-    expect(
-      screen.queryByRole('status', { name: 'Saved duplicate tabs view' }),
-    ).not.toBeInTheDocument();
-    expect(window.location.hash).toBe('#/saved-windows');
-
-    deferredSettings.resolve(loadedSettings);
-    await act(() => deferredSettings.promise);
-
-    await waitFor(() => {
-      expect(previewButton).toBeEnabled();
-      expect(previewButton).toHaveAttribute('aria-pressed', 'true');
-      expect(previewButton).toHaveFocus();
-    });
-    expect(screen.getByRole('status', { name: 'Saved duplicate tabs view' })).toBeVisible();
-  });
-
-  it('opens and focuses the saved-window merge dialog from a palette view request', async () => {
-    const service = createService([
-      createSavedWindow(),
-      createSavedWindow({ id: 'saved-2', name: 'Reference' }),
-    ]);
-    window.location.hash = '#/saved-windows?view=merge';
-
-    render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
-
-    const dialog = await screen.findByRole('dialog', { name: 'Merge saved windows' });
-    await waitFor(() => expect(within(dialog).getAllByRole('checkbox')[0]).toHaveFocus());
-    expect(window.location.hash).toBe('#/saved-windows');
-  });
-
-  it('reports an unavailable saved-window Merge view and moves focus to search', async () => {
-    window.location.hash = '#/saved-windows?view=merge';
-
-    render(
-      <SavedWindowsPage service={createService()} settingsService={createSettingsService()} />,
-    );
-
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Save at least two windows before merging them.');
-    expect(screen.queryByRole('dialog', { name: 'Merge saved windows' })).not.toBeInTheDocument();
-    expect(window.location.hash).toBe('#/saved-windows');
-    await waitFor(() =>
-      expect(
-        screen.getByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
-      ).toHaveFocus(),
-    );
   });
 
   it('keeps focus at the same list position after removing one saved tab', async () => {

@@ -25,9 +25,8 @@ import { createPortal } from 'react-dom';
 
 import { type ActiveWindowsService } from '../active-windows/chromeActiveWindowsService';
 import { TabIcon } from '../active-windows/TabIcon';
-import { useActiveWindows } from '../active-windows/useActiveWindows';
-import { type SavedWindowsService } from '../saved-windows/savedWindowsService';
-import { useSavedWindows } from '../saved-windows/useSavedWindows';
+import { type ActiveWindowsDataSource, useActiveWindows } from '../active-windows/useActiveWindows';
+import { type SavedWindowsReadService, useSavedWindows } from '../saved-windows/useSavedWindows';
 import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import {
   buildCommandPaletteSections,
@@ -39,8 +38,8 @@ const DIALOG_ID = 'command-palette-dialog';
 const LISTBOX_ID = 'command-palette-results';
 
 interface CommandPaletteProps {
-  activeWindowsService: ActiveWindowsService;
-  savedWindowsService: SavedWindowsService;
+  activeWindowsService: ActiveWindowsDataSource & Pick<ActiveWindowsService, 'focusTab'>;
+  savedWindowsService: Pick<SavedWindowsReadService, 'load' | 'subscribe'>;
 }
 
 interface CommandPaletteDialogProps extends CommandPaletteProps {
@@ -195,7 +194,14 @@ function CommandPaletteDialog({
   const [busyResultId, setBusyResultId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const activeWindows = useActiveWindows(activeWindowsService);
-  const savedWindows = useSavedWindows(savedWindowsService);
+  const savedWindowsSource = useMemo(
+    () => ({
+      load: () => savedWindowsService.load(),
+      subscribe: (listener: () => void) => savedWindowsService.subscribe(listener),
+    }),
+    [savedWindowsService],
+  );
+  const savedWindows = useSavedWindows(savedWindowsSource);
   const sections = useMemo(
     () =>
       buildCommandPaletteSections({
@@ -355,18 +361,6 @@ function CommandPaletteDialog({
       updateActiveIndex(resolvedActiveIndex - 1);
       return;
     }
-    if (event.key === 'Home') {
-      event.preventDefault();
-      event.stopPropagation();
-      updateActiveIndex(0);
-      return;
-    }
-    if (event.key === 'End') {
-      event.preventDefault();
-      event.stopPropagation();
-      updateActiveIndex(results.length - 1);
-      return;
-    }
     if (event.key === 'Enter') {
       const activeResult = results[resolvedActiveIndex];
       if (!activeResult) {
@@ -391,7 +385,11 @@ function CommandPaletteDialog({
       >
         <div className="command-palette-section-heading" id={headingId}>
           <span>{section.label}</span>
-          <span aria-label={`${section.results.length} results`}>{section.results.length}</span>
+          <span
+            aria-label={`${section.results.length} result${section.results.length === 1 ? '' : 's'}`}
+          >
+            {section.results.length}
+          </span>
         </div>
         {section.results.map((result) => {
           const index = resultIndex++;
@@ -406,12 +404,13 @@ function CommandPaletteDialog({
           );
           const shortcut = index < 9 ? `${modifierLabel}${index + 1}` : null;
           return (
-            <div
+            <button
               className={`command-palette-result${resolvedActiveIndex === index ? ' is-active' : ''}${
                 busyResultId === result.id ? ' is-busy' : ''
               }${result.state?.suspended ? ' is-suspended' : ''}`}
               id={optionId}
               key={result.id}
+              type="button"
               role="option"
               aria-label={`${result.title}. ${result.subtitle}`}
               aria-busy={busyResultId === result.id || undefined}
@@ -420,12 +419,6 @@ function CommandPaletteDialog({
               aria-selected={resolvedActiveIndex === index}
               tabIndex={-1}
               onClick={() => void activateResult(result)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  void activateResult(result);
-                }
-              }}
               onMouseDown={(event: ReactMouseEvent) => event.preventDefault()}
               onMouseEnter={() => setActiveIndex(index)}
             >
@@ -438,7 +431,7 @@ function CommandPaletteDialog({
               </span>
               <ResultStates result={result} stateId={stateId} />
               {shortcut ? <kbd className="command-palette-result-shortcut">{shortcut}</kbd> : null}
-            </div>
+            </button>
           );
         })}
       </div>

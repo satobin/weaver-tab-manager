@@ -1,4 +1,4 @@
-import { APP_ROUTES, createAppRouteQuery } from '../../app/routes';
+import { APP_LAUNCH_ROUTES, APP_ROUTES, createAppRouteQuery } from '../../app/routes';
 import {
   type ActiveWindowsSnapshot,
   isTabSuspended,
@@ -66,9 +66,12 @@ export interface CommandPaletteSection {
 
 interface Candidate extends CommandPaletteResult {
   directSearchValues: readonly string[];
-  order: number;
   searchValues: readonly string[];
   showWhenEmpty?: boolean;
+}
+
+interface RankedCandidate extends Candidate {
+  order: number;
 }
 
 interface BuildCommandPaletteSectionsInput {
@@ -105,7 +108,6 @@ function matches(values: readonly string[], terms: readonly string[]): boolean {
 function getCandidateRank(candidate: Candidate, query: string, terms: readonly string[]): number {
   const normalizedQuery = normalize(query);
   const title = normalize(candidate.title);
-  const directText = normalize(candidate.directSearchValues.join(' '));
   if (title === normalizedQuery) {
     return 0;
   }
@@ -118,14 +120,11 @@ function getCandidateRank(candidate: Candidate, query: string, terms: readonly s
   if (matches(candidate.directSearchValues, terms)) {
     return 3;
   }
-  if (directText.includes(normalizedQuery)) {
-    return 4;
-  }
-  return 5;
+  return 4;
 }
 
 function filterCandidates(
-  candidates: readonly Candidate[],
+  candidates: readonly RankedCandidate[],
   query: string,
   terms: readonly string[],
 ): CommandPaletteResult[] {
@@ -173,19 +172,16 @@ function formatDomain(url: string, extensionOrigin = ''): string {
 }
 
 function createStaticCandidates(): Candidate[] {
-  let order = 0;
   const createCandidate = (
-    candidate: Omit<Candidate, 'directSearchValues' | 'order' | 'searchValues'> & {
+    candidate: Omit<Candidate, 'directSearchValues' | 'searchValues'> & {
       aliases?: readonly string[];
-      keywords?: readonly string[];
     },
   ): Candidate => {
-    const { aliases = [], keywords = [], ...result } = candidate;
+    const { aliases = [], ...result } = candidate;
     return {
       ...result,
       directSearchValues: [result.title, result.subtitle, ...aliases],
-      order: order++,
-      searchValues: [result.title, result.subtitle, ...aliases, ...keywords],
+      searchValues: [result.title, result.subtitle, ...aliases],
     };
   };
 
@@ -286,7 +282,7 @@ function createStaticCandidates(): Candidate[] {
     }),
     createCandidate({
       action: {
-        hash: createAppRouteQuery(APP_ROUTES.windows, { view: 'duplicates' }),
+        hash: APP_LAUNCH_ROUTES.duplicateTabs,
         type: 'navigate',
       },
       aliases: ['close duplicate tabs', 'dedupe open tabs'],
@@ -373,10 +369,18 @@ function createActiveCandidates(
     return [];
   }
   const candidates: Candidate[] = [];
-  let order = 0;
   snapshot.windows.forEach((window) => {
     const groupsById = new Map(window.groups.map((group) => [group.id, group]));
-    [...window.tabs]
+    const searchableTabs = window.tabs.filter(
+      (tab) =>
+        !(
+          window.isCurrent &&
+          tab.active &&
+          Boolean(snapshot.extensionOrigin) &&
+          tab.url.startsWith(snapshot.extensionOrigin)
+        ),
+    );
+    [...searchableTabs]
       .sort((first, second) => first.index - second.index)
       .forEach((tab) => {
         const group = tab.groupId === null ? undefined : groupsById.get(tab.groupId);
@@ -390,7 +394,6 @@ function createActiveCandidates(
           icon: 'tab',
           iconUrl: tab.iconUrl,
           id: `active-tab:${window.id}:${tab.id}`,
-          order: order++,
           searchValues: [tab.title, tab.url, domain, groupTitle, window.label],
           section: 'open-tabs',
           state: {
@@ -406,7 +409,7 @@ function createActiveCandidates(
       });
 
     window.groups.forEach((group) => {
-      const children = window.tabs
+      const children = searchableTabs
         .filter((tab) => tab.groupId === group.id)
         .sort((first, second) => first.index - second.index);
       if (children.length === 0) {
@@ -416,7 +419,7 @@ function createActiveCandidates(
       const matchingChildren = children.filter((tab) =>
         matches([tab.title, tab.url, formatDomain(tab.url, snapshot.extensionOrigin)], queryTerms),
       );
-      const targetTab = children[0];
+      const targetTab = matchingChildren[0] ?? children[0];
       if (!targetTab) {
         return;
       }
@@ -431,7 +434,6 @@ function createActiveCandidates(
         groupColor: group.color,
         icon: 'tab-group',
         id: `active-group:${window.id}:${group.id}`,
-        order: order++,
         searchValues: [
           groupTitle,
           group.color,
@@ -455,7 +457,6 @@ function createSavedCandidates(
     return [];
   }
   const candidates: Candidate[] = [];
-  let order = 0;
   savedWindows.forEach((savedWindow) => {
     const groupsByKey = new Map(savedWindow.groups.map((group) => [group.key, group]));
     const descendantValues = [
@@ -474,7 +475,6 @@ function createSavedCandidates(
       directSearchValues: [savedWindow.name],
       icon: 'saved-window',
       id: `saved-window:${savedWindow.id}`,
-      order: order++,
       searchValues: [savedWindow.name, ...descendantValues],
       section: 'saved',
       subtitle: `Saved window · ${pluralize(savedWindow.tabs.length, 'tab')}`,
@@ -499,7 +499,6 @@ function createSavedCandidates(
         ...(group ? { groupColor: group.color } : {}),
         icon: 'tab',
         id: `saved-tab:${savedWindow.id}:${tab.order}`,
-        order: order++,
         searchValues: [tab.title, tab.url, groupTitle, savedWindow.name],
         section: 'saved',
         state: {
@@ -538,7 +537,6 @@ function createSavedCandidates(
         groupColor: group.color,
         icon: 'tab-group',
         id: `saved-group:${savedWindow.id}:${group.key}`,
-        order: order++,
         searchValues: [
           groupTitle,
           group.color,
@@ -564,7 +562,7 @@ export function buildCommandPaletteSections({
     ...createActiveCandidates(activeSnapshot, terms),
     ...createSavedCandidates(savedWindows, terms),
     ...createStaticCandidates(),
-  ];
+  ].map((candidate, order): RankedCandidate => ({ ...candidate, order }));
   return COMMAND_PALETTE_SECTION_ORDER.flatMap((sectionId) => {
     const results = filterCandidates(
       candidates.filter((candidate) => candidate.section === sectionId),

@@ -1010,12 +1010,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   align-items: stretch;
 }
 
-.duplicate-split-button:focus-visible,
-.merge-control:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-
 .duplicate-split-button .topbar-remove-duplicates-button {
   height: 34px;
   border-radius: 5px 0 0 5px;
@@ -3540,21 +3534,28 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   padding-inline: 4px;
   border-radius: 4px;
   background: var(--badge-bg);
-  color: var(--text-subtle);
-  font-size: 9px;
+  color: var(--control-text);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
 .command-palette-result {
   display: grid;
+  width: 100%;
   min-height: 48px;
   grid-template-columns: 28px minmax(0, 1fr) 84px 36px;
   align-items: center;
   gap: 8px;
   padding: 6px;
+  appearance: none;
+  border: 0;
   border-left: 3px solid transparent;
   border-radius: 5px;
+  background: transparent;
+  color: inherit;
   cursor: default;
+  font: inherit;
+  text-align: left;
 }
 
 .command-palette-result.is-active {
@@ -3605,10 +3606,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 
 .command-palette-group-icon.group-color-green {
   --palette-group-color: var(--group-green);
-}
-
-.command-palette-group-icon.group-color-grey {
-  --palette-group-color: var(--group-grey);
 }
 
 .command-palette-group-icon.group-color-orange {

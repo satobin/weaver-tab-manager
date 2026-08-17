@@ -156,7 +156,15 @@ describe('buildCommandPaletteSections', () => {
     expect(savedGroup?.action.type).toBe('navigate');
   });
 
-  it('chooses the first browser-order child when a group title matches', () => {
+  it('keeps live groups ahead of saved groups for equal descendant matches', () => {
+    const groups = buildCommandPaletteSections({ ...createSources(), query: 'notion' })
+      .find((section) => section.id === 'tab-groups')
+      ?.results.map((result) => result.id);
+
+    expect(groups).toEqual(['active-group:1:10', 'saved-group:saved-1:research']);
+  });
+
+  it('focuses the first child for a group match and the matching child for a descendant match', () => {
     const sources = createSources();
     const group = buildCommandPaletteSections({ ...sources, query: 'planning' })
       .find((section) => section.id === 'tab-groups')
@@ -171,7 +179,7 @@ describe('buildCommandPaletteSections', () => {
       .find((section) => section.id === 'tab-groups')
       ?.results.find((result) => result.id === 'active-group:1:10');
     expect(descendantMatch?.action).toEqual({
-      tabId: 101,
+      tabId: 102,
       type: 'focus-active-tab',
       windowId: 1,
     });
@@ -205,6 +213,75 @@ describe('buildCommandPaletteSections', () => {
       'active-tab:1:101',
       'active-tab:2:201',
     ]);
+  });
+
+  it('omits only the Weaver tab hosting the palette from live tab and group results', () => {
+    const group = {
+      collapsed: false,
+      color: 'blue' as const,
+      id: 10,
+      title: 'Weaver tools',
+      windowId: 1,
+    };
+    const currentTab = createManagedTab({
+      active: true,
+      groupId: group.id,
+      id: 101,
+      title: 'Weaver',
+      url: 'chrome-extension://weaver/app.html#/windows',
+    });
+    const siblingTab = createManagedTab({
+      groupId: group.id,
+      id: 102,
+      index: 1,
+      title: 'Weaver settings',
+      url: 'chrome-extension://weaver/app.html#/settings',
+    });
+    const otherWindowTab = createManagedTab({
+      active: true,
+      id: 201,
+      title: 'Weaver saved windows',
+      url: 'chrome-extension://weaver/app.html#/saved-windows',
+      windowId: 2,
+    });
+    const activeSnapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({ groups: [group], isCurrent: true, tabs: [currentTab, siblingTab] }),
+        createManagedWindow({
+          focused: false,
+          id: 2,
+          isCurrent: false,
+          label: 'Window 2',
+          tabs: [otherWindowTab],
+        }),
+      ],
+    });
+
+    const sections = buildCommandPaletteSections({
+      activeSnapshot,
+      query: 'weaver',
+      savedWindows: [],
+    });
+
+    expect(
+      sections.find((section) => section.id === 'open-tabs')?.results.map((result) => result.id),
+    ).toEqual(['active-tab:1:102', 'active-tab:2:201']);
+    expect(sections.find((section) => section.id === 'tab-groups')?.results).toEqual([
+      expect.objectContaining({
+        action: { tabId: 102, type: 'focus-active-tab', windowId: 1 },
+        id: 'active-group:1:10',
+      }),
+    ]);
+
+    const selfOnlySections = buildCommandPaletteSections({
+      activeSnapshot: createActiveWindowsSnapshot({
+        windows: [createManagedWindow({ groups: [group], isCurrent: true, tabs: [currentTab] })],
+      }),
+      query: 'weaver',
+      savedWindows: [],
+    });
+    expect(selfOnlySections.some((section) => section.id === 'open-tabs')).toBe(false);
+    expect(selfOnlySections.some((section) => section.id === 'tab-groups')).toBe(false);
   });
 
   it('routes saved-tab matches to an exact versioned reveal target', () => {
@@ -267,7 +344,26 @@ describe('buildCommandPaletteSections', () => {
       savedWindows: [],
     });
 
-    expect(sections.map((section) => section.label)).toEqual(['Actions', 'Go to']);
+    expect(
+      sections.map((section) => ({
+        id: section.id,
+        results: section.results.map((result) => result.id),
+      })),
+    ).toEqual([
+      {
+        id: 'actions',
+        results: ['action:preview-open-duplicates', 'action:merge-windows'],
+      },
+      {
+        id: 'go-to',
+        results: [
+          'navigation:active-windows',
+          'navigation:saved-windows',
+          'navigation:settings',
+          'navigation:about',
+        ],
+      },
+    ]);
     expect(
       sections
         .flatMap((section) => section.results)
@@ -275,9 +371,25 @@ describe('buildCommandPaletteSections', () => {
     ).toBe(true);
   });
 
-  it('keeps matched actions ahead of matched settings in the fixed section order', () => {
-    const sections = buildCommandPaletteSections({ ...createSources(), query: 'duplicate' });
+  it('keeps the approved Settings command inventory searchable', () => {
+    const expectedSettings = [
+      ['Appearance', 'setting:appearance'],
+      ['Keyboard shortcuts', 'setting:keyboard-shortcuts'],
+      ['Show tab URLs', 'setting:show-tab-urls'],
+      ['Advanced duplicate matching', 'setting:advanced-duplicate-matching'],
+      ['Notion URL matching', 'setting:notion-url-matching'],
+      ['Google file URL matching', 'setting:google-url-matching'],
+      ['Custom URL rules', 'setting:custom-url-rules'],
+    ] as const;
 
-    expect(sections.map((section) => section.label)).toEqual(['Actions', 'Settings']);
+    expectedSettings.forEach(([query, expectedId]) => {
+      const settings = buildCommandPaletteSections({
+        activeSnapshot: null,
+        query,
+        savedWindows: [],
+      }).find((section) => section.id === 'settings');
+
+      expect(settings?.results[0]?.id).toBe(expectedId);
+    });
   });
 });

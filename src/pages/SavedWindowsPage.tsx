@@ -86,7 +86,6 @@ interface SavedWindowNotice {
 
 type SavedDuplicatePreviewOutcome = 'close' | 'keep';
 type SavedWindowSortSelection = Pick<TabSortOptions, 'criterion' | 'direction'>;
-type PaletteViewRequest = 'duplicates' | 'merge';
 
 interface PaletteRevealTarget {
   groupKey: string | null;
@@ -381,7 +380,6 @@ export function SavedWindowsPage({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [paletteRevealTarget, setPaletteRevealTarget] = useState<PaletteRevealTarget | null>(null);
-  const [paletteViewRequest, setPaletteViewRequest] = useState<PaletteViewRequest | null>(null);
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
@@ -880,7 +878,6 @@ export function SavedWindowsPage({
       setPaletteRevealTarget(
         savedWindowId === null ? null : { groupKey, savedWindowId, savedWindowUpdatedAt, tabOrder },
       );
-      setPaletteViewRequest(null);
       setQuery(savedWindowId !== null && tabOrder !== null ? '' : (search ?? ''));
       pendingPaletteRevealScrollRef.current = savedWindowId !== null;
       pendingPaletteSearchFocusRef.current = true;
@@ -895,28 +892,6 @@ export function SavedWindowsPage({
     window.addEventListener('hashchange', consumePaletteSearch);
     return () => window.removeEventListener('hashchange', consumePaletteSearch);
   }, [clearTabSelection, closeMergeDialog, closeMoveDialog, exitDuplicatePreview]);
-
-  useEffect(() => {
-    const consumePaletteView = () => {
-      if (parseAppRoute(window.location.hash) !== APP_ROUTES.savedWindows) {
-        return;
-      }
-      const view = getAppRouteSearchParams(window.location.hash).get('view');
-      if (view !== 'duplicates' && view !== 'merge') {
-        return;
-      }
-      setPaletteViewRequest(view);
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${window.location.search}${APP_ROUTES.savedWindows}`,
-      );
-    };
-
-    consumePaletteView();
-    window.addEventListener('hashchange', consumePaletteView);
-    return () => window.removeEventListener('hashchange', consumePaletteView);
-  }, []);
 
   useEffect(() => {
     if (status !== 'ready' || !pendingPaletteSearchFocusRef.current) {
@@ -1084,6 +1059,19 @@ export function SavedWindowsPage({
   };
 
   const toggleExpanded = (id: string) => {
+    if (paletteRevealTarget?.savedWindowId === id) {
+      setPaletteRevealTarget(null);
+      if (hasFilter) {
+        setCollapsedFilterIds((current) => new Set(current).add(id));
+      } else {
+        setExpandedIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }
+      return;
+    }
     if (hasFilter) {
       setCollapsedFilterIds((current) => {
         const next = new Set(current);
@@ -1569,86 +1557,11 @@ export function SavedWindowsPage({
     selectedTabCount > 0 ||
     (!duplicatePreviewMode && duplicatePlan.duplicateGroupCount === 0);
 
-  useEffect(() => {
-    if (
-      !paletteViewRequest ||
-      status !== 'ready' ||
-      (paletteViewRequest === 'duplicates' && (settingsLoading || operation !== null))
-    ) {
-      return;
-    }
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) {
-        return;
-      }
-      if (paletteViewRequest === 'duplicates') {
-        closeMergeDialog(false);
-        closeMoveDialog(false);
-        clearTabSelection();
-        setDeletingId(null);
-        setRenamingId(null);
-        setPaletteRevealTarget(null);
-        setQuery('');
-        setDuplicatePreviewMode(true);
-        setPaletteViewRequest(null);
-        queueMicrotask(() => {
-          const previewButton = duplicatePreviewButtonRef.current;
-          if (previewButton && !previewButton.disabled) {
-            previewButton.focus();
-          }
-        });
-        return;
-      }
-      if (windows.length < 2) {
-        setActionError('Save at least two windows before merging them.');
-        setPaletteViewRequest(null);
-        queueMicrotask(() => searchInputRef.current?.focus());
-        return;
-      }
-      if (operation !== null) {
-        return;
-      }
-      closeMoveDialog(false);
-      clearTabSelection();
-      setDeletingId(null);
-      setRenamingId(null);
-      setPaletteRevealTarget(null);
-      setQuery('');
-      setDuplicatePreviewMode(false);
-      setMergeWindowName('');
-      setMergeWindowIds(new Set());
-      updateMergeDialogPosition();
-      setMergeDialogOpen(true);
-      setPaletteViewRequest(null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    clearTabSelection,
-    closeMergeDialog,
-    closeMoveDialog,
-    operation,
-    paletteViewRequest,
-    settingsLoading,
-    status,
-    updateMergeDialogPosition,
-    windows.length,
-  ]);
-
   const bulkActionControls = (
     <div className="topbar-window-actions">
       <div className="duplicate-preview-control">
-        <div
-          className="duplicate-split-button"
-          id="saved-duplicate-actions"
-          role="group"
-          aria-label="Duplicate tab actions"
-          tabIndex={-1}
-        >
+        <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
           <button
-            id="remove-saved-duplicate-tabs-button"
             className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${removingDuplicates ? ' is-removing-duplicates' : ''}`}
             type="button"
             aria-label={
@@ -1675,7 +1588,6 @@ export function SavedWindowsPage({
           </button>
           <button
             ref={duplicatePreviewButtonRef}
-            id="saved-duplicate-preview-button"
             className="toolbar-button topbar-duplicate-preview-button"
             type="button"
             aria-label="Show saved duplicate tabs only"
@@ -1703,15 +1615,12 @@ export function SavedWindowsPage({
 
       <div
         className="merge-control"
-        id="saved-merge-actions"
         ref={mergeControlRef}
         role="group"
         aria-label="Merge saved windows"
-        tabIndex={-1}
       >
         <button
           ref={mergeButtonRef}
-          id="merge-saved-windows-button"
           className={`toolbar-button topbar-merge-button${mergingSavedWindows ? ' is-merging-saved-windows' : ''}`}
           type="button"
           aria-label={

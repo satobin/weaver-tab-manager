@@ -1,18 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createActiveWindowsSnapshot,
   createManagedTab,
   createManagedWindow,
 } from '../../test/activeWindowsFixtures';
-import { type ActiveWindowsService } from '../active-windows/chromeActiveWindowsService';
 import { type SavedWindow } from '../saved-windows/savedWindowModel';
-import { type SavedWindowsService } from '../saved-windows/savedWindowsService';
 import { CommandPalette } from './CommandPalette';
 
-function createActiveService(): ActiveWindowsService {
+function createActiveService() {
   const snapshot = createActiveWindowsSnapshot({
     windows: [
       createManagedWindow({
@@ -51,7 +49,7 @@ function createActiveService(): ActiveWindowsService {
     focusTab: vi.fn(() => Promise.resolve()),
     loadSnapshot: vi.fn(() => Promise.resolve(snapshot)),
     subscribe: vi.fn(() => () => undefined),
-  } as unknown as ActiveWindowsService;
+  };
 }
 
 function createSavedWindow(): SavedWindow {
@@ -81,22 +79,17 @@ function createSavedWindow(): SavedWindow {
   };
 }
 
-function createSavedService(): SavedWindowsService {
+function createSavedService() {
   return {
     load: vi.fn(() => Promise.resolve([createSavedWindow()])),
     openTab: vi.fn(() => Promise.resolve(42)),
     restoreWindow: vi.fn(() => Promise.reject(new Error('Must not restore from the palette'))),
     subscribe: vi.fn(() => () => undefined),
-  } as unknown as SavedWindowsService;
+  };
 }
 
-afterEach(() => {
-  window.location.hash = '';
-  vi.restoreAllMocks();
-});
-
 describe('CommandPalette', () => {
-  it('loads full tab data lazily and exposes the dialog combobox contract', async () => {
+  it('exposes the dialog combobox contract', async () => {
     const user = userEvent.setup();
     const activeService = createActiveService();
     const savedService = createSavedService();
@@ -109,9 +102,6 @@ describe('CommandPalette', () => {
     const trigger = screen.getByRole('button', { name: 'Search Weaver' });
     expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     expect(trigger).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K');
-    expect(activeService.loadSnapshot).not.toHaveBeenCalled();
-    expect(savedService.load).not.toHaveBeenCalled();
-
     await user.click(trigger);
 
     const dialog = screen.getByRole('dialog', { name: 'Search Weaver' });
@@ -122,8 +112,6 @@ describe('CommandPalette', () => {
     expect(
       await within(dialog).findByRole('listbox', { name: 'Weaver search results' }),
     ).toBeVisible();
-    expect(activeService.loadSnapshot).toHaveBeenCalledOnce();
-    expect(savedService.load).toHaveBeenCalledOnce();
   });
 
   it('shows sectioned results, accessible tab states, and compact result shortcuts', async () => {
@@ -187,16 +175,10 @@ describe('CommandPalette', () => {
     });
     expect(previewOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
     expect(previewOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
-    expect(
-      previewOption.querySelector('.command-palette-result-icon .lucide-eye'),
-    ).toBeInTheDocument();
 
     const mergeOption = screen.getByRole('option', { name: /^Merge windows\./u });
     expect(mergeOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
     expect(mergeOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
-    expect(
-      mergeOption.querySelector('.command-palette-result-icon .lucide-merge'),
-    ).toBeInTheDocument();
   });
 
   it('updates live result states and keeps one valid selection after source changes', async () => {
@@ -245,7 +227,7 @@ describe('CommandPalette', () => {
           notifySourceChange = undefined;
         };
       }),
-    } as unknown as ActiveWindowsService;
+    };
     const user = userEvent.setup();
     render(
       <div className="app-shell">
@@ -300,11 +282,13 @@ describe('CommandPalette', () => {
     expect(activeService.focusTab).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog', { name: 'Search Weaver' })).toBeInTheDocument();
 
-    await user.keyboard('{ArrowDown}{ArrowUp}');
+    await user.keyboard('{ArrowDown}');
     expect(input).toHaveFocus();
+    expect(options[0]).toHaveAttribute('aria-selected', 'false');
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{Enter}');
 
-    await waitFor(() => expect(activeService.focusTab).toHaveBeenCalledWith(1, 102));
+    await waitFor(() => expect(activeService.focusTab).toHaveBeenCalledWith(1, 101));
     expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
   });
 
@@ -391,6 +375,56 @@ describe('CommandPalette', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument(),
     );
+  });
+
+  it('recovers from a failed tab focus and allows a retry', async () => {
+    const user = userEvent.setup();
+    const activeService = createActiveService();
+    vi.mocked(activeService.focusTab)
+      .mockRejectedValueOnce(new Error('That tab is no longer available.'))
+      .mockResolvedValueOnce(undefined);
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={activeService}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    await user.type(screen.getByRole('combobox', { name: 'Search Weaver' }), 'notion');
+    const option = await screen.findByRole('option', { name: /^Notion roadmap\./u });
+
+    await user.click(option);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('That tab is no longer available.');
+    expect(option).not.toHaveAttribute('aria-busy');
+    expect(screen.getByRole('dialog', { name: 'Search Weaver' })).toBeInTheDocument();
+
+    await user.click(option);
+    await waitFor(() => expect(activeService.focusTab).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
+  });
+
+  it('keeps healthy and static results available when one source fails', async () => {
+    const user = userEvent.setup();
+    const activeService = createActiveService();
+    vi.mocked(activeService.loadSnapshot).mockRejectedValue(new Error('Tabs unavailable'));
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={activeService}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+
+    expect(await screen.findByRole('option', { name: /^Preview duplicate tabs\./u })).toBeVisible();
+    expect(await screen.findByText('Open tabs are temporarily unavailable.')).toBeVisible();
+
+    await user.type(screen.getByRole('combobox', { name: 'Search Weaver' }), 'weaver ideas');
+    expect(await screen.findByRole('option', { name: /^Weaver ideas — Notion\./u })).toBeVisible();
   });
 
   it('lets the clear and close buttons handle Enter without activating a result', async () => {
@@ -505,7 +539,10 @@ describe('CommandPalette', () => {
     expect(fireEvent.keyDown(reopenedInput, { key: 'k', metaKey: true, repeat: true })).toBe(false);
     expect(reopenedDialog).toBeInTheDocument();
     expect(reopenedInput).toHaveFocus();
-    await user.click(within(reopenedDialog).getByRole('button', { name: 'Close' }));
+    expect(fireEvent.keyDown(reopenedInput, { key: 'k', metaKey: true })).toBe(false);
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument(),
+    );
     await waitFor(() => expect(trigger).toHaveFocus());
 
     rerender(

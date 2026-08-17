@@ -5,12 +5,11 @@ import {
   APP_ROUTES,
   createAppRouteQuery,
   getAppRouteSearchParams,
-  isDuplicateTabsLaunchRoute,
   parseAppNavigationRoute,
   parseAppRoute,
 } from './routes';
 
-describe('parseAppRoute', () => {
+describe('app routes', () => {
   it.each(Object.values(APP_ROUTES))('accepts %s', (route) => {
     expect(parseAppRoute(route)).toBe(route);
   });
@@ -27,15 +26,6 @@ describe('parseAppRoute', () => {
     expect(parseAppNavigationRoute(APP_LAUNCH_ROUTES.duplicateTabs)).toBe(
       APP_LAUNCH_ROUTES.duplicateTabs,
     );
-  });
-
-  it('recognizes duplicate-tab launches with an additional focus intent', () => {
-    const route = createAppRouteQuery(APP_ROUTES.windows, {
-      focus: 'active-duplicate-actions',
-      view: 'duplicates',
-    });
-
-    expect(isDuplicateTabsLaunchRoute(route)).toBe(true);
   });
 
   it('round-trips encoded command-palette route parameters', () => {

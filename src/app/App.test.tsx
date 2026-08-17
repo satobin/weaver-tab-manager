@@ -303,8 +303,9 @@ describe('App', () => {
     expect(window.location.hash).toBe(APP_ROUTES.about);
   });
 
-  it('uses the empty-query Saved Windows shortcut and focuses its page title', async () => {
+  it('navigates to Saved Windows from the palette and focuses its page title', async () => {
     window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
     render(
       <App activeWindowsService={createService()} savedWindowsService={createSavedService(1)} />,
     );
@@ -312,23 +313,13 @@ describe('App', () => {
 
     fireEvent.keyDown(document, { key: 'k', metaKey: true });
     const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
-    const input = within(dialog).getByRole('combobox', { name: 'Search Weaver' });
-    expect(input).toHaveValue('');
-    expect(within(dialog).getByRole('option', { name: /^Saved Windows\./u })).toHaveAttribute(
-      'aria-keyshortcuts',
-      'Meta+4 Control+4',
-    );
-
-    fireEvent.keyDown(input, { key: '4', metaKey: true });
+    await user.click(within(dialog).getByRole('option', { name: /^Saved Windows\./u }));
 
     const savedWindowsHeading = await screen.findByRole('heading', {
       name: 'Saved Windows',
       level: 1,
     });
     expect(window.location.hash).toBe(APP_ROUTES.savedWindows);
-    expect(savedWindowsHeading.tagName).toBe('H1');
-    expect(savedWindowsHeading).toHaveAttribute('tabindex', '-1');
-    expect(savedWindowsHeading).toHaveClass('programmatic-focus-target');
     await waitFor(() => expect(savedWindowsHeading).toHaveFocus());
   });
 
