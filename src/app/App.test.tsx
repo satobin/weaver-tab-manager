@@ -270,11 +270,11 @@ describe('App', () => {
     expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
   });
 
-  it('moves focus to safe page targets for command-palette navigation', async () => {
+  it('activates command-palette actions and moves focus to safe page targets', async () => {
     window.location.hash = APP_ROUTES.windows;
     const user = userEvent.setup();
     render(
-      <App activeWindowsService={createService()} savedWindowsService={createSavedService(1)} />,
+      <App activeWindowsService={createService(2)} savedWindowsService={createSavedService(1)} />,
     );
     await screen.findByRole('heading', { name: 'Active Windows', level: 1 });
 
@@ -282,9 +282,17 @@ describe('App', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
     await user.click(within(dialog).getByRole('option', { name: /^Merge windows\./u }));
 
-    const mergeActions = await screen.findByRole('group', { name: 'Merge windows' });
-    await waitFor(() => expect(mergeActions).toHaveFocus());
+    const mergeDialog = await screen.findByRole('dialog', { name: 'Merge windows' });
+    const firstWindowCheckbox = within(mergeDialog).getByRole('checkbox', {
+      name: /Window 1/u,
+    });
+    await waitFor(() => expect(firstWindowCheckbox).toHaveFocus());
     expect(window.location.hash).toBe(APP_ROUTES.windows);
+
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument(),
+    );
 
     fireEvent.keyDown(document, { key: 'k', metaKey: true });
     const reopenedDialog = await screen.findByRole('dialog', { name: 'Search Weaver' });
@@ -308,10 +316,10 @@ describe('App', () => {
     expect(input).toHaveValue('');
     expect(within(dialog).getByRole('option', { name: /^Saved Windows\./u })).toHaveAttribute(
       'aria-keyshortcuts',
-      'Meta+6 Control+6',
+      'Meta+4 Control+4',
     );
 
-    fireEvent.keyDown(input, { key: '6', metaKey: true });
+    fireEvent.keyDown(input, { key: '4', metaKey: true });
 
     const savedWindowsHeading = await screen.findByRole('heading', {
       name: 'Saved Windows',
@@ -340,6 +348,26 @@ describe('App', () => {
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
+    expect(selectTab).toBeChecked();
+  });
+
+  it('replaces the active Merge dialog with Cmd+K without clearing page selection', async () => {
+    window.location.hash = APP_ROUTES.windows;
+    const user = userEvent.setup();
+    render(
+      <App activeWindowsService={createService(2)} savedWindowsService={createSavedService(1)} />,
+    );
+
+    const selectTab = (await screen.findAllByRole('checkbox', { name: 'Select Example tab' }))[0]!;
+    await user.click(selectTab);
+    await user.click(screen.getByRole('button', { name: 'Merge windows' }));
+    expect(screen.getByRole('dialog', { name: 'Merge windows' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+
+    expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
+    const palette = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    expect(within(palette).getByRole('combobox', { name: 'Search Weaver' })).toHaveFocus();
     expect(selectTab).toBeChecked();
   });
 
@@ -511,6 +539,26 @@ describe('App', () => {
     );
     expect(screen.queryByRole('menu', { name: 'Color scheme' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'About Weaver', level: 1 })).toBeInTheDocument();
+  });
+
+  it('replaces the appearance menu with Cmd+K', async () => {
+    const user = userEvent.setup();
+    const settings = createSettingsService();
+    window.location.hash = APP_ROUTES.about;
+    render(<App activeWindowsService={createService()} settingsService={settings.service} />);
+    const appearance = await screen.findByRole('button', {
+      name: 'Color scheme: System default',
+    });
+
+    await waitFor(() => expect(appearance).toBeEnabled());
+    await user.click(appearance);
+    expect(screen.getByRole('menu', { name: 'Color scheme' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'k', metaKey: true });
+
+    expect(screen.queryByRole('menu', { name: 'Color scheme' })).not.toBeInTheDocument();
+    const palette = await screen.findByRole('dialog', { name: 'Search Weaver' });
+    expect(within(palette).getByRole('combobox', { name: 'Search Weaver' })).toHaveFocus();
   });
 
   it('keeps the Settings selector and top-bar appearance icon synchronized', async () => {

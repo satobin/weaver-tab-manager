@@ -16,7 +16,7 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { APP_ROUTES, isDuplicateTabsLaunchRoute } from '../app/routes';
+import { APP_ROUTES, getAppRouteSearchParams, parseAppRoute } from '../app/routes';
 import {
   createChromeActiveWindowsService,
   PINNED_TAB_GROUP_MOVE_ERROR_MESSAGE,
@@ -86,6 +86,7 @@ interface ActiveWindowsPageProps {
 
 const EMPTY_WINDOWS: readonly ManagedWindow[] = [];
 type WindowSortSelection = Pick<TabSortOptions, 'criterion' | 'direction'>;
+type PaletteViewRequest = 'duplicates' | 'merge';
 interface NewWindowDropTarget {
   anchorWindowId: number;
   beforeWindowId: number | null;
@@ -335,6 +336,7 @@ export function ActiveWindowsPage({
     ReadonlyMap<number, TabSortOptions>
   >(() => new Map());
   const [duplicatePreviewMode, setDuplicatePreviewMode] = useState(false);
+  const [paletteViewRequest, setPaletteViewRequest] = useState<PaletteViewRequest | null>(null);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeDialogHorizontalOffset, setMergeDialogHorizontalOffset] = useState(0);
   const [mergeWindowIds, setMergeWindowIds] = useState<ReadonlySet<number>>(() => new Set());
@@ -378,6 +380,7 @@ export function ActiveWindowsPage({
   const cardTargetPointerRef = useRef<PointerPosition | null>(null);
   const mergeButtonRef = useRef<HTMLButtonElement>(null);
   const mergeControlRef = useRef<HTMLDivElement>(null);
+  const duplicatePreviewButtonRef = useRef<HTMLButtonElement>(null);
   const saveWindowTriggerRef = useRef<HTMLButtonElement | null>(null);
   const updateMergeDialogPosition = useCallback(() => {
     const buttonLeft = mergeButtonRef.current?.getBoundingClientRect().left;
@@ -1337,11 +1340,15 @@ export function ActiveWindowsPage({
   }, [clearSelection, closeMergeDialog]);
 
   useEffect(() => {
-    const consumeDuplicateTabsLaunch = () => {
-      if (!isDuplicateTabsLaunchRoute(window.location.hash)) {
+    const consumePaletteView = () => {
+      if (parseAppRoute(window.location.hash) !== APP_ROUTES.windows) {
         return;
       }
-      enterDuplicatePreview();
+      const view = getAppRouteSearchParams(window.location.hash).get('view');
+      if (view !== 'duplicates' && view !== 'merge') {
+        return;
+      }
+      setPaletteViewRequest(view);
       window.history.replaceState(
         null,
         '',
@@ -1349,10 +1356,10 @@ export function ActiveWindowsPage({
       );
     };
 
-    consumeDuplicateTabsLaunch();
-    window.addEventListener('hashchange', consumeDuplicateTabsLaunch);
-    return () => window.removeEventListener('hashchange', consumeDuplicateTabsLaunch);
-  }, [enterDuplicatePreview]);
+    consumePaletteView();
+    window.addEventListener('hashchange', consumePaletteView);
+    return () => window.removeEventListener('hashchange', consumePaletteView);
+  }, []);
 
   const setTabsSelected = (tabIds: readonly number[], checked: boolean) => {
     clearSelectedGroupIntentForTabs(tabIds);
@@ -2117,6 +2124,64 @@ export function ActiveWindowsPage({
     operationLabel !== null ||
     hasPendingWindowCloses ||
     (!duplicatePreviewMode && duplicatePlan.duplicateGroups.length === 0);
+
+  useEffect(() => {
+    if (
+      !paletteViewRequest ||
+      status !== 'ready' ||
+      !snapshot ||
+      (paletteViewRequest === 'duplicates' &&
+        (settingsLoading || operationLabel !== null || hasPendingWindowCloses))
+    ) {
+      return;
+    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+      if (paletteViewRequest === 'duplicates') {
+        enterDuplicatePreview();
+        setPaletteViewRequest(null);
+        queueMicrotask(() => {
+          const previewButton = duplicatePreviewButtonRef.current;
+          if (previewButton && !previewButton.disabled) {
+            previewButton.focus();
+          }
+        });
+        return;
+      }
+      if (snapshot.windows.length < 2) {
+        pendingWindowCloseResultFocusRef.current = 'error';
+        setOperationError('Open at least two windows before merging them.');
+        setPaletteViewRequest(null);
+        return;
+      }
+      if (operationLabel !== null || hasPendingWindowCloses) {
+        return;
+      }
+      setOperationError(null);
+      setDuplicatePreviewMode(false);
+      clearSelection();
+      setMergeWindowIds(new Set());
+      updateMergeDialogPosition();
+      setMergeDialogOpen(true);
+      setPaletteViewRequest(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clearSelection,
+    enterDuplicatePreview,
+    hasPendingWindowCloses,
+    operationLabel,
+    paletteViewRequest,
+    snapshot,
+    status,
+    settingsLoading,
+    updateMergeDialogPosition,
+  ]);
   const removeDuplicatesControl = (
     <div className="duplicate-preview-control">
       <div
@@ -2147,6 +2212,7 @@ export function ActiveWindowsPage({
           </span>
         </button>
         <button
+          ref={duplicatePreviewButtonRef}
           id="open-duplicate-preview-button"
           className="toolbar-button topbar-duplicate-preview-button"
           type="button"
@@ -2508,7 +2574,7 @@ export function ActiveWindowsPage({
               {duplicatePlan.duplicateGroups.length > 0 &&
               duplicatePlan.duplicateTabIds.length === 0
                 ? 'Every duplicate shown is protected and will stay open. Pinned tabs can be unpinned; agent-associated tabs stay open while activity is ongoing or unclear.'
-                : 'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.'}
+                : 'Tabs labeled Keep stay open. Weaver protects pinned tabs and tabs linked to agents with ongoing or unclear activity. Cleanup closes only tabs labeled Close.'}
             </span>
           </div>
           <div className="duplicate-preview-banner-actions">

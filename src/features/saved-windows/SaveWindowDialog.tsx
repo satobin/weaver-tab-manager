@@ -1,10 +1,11 @@
 import { PanelTopClose, Save, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 import { type SaveWindowResult } from './savedWindowsService';
 
 interface SaveWindowDialogProps {
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
   onComplete: (result: SaveWindowResult) => void;
   onSave: (name: string, closeSource: boolean) => Promise<SaveWindowResult>;
   tabCount: number;
@@ -30,6 +31,8 @@ export function SaveWindowDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const savingRef = useRef(false);
+
+  useDismissOnCommandPaletteOpen(dialogRef, () => onClose(false), savingAction === null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -112,7 +115,7 @@ export function SaveWindowDialog({
             aria-label="Close save window"
             title="Close"
             disabled={savingAction !== null}
-            onClick={onClose}
+            onClick={() => onClose()}
           >
             <X aria-hidden="true" size={16} />
           </button>
@@ -150,7 +153,7 @@ export function SaveWindowDialog({
               type="button"
               title="Cancel saving this window"
               disabled={savingAction !== null}
-              onClick={onClose}
+              onClick={() => onClose()}
             >
               Cancel
             </button>

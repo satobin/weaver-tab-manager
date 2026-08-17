@@ -434,7 +434,7 @@ describe('ActiveWindowsPage', () => {
 
     const duplicateBanner = await screen.findByRole('status', { name: 'Duplicate tabs view' });
     expect(duplicateBanner).toHaveTextContent(
-      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.',
+      'Tabs labeled Keep stay open. Weaver protects pinned tabs and tabs linked to agents with ongoing or unclear activity. Cleanup closes only tabs labeled Close.',
     );
     const bannerButtons = within(duplicateBanner).getAllByRole('button');
     expect(bannerButtons[0]).toHaveAccessibleName('Close duplicate tabs: 1 tab');
@@ -841,6 +841,101 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
     expect(screen.getByRole('checkbox', { name: 'Select Hidden selection' })).not.toBeChecked();
+  });
+
+  it('opens and focuses Merge from an initial palette view intent', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}?view=merge`,
+    );
+
+    render(<ActiveWindowsPage service={createService()} />);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Merge windows' });
+    const firstWindowCheckbox = within(dialog).getByRole('checkbox', {
+      name: /Window 1.*Quarterly plan.*2 tabs/u,
+    });
+    await waitFor(() => expect(firstWindowCheckbox).toHaveFocus());
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+  });
+
+  it('opens and focuses Merge from a same-route palette view intent', async () => {
+    render(<ActiveWindowsPage service={createService()} />);
+    await screen.findByRole('heading', { name: 'Window 1' });
+
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}?view=merge`,
+    );
+    fireEvent(window, new Event('hashchange'));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Merge windows' });
+    const firstWindowCheckbox = within(dialog).getByRole('checkbox', {
+      name: /Window 1.*Quarterly plan.*2 tabs/u,
+    });
+    await waitFor(() => expect(firstWindowCheckbox).toHaveFocus());
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+  });
+
+  it('retains a Merge palette view intent until window loading completes', async () => {
+    const service = createService();
+    const snapshot = await service.loadSnapshot();
+    vi.mocked(service.loadSnapshot).mockClear();
+    let resolveSnapshot: ((loadedSnapshot: typeof snapshot) => void) | undefined;
+    vi.mocked(service.loadSnapshot).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}?view=merge`,
+    );
+
+    render(<ActiveWindowsPage service={service} />);
+
+    await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+
+    await act(async () => {
+      resolveSnapshot?.(snapshot);
+      await Promise.resolve();
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Merge windows' });
+    const firstWindowCheckbox = within(dialog).getByRole('checkbox', {
+      name: /Window 1.*Quarterly plan.*2 tabs/u,
+    });
+    await waitFor(() => expect(firstWindowCheckbox).toHaveFocus());
+  });
+
+  it('reports an unavailable Merge palette view and moves focus to the error', async () => {
+    const service = createService();
+    const snapshot = await service.loadSnapshot();
+    vi.mocked(service.loadSnapshot).mockResolvedValue({
+      ...snapshot,
+      windows: snapshot.windows.slice(0, 1),
+    });
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${APP_ROUTES.windows}?view=merge`,
+    );
+
+    render(<ActiveWindowsPage service={service} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Open at least two windows before merging them.');
+    expect(screen.queryByRole('dialog', { name: 'Merge windows' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
+    await waitFor(() =>
+      expect(within(alert).getByRole('button', { name: 'Dismiss' })).toHaveFocus(),
+    );
   });
 
   it('limits duplicate-view group selection and bulk actions to visible duplicate tabs', async () => {
@@ -2505,7 +2600,7 @@ describe('ActiveWindowsPage', () => {
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
     expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
-      'Tabs labeled Keep stay open, including pinned matches and agent-associated matches with ongoing or unclear activity. Duplicate cleanup closes tabs labeled Close.',
+      'Tabs labeled Keep stay open. Weaver protects pinned tabs and tabs linked to agents with ongoing or unclear activity. Cleanup closes only tabs labeled Close.',
     );
     expect(screen.queryByRole('dialog', { name: 'Duplicate tab preview' })).not.toBeInTheDocument();
     expect(screen.getByText('Keep this tab').closest('li')).toHaveClass(
@@ -2732,7 +2827,7 @@ describe('ActiveWindowsPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('waits for advanced duplicate settings before declaring the plan empty', async () => {
+  it('retains a duplicate view intent until advanced settings load, then focuses the preview', async () => {
     const service = createService();
     vi.mocked(service.loadSnapshot).mockResolvedValue(
       createActiveWindowsSnapshot({
@@ -2792,19 +2887,25 @@ describe('ActiveWindowsPage', () => {
 
     render(<ActiveWindowsPage service={service} settingsService={settingsService} />);
 
-    expect(
-      await screen.findByRole('heading', { name: 'Loading duplicate tabs…' }),
-    ).toBeInTheDocument();
+    await screen.findByRole('status', { name: '2 windows · 2 tabs' });
+    const previewButton = screen.getByRole('button', { name: 'Show duplicate tabs only' });
+    expect(previewButton).toBeDisabled();
+    expect(previewButton).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('status', { name: 'Duplicate tabs view' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No duplicate tabs' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe(APP_ROUTES.windows);
 
     resolveSettings(loadedSettings);
     await act(() => settingsPromise);
 
+    await waitFor(() => {
+      expect(previewButton).toBeEnabled();
+      expect(previewButton).toHaveAttribute('aria-pressed', 'true');
+      expect(previewButton).toHaveFocus();
+    });
+    expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
     expect(await screen.findByText('Workspace one')).toBeInTheDocument();
     expect(screen.getByText('Workspace two')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('heading', { name: 'Loading duplicate tabs…' }),
-    ).not.toBeInTheDocument();
   });
 
   it('applies a saved site-wide rule to different paths', async () => {

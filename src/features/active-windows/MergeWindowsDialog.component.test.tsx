@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import { MergeWindowsDialog } from './MergeWindowsDialog';
 import { type ManagedWindow } from './model';
 
@@ -121,5 +122,12 @@ describe('MergeWindowsDialog', () => {
     await user.keyboard('{Escape}');
 
     expect(onClose.mock.calls).toEqual([[]]);
+  });
+
+  it('hands off to the command palette without restoring merge-button focus', () => {
+    const { onClose } = renderDialog();
+
+    expect(dismissTransientSurfacesForCommandPalette()).toBe(true);
+    expect(onClose).toHaveBeenCalledWith(false);
   });
 });

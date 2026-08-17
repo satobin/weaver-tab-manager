@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import { type DedupeRule, DEFAULT_DEDUPLICATION_RULES } from './deduplication';
 import { DedupeRuleEditor } from './DedupeRuleEditor';
 import {
@@ -566,6 +567,12 @@ describe('DedupeRuleEditor', () => {
     expect(within(help).getByText('app.example.com/workspaces/acme/items/42')).toBeInTheDocument();
     expect(within(help).getByText(/exact full-URL match/)).toBeInTheDocument();
 
+    act(() => expect(dismissTransientSurfacesForCommandPalette()).toBe(true));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Custom rules help' })).not.toBeInTheDocument(),
+    );
+
+    await user.click(helpButton);
     await user.keyboard('{Escape}');
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Custom rules help' })).not.toBeInTheDocument(),
@@ -784,6 +791,10 @@ describe('DedupeRuleEditor', () => {
       /Supported URL formats.*notion\.so\/PAGE_PATH.*WORKSPACE\.notion\.so\/PAGE_PATH.*notion\.com\/PAGE_PATH.*app\.notion\.com\/PAGE_PATH.*Query parameters and page sections are ignored\./,
     );
 
+    act(() => expect(dismissTransientSurfacesForCommandPalette()).toBe(true));
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+
+    await clickOnlyUser.click(notionFormats);
     await clickOnlyUser.click(screen.getByRole('heading', { name: 'Advanced duplicate matching' }));
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.dedupe-preset-formats-tooltip')).toHaveLength(0);

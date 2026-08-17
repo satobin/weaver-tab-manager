@@ -144,19 +144,59 @@ describe('CommandPalette', () => {
     const listbox = screen.getByRole('listbox', { name: 'Weaver search results' });
     expect(within(listbox).getByRole('group', { name: /Open tabs 2/u })).toBeVisible();
     expect(within(listbox).getByRole('group', { name: /Tab groups 2/u })).toBeVisible();
-    expect(within(listbox).getByRole('group', { name: /Saved 2/u })).toBeVisible();
+    expect(within(listbox).getByRole('group', { name: /Saved Window\/Tabs 2/u })).toBeVisible();
     expect(within(listbox).getByRole('group', { name: /Settings 2/u })).toBeVisible();
     const fleetOption = within(listbox).getByRole('option', { name: /Fleet capacity plan/u });
     expect(fleetOption).toHaveAccessibleName('Fleet capacity plan — Notion. Planning · notion.so');
     expect(fleetOption).toHaveAccessibleDescription(
       /blue tab group.*Active tab.*Agent-associated.*Pinned tab/u,
     );
+    const fleetStates = fleetOption.querySelector('.command-palette-result-states');
+    expect(fleetStates).toBeInTheDocument();
+    expect(fleetStates).toHaveAttribute('aria-hidden', 'true');
+    expect(fleetStates?.querySelector('.is-group.group-color-blue')).toBeInTheDocument();
+    expect(fleetStates?.querySelector('.is-active')).toBeInTheDocument();
+    expect(fleetStates?.querySelector('.is-agent')).toBeInTheDocument();
+    expect(fleetStates?.querySelector('.is-pinned')).toBeInTheDocument();
+    expect(fleetOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
     expect(fleetOption).toHaveTextContent(/⌘[1-9]/u);
     expect(fleetOption).not.toHaveTextContent(/Focus|Open|Go/u);
+    const roadmapOption = within(listbox).getByRole('option', { name: /Notion roadmap/u });
+    expect(roadmapOption).toHaveAccessibleDescription(/Suspended tab/u);
     expect(
-      within(listbox).getByRole('option', { name: /Notion roadmap/u }),
-    ).toHaveAccessibleDescription(/Suspended tab/u);
+      roadmapOption.querySelector('.command-palette-result-states .is-suspended'),
+    ).toBeInTheDocument();
+    expect(roadmapOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
     expect(within(listbox).queryByText(/Window \d+/u)).not.toBeInTheDocument();
+  });
+
+  it('keeps empty state and shortcut rails present for Action results', async () => {
+    const user = userEvent.setup();
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={createActiveService()}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+
+    const previewOption = await screen.findByRole('option', {
+      name: /^Preview duplicate tabs\./u,
+    });
+    expect(previewOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
+    expect(previewOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
+    expect(
+      previewOption.querySelector('.command-palette-result-icon .lucide-eye'),
+    ).toBeInTheDocument();
+
+    const mergeOption = screen.getByRole('option', { name: /^Merge windows\./u });
+    expect(mergeOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
+    expect(mergeOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
+    expect(
+      mergeOption.querySelector('.command-palette-result-icon .lucide-merge'),
+    ).toBeInTheDocument();
   });
 
   it('updates live result states and keeps one valid selection after source changes', async () => {
@@ -288,6 +328,71 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(activeService.focusTab).toHaveBeenCalledWith(1, 102));
   });
 
+  it('handles numbered chords dialog-wide and consumes repeated chords without activating', async () => {
+    const user = userEvent.setup();
+    const activeService = createActiveService();
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={activeService}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    const input = screen.getByRole('combobox', { name: 'Search Weaver' });
+    await user.type(input, 'notion');
+    await user.tab();
+    const clear = screen.getByRole('button', { name: 'Clear search' });
+    expect(clear).toHaveFocus();
+
+    expect(fireEvent.keyDown(clear, { key: '1', metaKey: true, repeat: true })).toBe(false);
+    expect(activeService.focusTab).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Search Weaver' })).toBeInTheDocument();
+
+    expect(fireEvent.keyDown(clear, { ctrlKey: true, key: '1' })).toBe(false);
+    await waitFor(() => expect(activeService.focusTab).toHaveBeenCalledWith(1, 102));
+    expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument();
+  });
+
+  it('guards a pending tab focus from rapid duplicate activation', async () => {
+    const activeService = createActiveService();
+    let resolveFocus: (() => void) | undefined;
+    const focusPromise = new Promise<void>((resolve) => {
+      resolveFocus = resolve;
+    });
+    vi.mocked(activeService.focusTab).mockReturnValue(focusPromise);
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={activeService}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    const input = screen.getByRole('combobox', { name: 'Search Weaver' });
+    fireEvent.change(input, { target: { value: 'notion' } });
+    const option = await screen.findByRole('option', { name: /^Notion roadmap\./u });
+
+    act(() => {
+      option.click();
+      option.click();
+    });
+
+    expect(activeService.focusTab).toHaveBeenCalledOnce();
+    expect(activeService.focusTab).toHaveBeenCalledWith(1, 102);
+    expect(option).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      resolveFocus?.();
+      await focusPromise;
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Search Weaver' })).not.toBeInTheDocument(),
+    );
+  });
+
   it('lets the clear and close buttons handle Enter without activating a result', async () => {
     const user = userEvent.setup();
     const activeService = createActiveService();
@@ -335,12 +440,37 @@ describe('CommandPalette', () => {
     await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
     await user.type(screen.getByRole('combobox', { name: 'Search Weaver' }), 'research planning');
 
-    await user.click(await screen.findByRole('option', { name: /Research planning/u }));
+    await user.click(await screen.findByRole('option', { name: /^Research planning\./u }));
 
     expect(savedService.restoreWindow).not.toHaveBeenCalled();
     expect(savedService.openTab).not.toHaveBeenCalled();
     expect(window.location.hash).toContain('search=Research+planning');
     expect(window.location.hash).toContain('savedWindowId=saved-1');
+  });
+
+  it('reveals an exact saved tab without opening a browser tab', async () => {
+    const user = userEvent.setup();
+    const savedService = createSavedService();
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={createActiveService()}
+          savedWindowsService={savedService}
+        />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    await user.type(screen.getByRole('combobox', { name: 'Search Weaver' }), 'weaver ideas');
+
+    await user.click(await screen.findByRole('option', { name: /^Weaver ideas — Notion\./u }));
+
+    expect(savedService.openTab).not.toHaveBeenCalled();
+    expect(savedService.restoreWindow).not.toHaveBeenCalled();
+    const searchParams = new URLSearchParams(window.location.hash.split('?')[1]);
+    expect(searchParams.get('savedWindowId')).toBe('saved-1');
+    expect(searchParams.get('savedWindowUpdatedAt')).toBe('2026-08-16T12:00:00.000Z');
+    expect(searchParams.get('tabOrder')).toBe('0');
+    expect(searchParams.has('search')).toBe(false);
   });
 
   it('restores focus after dismissal and stays closed behind an existing dialog', async () => {

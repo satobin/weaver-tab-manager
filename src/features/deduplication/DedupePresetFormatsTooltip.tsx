@@ -2,6 +2,7 @@ import { Info } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 import type { BuiltInDedupePreset } from './dedupeRulePresentation';
 
 const TOOLTIP_GAP = 6;
@@ -69,6 +70,7 @@ export function DedupePresetFormatsTooltip({
 }: DedupePresetFormatsTooltipProps) {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLSpanElement>(null);
   const [position, setPosition] = useState<TooltipPosition | null>(null);
   const presetLabel = preset.id === 'google-workspace' ? 'Google' : 'Notion';
   const visible = open && position !== null;
@@ -85,6 +87,8 @@ export function DedupePresetFormatsTooltip({
   }, [onOpen, updatePosition]);
 
   const hideTooltip = useCallback(() => onClose(), [onClose]);
+
+  useDismissOnCommandPaletteOpen(tooltipRef, hideTooltip, visible);
 
   useEffect(() => {
     if (!open) {
@@ -143,6 +147,7 @@ export function DedupePresetFormatsTooltip({
       {visible
         ? createPortal(
             <span
+              ref={tooltipRef}
               className={`dedupe-preset-formats-tooltip${position?.above ? ' is-above' : ''}`}
               id={tooltipId}
               role="tooltip"

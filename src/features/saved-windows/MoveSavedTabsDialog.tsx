@@ -1,11 +1,13 @@
 import { Archive, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
+
 interface MoveSavedTabsDialogProps {
   errorMessage: string | null;
   moving: boolean;
   name: string;
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
   onMove: (name: string) => void;
   onNameChange: (name: string) => void;
   selectionChanged: boolean;
@@ -36,6 +38,8 @@ export function MoveSavedTabsDialog({
       : !name.trim()
         ? 'Enter a name for the new saved window.'
         : null;
+
+  useDismissOnCommandPaletteOpen(dialogRef, () => onClose(false), !moving);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -102,7 +106,7 @@ export function MoveSavedTabsDialog({
             aria-label="Close move to new saved window"
             title="Close"
             disabled={moving}
-            onClick={onClose}
+            onClick={() => onClose()}
           >
             <X aria-hidden="true" size={16} />
           </button>
@@ -138,7 +142,12 @@ export function MoveSavedTabsDialog({
           ) : null}
 
           <footer>
-            <button className="toolbar-button" type="button" disabled={moving} onClick={onClose}>
+            <button
+              className="toolbar-button"
+              type="button"
+              disabled={moving}
+              onClick={() => onClose()}
+            >
               Cancel
             </button>
             <button

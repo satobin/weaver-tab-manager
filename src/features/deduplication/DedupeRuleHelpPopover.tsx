@@ -2,6 +2,8 @@ import { AlertTriangle, CircleHelp, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
+
 const POPOVER_GAP = 6;
 const POPOVER_GUTTER = 8;
 const POPOVER_MAX_HEIGHT = 560;
@@ -88,6 +90,8 @@ export function DedupeRuleHelpPopover() {
       queueMicrotask(() => triggerRef.current?.focus());
     }
   }, []);
+
+  useDismissOnCommandPaletteOpen(dialogRef, () => closeHelp(false), open);
 
   useEffect(() => {
     if (!open) {

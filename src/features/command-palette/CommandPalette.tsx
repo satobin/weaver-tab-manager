@@ -3,8 +3,9 @@ import {
   Bot,
   CirclePause,
   Command,
-  CopyX,
+  Eye,
   Info,
+  Merge,
   PanelTop,
   PanelsTopLeft,
   Pin,
@@ -27,6 +28,7 @@ import { TabIcon } from '../active-windows/TabIcon';
 import { useActiveWindows } from '../active-windows/useActiveWindows';
 import { type SavedWindowsService } from '../saved-windows/savedWindowsService';
 import { useSavedWindows } from '../saved-windows/useSavedWindows';
+import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import {
   buildCommandPaletteSections,
   type CommandPaletteResult,
@@ -58,14 +60,6 @@ function isPrimaryShortcut(
 
 function getModifierLabel(): string {
   return /Mac|iPhone|iPad|iPod/u.test(navigator.platform) ? '⌘' : 'Ctrl';
-}
-
-function hasBlockingSurface(): boolean {
-  return Boolean(
-    document.querySelector(
-      `[role="dialog"]:not(#${DIALOG_ID}), [role="menu"], [aria-modal="true"]:not(#${DIALOG_ID})`,
-    ),
-  );
 }
 
 function getOptionId(index: number): string {
@@ -105,13 +99,15 @@ function ResultIcon({ result }: { result: CommandPaletteResult }) {
   const Icon =
     result.icon === 'active-windows'
       ? PanelsTopLeft
-      : result.icon === 'saved-window'
-        ? Archive
-        : result.icon === 'settings'
-          ? Settings
-          : result.icon === 'about'
-            ? Info
-            : CopyX;
+      : result.icon === 'duplicates'
+        ? Eye
+        : result.icon === 'merge'
+          ? Merge
+          : result.icon === 'saved-window'
+            ? Archive
+            : result.icon === 'settings'
+              ? Settings
+              : Info;
   return <Icon aria-hidden="true" size={20} strokeWidth={1.8} />;
 }
 
@@ -140,14 +136,22 @@ function ResultStates({ result, stateId }: { result: CommandPaletteResult; state
   return (
     <>
       <span className="command-palette-result-states" aria-hidden="true">
+        {result.icon === 'tab' && result.groupColor ? (
+          <span
+            className={`command-palette-state-icon is-group group-color-${result.groupColor}`}
+            title={`${result.groupColor} tab group`}
+          >
+            <PanelTop size={14} strokeWidth={1.9} />
+          </span>
+        ) : null}
         {result.state?.active ? (
-          <span className="command-palette-state-icon" title="Active tab">
+          <span className="command-palette-state-icon is-active" title="Active tab">
             <span className="command-palette-current-dot" />
           </span>
         ) : null}
         {result.state?.agentAssociated ? (
           <span
-            className="command-palette-state-icon"
+            className="command-palette-state-icon is-agent"
             title={
               result.state.agentDedupeProtected
                 ? 'Agent-associated; kept during duplicate cleanup'
@@ -158,12 +162,12 @@ function ResultStates({ result, stateId }: { result: CommandPaletteResult; state
           </span>
         ) : null}
         {result.state?.pinned ? (
-          <span className="command-palette-state-icon" title="Pinned tab">
+          <span className="command-palette-state-icon is-pinned" title="Pinned tab">
             <Pin size={15} strokeWidth={1.9} />
           </span>
         ) : null}
         {result.state?.suspended ? (
-          <span className="command-palette-state-icon" title="Suspended tab">
+          <span className="command-palette-state-icon is-suspended" title="Suspended tab">
             <CirclePause size={15} strokeWidth={1.9} />
           </span>
         ) : null}
@@ -185,6 +189,7 @@ function CommandPaletteDialog({
   const dialogRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const busyResultIdRef = useRef<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [busyResultId, setBusyResultId] = useState<string | null>(null);
@@ -251,7 +256,7 @@ function CommandPaletteDialog({
   }, [activeOptionId]);
 
   const activateResult = async (result: CommandPaletteResult) => {
-    if (busyResultId) {
+    if (busyResultIdRef.current) {
       return;
     }
     setActionError(null);
@@ -261,16 +266,10 @@ function CommandPaletteDialog({
       return;
     }
 
+    busyResultIdRef.current = result.id;
     setBusyResultId(result.id);
     try {
-      if (result.action.type === 'focus-active-tab') {
-        await activeWindowsService.focusTab(result.action.windowId, result.action.tabId);
-      } else {
-        await savedWindowsService.openTab({
-          pinned: result.action.pinned,
-          url: result.action.url,
-        });
-      }
+      await activeWindowsService.focusTab(result.action.windowId, result.action.tabId);
       onClose(false);
     } catch (error) {
       setActionError(
@@ -278,6 +277,7 @@ function CommandPaletteDialog({
           ? error.message
           : 'Weaver could not complete that action.',
       );
+      busyResultIdRef.current = null;
       setBusyResultId(null);
     }
   };
@@ -328,6 +328,18 @@ function CommandPaletteDialog({
       }
       return;
     }
+    if ((event.metaKey || event.ctrlKey) && /^[1-9]$/u.test(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) {
+        return;
+      }
+      const shortcutResult = results[Number(event.key) - 1];
+      if (shortcutResult) {
+        void activateResult(shortcutResult);
+      }
+      return;
+    }
     if (event.currentTarget !== inputRef.current) {
       return;
     }
@@ -363,16 +375,6 @@ function CommandPaletteDialog({
       event.preventDefault();
       event.stopPropagation();
       void activateResult(activeResult);
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && /^[1-9]$/u.test(event.key)) {
-      const shortcutResult = results[Number(event.key) - 1];
-      if (!shortcutResult) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      void activateResult(shortcutResult);
       return;
     }
   };
@@ -561,7 +563,7 @@ export function CommandPalette({ activeWindowsService, savedWindowsService }: Co
   const modifierLabel = getModifierLabel();
 
   const openPalette = () => {
-    if (hasBlockingSurface()) {
+    if (!dismissTransientSurfacesForCommandPalette()) {
       return;
     }
     const activeElement = document.activeElement;

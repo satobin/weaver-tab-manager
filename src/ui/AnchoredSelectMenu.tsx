@@ -2,6 +2,8 @@ import { Check, ChevronDown, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useDismissOnCommandPaletteOpen } from './transientSurface';
+
 import './anchoredSelectMenu.css';
 
 export interface AnchoredSelectOption<T extends number | string> {
@@ -106,6 +108,8 @@ export function AnchoredSelectMenu<T extends number | string>({
       queueMicrotask(() => triggerRef.current?.focus());
     }
   }, []);
+
+  useDismissOnCommandPaletteOpen(menuRef, () => closeMenu(false), open);
 
   const openMenu = () => {
     if (disabled || options.length === 0) {

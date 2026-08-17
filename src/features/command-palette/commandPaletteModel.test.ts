@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { APP_ROUTES, getAppRouteSearchParams, parseAppRoute } from '../../app/routes';
 import {
   createActiveWindowsSnapshot,
   createManagedTab,
@@ -91,16 +92,16 @@ describe('buildCommandPaletteSections', () => {
     expect(COMMAND_PALETTE_SECTION_ORDER).toEqual([
       'open-tabs',
       'tab-groups',
-      'saved',
-      'settings',
       'actions',
+      'settings',
       'go-to',
+      'saved',
     ]);
     expect(sections.map((section) => section.label)).toEqual([
       'Open tabs',
       'Tab groups',
-      'Saved',
       'Settings',
+      'Saved Window/Tabs',
     ]);
 
     const results = sections.flatMap((section) => section.results);
@@ -206,6 +207,59 @@ describe('buildCommandPaletteSections', () => {
     ]);
   });
 
+  it('routes saved-tab matches to an exact versioned reveal target', () => {
+    const sources = createSources();
+    const savedTab = buildCommandPaletteSections({ ...sources, query: 'weaver ideas' })
+      .find((section) => section.id === 'saved')
+      ?.results.find((result) => result.id === 'saved-tab:saved-1:0');
+
+    expect(savedTab).toMatchObject({
+      action: { type: 'navigate' },
+      subtitle: 'Research planning · Research · notion.so',
+    });
+    expect(savedTab?.action.type).toBe('navigate');
+    if (savedTab?.action.type !== 'navigate') {
+      throw new Error('Saved-tab result did not navigate');
+    }
+
+    expect(parseAppRoute(savedTab.action.hash)).toBe(APP_ROUTES.savedWindows);
+    expect(Object.fromEntries(getAppRouteSearchParams(savedTab.action.hash))).toEqual({
+      savedWindowId: 'saved-1',
+      savedWindowUpdatedAt: '2026-08-16T12:00:00.000Z',
+      tabOrder: '0',
+    });
+  });
+
+  it('uses semantic icons and direct view routes for every Action result', () => {
+    const actions = buildCommandPaletteSections({
+      activeSnapshot: null,
+      query: '',
+      savedWindows: [],
+    }).find((section) => section.id === 'actions')?.results;
+
+    expect(actions?.map(({ action, icon, id }) => ({ action, icon, id }))).toEqual([
+      {
+        action: { hash: '#/windows?view=duplicates', type: 'navigate' },
+        icon: 'duplicates',
+        id: 'action:preview-open-duplicates',
+      },
+      {
+        action: { hash: '#/windows?view=merge', type: 'navigate' },
+        icon: 'merge',
+        id: 'action:merge-windows',
+      },
+    ]);
+  });
+
+  it('does not return every saved item for a generic save query', () => {
+    const results = buildCommandPaletteSections({ ...createSources(), query: 'save' }).flatMap(
+      (section) => section.results,
+    );
+
+    expect(results.map((result) => result.id)).toEqual(['navigation:saved-windows']);
+    expect(results.some((result) => result.id.startsWith('saved-'))).toBe(false);
+  });
+
   it('shows safe navigation and review commands before a query', () => {
     const sections = buildCommandPaletteSections({
       activeSnapshot: null,
@@ -219,5 +273,11 @@ describe('buildCommandPaletteSections', () => {
         .flatMap((section) => section.results)
         .every((result) => result.action.type === 'navigate'),
     ).toBe(true);
+  });
+
+  it('keeps matched actions ahead of matched settings in the fixed section order', () => {
+    const sections = buildCommandPaletteSections({ ...createSources(), query: 'duplicate' });
+
+    expect(sections.map((section) => section.label)).toEqual(['Actions', 'Settings']);
   });
 });

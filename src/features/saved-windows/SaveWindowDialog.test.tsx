@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
+import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import { SaveWindowDialog } from './SaveWindowDialog';
 import { type SaveWindowResult } from './savedWindowsService';
 
@@ -43,6 +44,41 @@ describe('SaveWindowDialog', () => {
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands off to the command palette only while no save is in progress', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    let resolveSave: ((value: SaveWindowResult) => void) | undefined;
+    render(
+      <SaveWindowDialog
+        onClose={onClose}
+        onComplete={vi.fn()}
+        onSave={vi.fn(
+          () =>
+            new Promise<SaveWindowResult>((resolve) => {
+              resolveSave = resolve;
+            }),
+        )}
+        tabCount={4}
+        windowLabel="Current Window"
+      />,
+    );
+
+    expect(dismissTransientSurfacesForCommandPalette()).toBe(true);
+    expect(onClose).toHaveBeenCalledWith(false);
+    onClose.mockClear();
+
+    await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Project work');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(dismissTransientSurfacesForCommandPalette()).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSave?.(result);
+      await Promise.resolve();
+    });
   });
 
   it('keeps forward and reverse Tab navigation inside the modal', async () => {

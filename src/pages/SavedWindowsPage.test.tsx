@@ -218,6 +218,25 @@ function createDeferred<T>() {
   };
 }
 
+function installScrollIntoViewMock() {
+  const previousDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scrollIntoView,
+  });
+  return {
+    restore: () => {
+      if (previousDescriptor) {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', previousDescriptor);
+      } else {
+        Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
+      }
+    },
+    scrollIntoView,
+  };
+}
+
 describe('SavedWindowsPage', () => {
   it('renders an empty state when there are no saved windows', async () => {
     const user = userEvent.setup();
@@ -475,6 +494,9 @@ describe('SavedWindowsPage', () => {
     expect(header?.querySelector('.window-identity')).toBeInTheDocument();
     expect(header?.querySelector('.window-heading-copy')).toBeInTheDocument();
     expect(header?.querySelector('.window-card-actions')).toBeInTheDocument();
+    expect(within(card).getByText(/Saved .* · 2 tabs · 1 group/u)).toHaveClass(
+      'window-heading-summary',
+    );
     const heading = within(card).getByRole('heading', { name: 'Research' });
     const headingName = heading.querySelector('.window-heading-static');
     const collapseState = heading.querySelector('.window-collapse-state');
@@ -534,7 +556,7 @@ describe('SavedWindowsPage', () => {
 
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(screen.queryByText('Inbox')).not.toBeInTheDocument();
-    expect(screen.getByText(/1 matching tab of 2 tabs · Saved/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved .* · 1 matching tab of 2 tabs/u)).toBeInTheDocument();
     const filteredSelection = screen.getByRole('button', { name: 'Select filtered 1' });
     expect(filteredSelection).toBeEnabled();
     await user.click(filteredSelection);
@@ -1621,6 +1643,187 @@ describe('SavedWindowsPage', () => {
     window.location.hash = '#/saved-windows?savedWindowId=saved-1&search=Research';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
     await waitFor(() => expect(search).toHaveFocus());
+  });
+
+  it('reveals the exact versioned saved tab without opening it', async () => {
+    const { restore, scrollIntoView } = installScrollIntoViewMock();
+    const service = createService();
+    window.location.hash =
+      '#/saved-windows?savedWindowId=saved-1&savedWindowUpdatedAt=2026-07-10T20%3A00%3A00.000Z&search=Plan&tabOrder=1';
+
+    try {
+      render(<SavedWindowsPage service={service} />);
+
+      const card = await screen.findByRole('article', { name: 'Research' });
+      const target = within(card).getByRole('button', { name: 'Open Plan in a new tab' });
+      const sibling = within(card).getByRole('button', {
+        name: 'Open Inbox in a new pinned tab',
+      });
+      const search = screen.getByRole('searchbox', {
+        name: 'Filter saved windows, groups, and tabs',
+      });
+
+      expect(within(card).getByRole('button', { name: 'Collapse Research' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      expect(target).toBeVisible();
+      expect(sibling).toBeVisible();
+      expect(search).toHaveValue('');
+      expect(target.closest('.tab-list-item')).toHaveClass('is-palette-reveal');
+      expect(sibling.closest('.tab-list-item')).not.toHaveClass('is-palette-reveal');
+      expect(screen.getByText('Showing Research with Plan highlighted.')).toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
+      expect(service.openTab).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe('#/saved-windows');
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not highlight the current tab at a stale saved-tab order', async () => {
+    const { restore, scrollIntoView } = installScrollIntoViewMock();
+    const service = createService();
+    window.location.hash =
+      '#/saved-windows?savedWindowId=saved-1&savedWindowUpdatedAt=2026-07-10T19%3A00%3A00.000Z&search=Plan&tabOrder=0';
+
+    try {
+      const { container } = render(<SavedWindowsPage service={service} />);
+
+      const card = await screen.findByRole('article', { name: 'Research' });
+      const inbox = within(card).getByRole('button', {
+        name: 'Open Inbox in a new pinned tab',
+      });
+      const plan = within(card).getByRole('button', { name: 'Open Plan in a new tab' });
+      expect(inbox.closest('.tab-list-item')).not.toHaveClass('is-palette-reveal');
+      expect(plan.closest('.tab-list-item')).not.toHaveClass('is-palette-reveal');
+      expect(card).toHaveClass('is-palette-reveal');
+      expect(container.querySelector('.tab-list-item.is-palette-reveal')).not.toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
+      expect(service.openTab).not.toHaveBeenCalled();
+      expect(window.location.hash).toBe('#/saved-windows');
+    } finally {
+      restore();
+    }
+  });
+
+  it('opens the saved duplicate review from a palette view request', async () => {
+    const duplicate = createSavedWindow({
+      groups: [],
+      id: 'saved-2',
+      name: 'Reference',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Reference plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+      updatedAt: '2026-07-10T21:00:00.000Z',
+    });
+    window.location.hash = '#/saved-windows?view=duplicates';
+
+    render(
+      <SavedWindowsPage
+        service={createService([createSavedWindow(), duplicate])}
+        settingsService={createSettingsService()}
+      />,
+    );
+
+    expect(await screen.findByRole('status', { name: 'Saved duplicate tabs view' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Show saved duplicate tabs only' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(window.location.hash).toBe('#/saved-windows');
+  });
+
+  it('retains a saved duplicate view intent until settings load, then focuses the preview', async () => {
+    const duplicate = createSavedWindow({
+      groups: [],
+      id: 'saved-2',
+      name: 'Reference',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Reference plan',
+          url: 'https://docs.example.com/plan',
+        },
+      ],
+      updatedAt: '2026-07-10T21:00:00.000Z',
+    });
+    const loadedSettings: WeaverSettings = {
+      ...DEFAULT_SETTINGS,
+      deduplicationRules: DEFAULT_SETTINGS.deduplicationRules.map((rule) => ({ ...rule })),
+    };
+    const deferredSettings = createDeferred<WeaverSettings>();
+    const settingsService = createSettingsService();
+    vi.mocked(settingsService.load).mockReturnValue(deferredSettings.promise);
+    window.location.hash = '#/saved-windows?view=duplicates';
+
+    render(
+      <SavedWindowsPage
+        service={createService([createSavedWindow(), duplicate])}
+        settingsService={settingsService}
+      />,
+    );
+
+    await screen.findByRole('status', { name: '2 saved windows · 3 tabs' });
+    const previewButton = screen.getByRole('button', {
+      name: 'Show saved duplicate tabs only',
+    });
+    expect(previewButton).toBeDisabled();
+    expect(previewButton).toHaveAttribute('aria-pressed', 'false');
+    expect(
+      screen.queryByRole('status', { name: 'Saved duplicate tabs view' }),
+    ).not.toBeInTheDocument();
+    expect(window.location.hash).toBe('#/saved-windows');
+
+    deferredSettings.resolve(loadedSettings);
+    await act(() => deferredSettings.promise);
+
+    await waitFor(() => {
+      expect(previewButton).toBeEnabled();
+      expect(previewButton).toHaveAttribute('aria-pressed', 'true');
+      expect(previewButton).toHaveFocus();
+    });
+    expect(screen.getByRole('status', { name: 'Saved duplicate tabs view' })).toBeVisible();
+  });
+
+  it('opens and focuses the saved-window merge dialog from a palette view request', async () => {
+    const service = createService([
+      createSavedWindow(),
+      createSavedWindow({ id: 'saved-2', name: 'Reference' }),
+    ]);
+    window.location.hash = '#/saved-windows?view=merge';
+
+    render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Merge saved windows' });
+    await waitFor(() => expect(within(dialog).getAllByRole('checkbox')[0]).toHaveFocus());
+    expect(window.location.hash).toBe('#/saved-windows');
+  });
+
+  it('reports an unavailable saved-window Merge view and moves focus to search', async () => {
+    window.location.hash = '#/saved-windows?view=merge';
+
+    render(
+      <SavedWindowsPage service={createService()} settingsService={createSettingsService()} />,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Save at least two windows before merging them.');
+    expect(screen.queryByRole('dialog', { name: 'Merge saved windows' })).not.toBeInTheDocument();
+    expect(window.location.hash).toBe('#/saved-windows');
+    await waitFor(() =>
+      expect(
+        screen.getByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
+      ).toHaveFocus(),
+    );
   });
 
   it('keeps focus at the same list position after removing one saved tab', async () => {

@@ -86,6 +86,14 @@ interface SavedWindowNotice {
 
 type SavedDuplicatePreviewOutcome = 'close' | 'keep';
 type SavedWindowSortSelection = Pick<TabSortOptions, 'criterion' | 'direction'>;
+type PaletteViewRequest = 'duplicates' | 'merge';
+
+interface PaletteRevealTarget {
+  groupKey: string | null;
+  savedWindowId: string;
+  savedWindowUpdatedAt: string | null;
+  tabOrder: number | null;
+}
 
 const DEFAULT_SAVED_WINDOW_SORT_SELECTION: SavedWindowSortSelection = {
   criterion: 'title',
@@ -115,6 +123,18 @@ function getSavedTabSelectionKey(
     tab.title,
     tab.url,
   ]);
+}
+
+function getPaletteSavedWindowTargetId(savedWindowId: string): string {
+  return `palette-saved-window-${savedWindowId}`;
+}
+
+function getPaletteSavedGroupTargetId(savedWindowId: string, groupKey: string): string {
+  return `palette-saved-group-${savedWindowId}-${groupKey}`;
+}
+
+function getPaletteSavedTabTargetId(savedWindowId: string, tabOrder: number): string {
+  return `palette-saved-tab-${savedWindowId}-${tabOrder}`;
 }
 
 function pluralize(count: number, singular: string) {
@@ -167,6 +187,8 @@ function SavedWindowPreview({
   onOpenTab,
   onRemoveTab,
   onToggleTab,
+  paletteRevealGroupKey,
+  paletteRevealTabOrder,
   removingTabKey,
   savedWindow,
   selectedTabKeys,
@@ -186,6 +208,8 @@ function SavedWindowPreview({
         orderedTabKeys: readonly string[],
       ) => void)
     | undefined;
+  paletteRevealGroupKey?: string | null | undefined;
+  paletteRevealTabOrder?: number | null | undefined;
   savedWindow: SavedWindow;
   removingTabKey?: string | null | undefined;
   selectedTabKeys?: ReadonlySet<string> | undefined;
@@ -209,6 +233,7 @@ function SavedWindowPreview({
               : null;
         const duplicatePreviewDescriptionId = `saved-tab-${savedWindow.id}-${tab.order}-duplicate-preview-description`;
         const selectionKey = getSavedTabSelectionKey(savedWindow.id, savedWindow.updatedAt, tab);
+        const paletteRevealed = paletteRevealTabOrder === tab.order;
         const selected = selectedTabKeys?.has(selectionKey) ?? false;
         const rowActionsDisabled = actionsDisabled || Boolean(selectedTabKeys?.size);
         const removing = removingTabKey === selectionKey;
@@ -229,6 +254,7 @@ function SavedWindowPreview({
               selected ? 'is-selected' : '',
               duplicatePreviewState === 'close' ? 'is-duplicate-preview-close' : '',
               duplicatePreviewState === 'keep' ? 'is-duplicate-preview-keep' : '',
+              paletteRevealed ? 'is-palette-reveal' : '',
               group ? `group-color-${group.color}` : '',
             ]
               .filter(Boolean)
@@ -237,7 +263,8 @@ function SavedWindowPreview({
           >
             {beginsGroup ? (
               <div
-                className={`tab-group-heading saved-group-heading${onToggleTab ? ' has-selection-control' : ''}`}
+                className={`tab-group-heading saved-group-heading${onToggleTab ? ' has-selection-control' : ''}${paletteRevealGroupKey === group.key ? ' is-palette-reveal' : ''}`}
+                id={getPaletteSavedGroupTargetId(savedWindow.id, group.key)}
               >
                 {onToggleTab ? <span aria-hidden="true" /> : null}
                 <div className="saved-group-copy">
@@ -262,6 +289,7 @@ function SavedWindowPreview({
                 <div className="saved-tab-open-area">
                   <button
                     className={`tab-focus-button saved-tab-open-button${onRemoveTab ? ' has-remove-action' : ''}`}
+                    id={getPaletteSavedTabTargetId(savedWindow.id, tab.order)}
                     type="button"
                     aria-label={`Open ${tab.title} in a new${tab.pinned ? ' pinned' : ''} tab`}
                     aria-describedby={
@@ -352,10 +380,8 @@ export function SavedWindowsPage({
   const [renameValue, setRenameValue] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [paletteRevealTarget, setPaletteRevealTarget] = useState<{
-    groupKey: string | null;
-    savedWindowId: string;
-  } | null>(null);
+  const [paletteRevealTarget, setPaletteRevealTarget] = useState<PaletteRevealTarget | null>(null);
+  const [paletteViewRequest, setPaletteViewRequest] = useState<PaletteViewRequest | null>(null);
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
@@ -400,6 +426,7 @@ export function SavedWindowsPage({
   const mergeControlRef = useRef<HTMLDivElement>(null);
   const duplicatePreviewButtonRef = useRef<HTMLButtonElement>(null);
   const moveTabsButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingPaletteRevealScrollRef = useRef(false);
   const pendingPaletteSearchFocusRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selectionAnchorByWindowRef = useRef(new Map<string, string>());
@@ -423,14 +450,21 @@ export function SavedWindowsPage({
       if (!savedWindow) {
         return [];
       }
-      if (paletteRevealTarget.groupKey === null) {
+      const versionMatches =
+        paletteRevealTarget.savedWindowUpdatedAt === null ||
+        paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
+      if (
+        paletteRevealTarget.tabOrder !== null ||
+        paletteRevealTarget.groupKey === null ||
+        !versionMatches
+      ) {
         return [savedWindow];
       }
       const group = savedWindow.groups.find(
         (candidate) => candidate.key === paletteRevealTarget.groupKey,
       );
       if (!group) {
-        return [];
+        return [savedWindow];
       }
       return [
         {
@@ -826,6 +860,13 @@ export function SavedWindowsPage({
       const search = searchParams.get('search');
       const savedWindowId = searchParams.get('savedWindowId');
       const groupKey = searchParams.get('groupKey');
+      const savedWindowUpdatedAt = searchParams.get('savedWindowUpdatedAt');
+      const rawTabOrder = searchParams.get('tabOrder');
+      const parsedTabOrder = rawTabOrder === null ? null : Number(rawTabOrder);
+      const tabOrder =
+        parsedTabOrder !== null && Number.isSafeInteger(parsedTabOrder) && parsedTabOrder >= 0
+          ? parsedTabOrder
+          : null;
       if (search === null && savedWindowId === null) {
         return;
       }
@@ -836,8 +877,12 @@ export function SavedWindowsPage({
       setDeletingId(null);
       setRenamingId(null);
       setCollapsedFilterIds(new Set());
-      setPaletteRevealTarget(savedWindowId === null ? null : { groupKey, savedWindowId });
-      setQuery(search ?? '');
+      setPaletteRevealTarget(
+        savedWindowId === null ? null : { groupKey, savedWindowId, savedWindowUpdatedAt, tabOrder },
+      );
+      setPaletteViewRequest(null);
+      setQuery(savedWindowId !== null && tabOrder !== null ? '' : (search ?? ''));
+      pendingPaletteRevealScrollRef.current = savedWindowId !== null;
       pendingPaletteSearchFocusRef.current = true;
       window.history.replaceState(
         null,
@@ -852,12 +897,64 @@ export function SavedWindowsPage({
   }, [clearTabSelection, closeMergeDialog, closeMoveDialog, exitDuplicatePreview]);
 
   useEffect(() => {
+    const consumePaletteView = () => {
+      if (parseAppRoute(window.location.hash) !== APP_ROUTES.savedWindows) {
+        return;
+      }
+      const view = getAppRouteSearchParams(window.location.hash).get('view');
+      if (view !== 'duplicates' && view !== 'merge') {
+        return;
+      }
+      setPaletteViewRequest(view);
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}${APP_ROUTES.savedWindows}`,
+      );
+    };
+
+    consumePaletteView();
+    window.addEventListener('hashchange', consumePaletteView);
+    return () => window.removeEventListener('hashchange', consumePaletteView);
+  }, []);
+
+  useEffect(() => {
     if (status !== 'ready' || !pendingPaletteSearchFocusRef.current) {
       return;
     }
     pendingPaletteSearchFocusRef.current = false;
     queueMicrotask(() => searchInputRef.current?.focus({ preventScroll: true }));
   }, [paletteRevealTarget, query, status]);
+
+  useEffect(() => {
+    if (status !== 'ready' || !paletteRevealTarget || !pendingPaletteRevealScrollRef.current) {
+      return;
+    }
+    pendingPaletteRevealScrollRef.current = false;
+    const savedWindow = windows.find(
+      (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
+    );
+    if (!savedWindow) {
+      return;
+    }
+    const versionMatches =
+      paletteRevealTarget.savedWindowUpdatedAt === null ||
+      paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
+    const tabMatches =
+      versionMatches &&
+      paletteRevealTarget.tabOrder !== null &&
+      savedWindow.tabs.some((tab) => tab.order === paletteRevealTarget.tabOrder);
+    const groupMatches =
+      versionMatches &&
+      paletteRevealTarget.groupKey !== null &&
+      savedWindow.groups.some((group) => group.key === paletteRevealTarget.groupKey);
+    const targetId = tabMatches
+      ? getPaletteSavedTabTargetId(savedWindow.id, paletteRevealTarget.tabOrder as number)
+      : groupMatches
+        ? getPaletteSavedGroupTargetId(savedWindow.id, paletteRevealTarget.groupKey as string)
+        : getPaletteSavedWindowTargetId(savedWindow.id);
+    queueMicrotask(() => document.getElementById(targetId)?.scrollIntoView?.({ block: 'center' }));
+  }, [paletteRevealTarget, status, windows]);
 
   useEffect(() => {
     if (!mergeDialogOpen) {
@@ -1422,6 +1519,33 @@ export function SavedWindowsPage({
       : `${pluralize(windows.length, 'saved window')} · ${pluralize(savedTabCount, 'tab')}`;
   const compactTotalSummary =
     status === 'loading' ? 'Loading' : `${windows.length}s · ${savedTabCount}t`;
+  const paletteRevealAnnouncement = (() => {
+    if (!paletteRevealTarget) {
+      return null;
+    }
+    const savedWindow = windows.find(
+      (candidate) => candidate.id === paletteRevealTarget.savedWindowId,
+    );
+    if (!savedWindow) {
+      return null;
+    }
+    const versionMatches =
+      paletteRevealTarget.savedWindowUpdatedAt === null ||
+      paletteRevealTarget.savedWindowUpdatedAt === savedWindow.updatedAt;
+    const tab = versionMatches
+      ? savedWindow.tabs.find((candidate) => candidate.order === paletteRevealTarget.tabOrder)
+      : undefined;
+    if (tab) {
+      return `Showing ${savedWindow.name} with ${tab.title} highlighted.`;
+    }
+    const group = versionMatches
+      ? savedWindow.groups.find((candidate) => candidate.key === paletteRevealTarget.groupKey)
+      : undefined;
+    if (group) {
+      return `Showing ${savedWindow.name} with ${group.title || 'Untitled group'} highlighted.`;
+    }
+    return `Showing saved window ${savedWindow.name}.`;
+  })();
   const headerStatus = (
     <div className="saved-window-header-status">
       <span className="window-summary" role="status" aria-label={totalSummary} aria-live="polite">
@@ -1444,6 +1568,75 @@ export function SavedWindowsPage({
     operation !== null ||
     selectedTabCount > 0 ||
     (!duplicatePreviewMode && duplicatePlan.duplicateGroupCount === 0);
+
+  useEffect(() => {
+    if (
+      !paletteViewRequest ||
+      status !== 'ready' ||
+      (paletteViewRequest === 'duplicates' && (settingsLoading || operation !== null))
+    ) {
+      return;
+    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+      if (paletteViewRequest === 'duplicates') {
+        closeMergeDialog(false);
+        closeMoveDialog(false);
+        clearTabSelection();
+        setDeletingId(null);
+        setRenamingId(null);
+        setPaletteRevealTarget(null);
+        setQuery('');
+        setDuplicatePreviewMode(true);
+        setPaletteViewRequest(null);
+        queueMicrotask(() => {
+          const previewButton = duplicatePreviewButtonRef.current;
+          if (previewButton && !previewButton.disabled) {
+            previewButton.focus();
+          }
+        });
+        return;
+      }
+      if (windows.length < 2) {
+        setActionError('Save at least two windows before merging them.');
+        setPaletteViewRequest(null);
+        queueMicrotask(() => searchInputRef.current?.focus());
+        return;
+      }
+      if (operation !== null) {
+        return;
+      }
+      closeMoveDialog(false);
+      clearTabSelection();
+      setDeletingId(null);
+      setRenamingId(null);
+      setPaletteRevealTarget(null);
+      setQuery('');
+      setDuplicatePreviewMode(false);
+      setMergeWindowName('');
+      setMergeWindowIds(new Set());
+      updateMergeDialogPosition();
+      setMergeDialogOpen(true);
+      setPaletteViewRequest(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    clearTabSelection,
+    closeMergeDialog,
+    closeMoveDialog,
+    operation,
+    paletteViewRequest,
+    settingsLoading,
+    status,
+    updateMergeDialogPosition,
+    windows.length,
+  ]);
+
   const bulkActionControls = (
     <div className="topbar-window-actions">
       <div className="duplicate-preview-control">
@@ -1572,6 +1765,11 @@ export function SavedWindowsPage({
 
   return (
     <section className="page-section saved-windows-page" aria-labelledby="saved-windows-heading">
+      {paletteRevealAnnouncement ? (
+        <span className="sr-only" role="status" aria-live="polite">
+          {paletteRevealAnnouncement}
+        </span>
+      ) : null}
       {headerPortalTarget ? createPortal(headerStatus, headerPortalTarget) : null}
       {actionPortalTarget ? createPortal(bulkActionControls, actionPortalTarget) : null}
       {headerPortalTarget === undefined ? headerStatus : null}
@@ -1918,11 +2116,40 @@ export function SavedWindowsPage({
           {displayedWindows.map((savedWindow) => {
             const sourceSavedWindow =
               windows.find((candidate) => candidate.id === savedWindow.id) ?? savedWindow;
+            const paletteRevealForWindow =
+              paletteRevealTarget?.savedWindowId === sourceSavedWindow.id
+                ? paletteRevealTarget
+                : null;
+            const paletteRevealVersionMatches =
+              paletteRevealForWindow !== null &&
+              (paletteRevealForWindow.savedWindowUpdatedAt === null ||
+                paletteRevealForWindow.savedWindowUpdatedAt === sourceSavedWindow.updatedAt);
+            const paletteRevealTabOrder =
+              paletteRevealVersionMatches &&
+              paletteRevealForWindow.tabOrder !== null &&
+              sourceSavedWindow.tabs.some((tab) => tab.order === paletteRevealForWindow.tabOrder)
+                ? paletteRevealForWindow.tabOrder
+                : null;
+            const paletteRevealGroupKey =
+              paletteRevealVersionMatches &&
+              paletteRevealForWindow.groupKey !== null &&
+              sourceSavedWindow.groups.some(
+                (group) => group.key === paletteRevealForWindow.groupKey,
+              )
+                ? paletteRevealForWindow.groupKey
+                : null;
+            const paletteRevealedWindow =
+              paletteRevealForWindow !== null &&
+              ((paletteRevealForWindow.groupKey === null &&
+                paletteRevealForWindow.tabOrder === null) ||
+                (paletteRevealTabOrder === null && paletteRevealGroupKey === null));
             const expanded = duplicatePreviewMode
               ? true
-              : hasFilter
-                ? !collapsedFilterIds.has(savedWindow.id)
-                : expandedIds.has(savedWindow.id);
+              : paletteRevealForWindow
+                ? true
+                : hasFilter
+                  ? !collapsedFilterIds.has(savedWindow.id)
+                  : expandedIds.has(savedWindow.id);
             const isRenaming = renamingId === savedWindow.id;
             const isDeleting = deletingId === savedWindow.id;
             const currentOperation = operation?.id === savedWindow.id ? operation.type : null;
@@ -1966,9 +2193,11 @@ export function SavedWindowsPage({
                   mergeDialogOpen && visibleMergeWindowIds.has(savedWindow.id)
                     ? 'is-merge-selected'
                     : '',
+                  paletteRevealedWindow ? 'is-palette-reveal' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
+                id={getPaletteSavedWindowTargetId(savedWindow.id)}
                 aria-labelledby={`saved-window-${savedWindow.id}-title`}
                 key={savedWindow.id}
               >
@@ -2003,13 +2232,13 @@ export function SavedWindowsPage({
                         ) : null}
                       </h3>
                       <span className="window-heading-summary">
+                        Saved {formatSavedTime(savedWindow.createdAt)} ·{' '}
                         {duplicatePreviewMode
                           ? pluralize(savedWindow.tabs.length, 'matching tab')
                           : hasFilter
                             ? `${pluralize(savedWindow.tabs.length, 'matching tab')} of ${pluralize(sourceSavedWindow.tabs.length, 'tab')}`
                             : `${pluralize(sourceSavedWindow.tabs.length, 'tab')} · ${pluralize(sourceSavedWindow.groups.length, 'group')}`}
-                        {selectedInWindowCount > 0 ? ` (${selectedInWindowCount} selected)` : ''} ·
-                        Saved {formatSavedTime(savedWindow.createdAt)}
+                        {selectedInWindowCount > 0 ? ` (${selectedInWindowCount} selected)` : ''}
                       </span>
                     </div>
                   </div>
@@ -2189,6 +2418,8 @@ export function SavedWindowsPage({
                         : {})}
                       onCopyTabUrl={(url, title) => void copySavedTabUrl(url, title)}
                       onOpenTab={(tab) => void openSavedTab(tab)}
+                      paletteRevealGroupKey={paletteRevealGroupKey}
+                      paletteRevealTabOrder={paletteRevealTabOrder}
                       {...(!duplicatePreviewMode
                         ? {
                             onRemoveTab: (tab, trigger) =>

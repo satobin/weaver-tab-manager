@@ -9,18 +9,19 @@ import { type SavedWindow } from '../saved-windows/savedWindowModel';
 export const COMMAND_PALETTE_SECTION_ORDER = [
   'open-tabs',
   'tab-groups',
-  'saved',
-  'settings',
   'actions',
+  'settings',
   'go-to',
+  'saved',
 ] as const;
 
 export type CommandPaletteSectionId = (typeof COMMAND_PALETTE_SECTION_ORDER)[number];
 
 export type CommandPaletteIcon =
   | 'about'
-  | 'action'
   | 'active-windows'
+  | 'duplicates'
+  | 'merge'
   | 'saved-window'
   | 'settings'
   | 'tab'
@@ -35,11 +36,6 @@ export type CommandPaletteAction =
   | {
       type: 'navigate';
       hash: string;
-    }
-  | {
-      type: 'open-saved-tab';
-      pinned: boolean;
-      url: string;
     };
 
 export interface CommandPaletteTabState {
@@ -84,7 +80,7 @@ interface BuildCommandPaletteSectionsInput {
 const SECTION_LABELS: Record<CommandPaletteSectionId, string> = {
   'open-tabs': 'Open tabs',
   'tab-groups': 'Tab groups',
-  saved: 'Saved',
+  saved: 'Saved Window/Tabs',
   settings: 'Settings',
   actions: 'Actions',
   'go-to': 'Go to',
@@ -290,14 +286,11 @@ function createStaticCandidates(): Candidate[] {
     }),
     createCandidate({
       action: {
-        hash: createAppRouteQuery(APP_ROUTES.windows, {
-          focus: 'active-duplicate-actions',
-          view: 'duplicates',
-        }),
+        hash: createAppRouteQuery(APP_ROUTES.windows, { view: 'duplicates' }),
         type: 'navigate',
       },
       aliases: ['close duplicate tabs', 'dedupe open tabs'],
-      icon: 'action',
+      icon: 'duplicates',
       id: 'action:preview-open-duplicates',
       section: 'actions',
       showWhenEmpty: true,
@@ -306,46 +299,16 @@ function createStaticCandidates(): Candidate[] {
     }),
     createCandidate({
       action: {
-        hash: createAppRouteQuery(APP_ROUTES.savedWindows, {
-          focus: 'saved-duplicate-actions',
-        }),
-        type: 'navigate',
-      },
-      aliases: ['saved dedupe', 'remove saved duplicates'],
-      icon: 'action',
-      id: 'action:preview-saved-duplicates',
-      section: 'actions',
-      showWhenEmpty: true,
-      subtitle: 'Open the Saved Windows duplicate review',
-      title: 'Review saved duplicate tabs',
-    }),
-    createCandidate({
-      action: {
-        hash: createAppRouteQuery(APP_ROUTES.windows, { focus: 'active-merge-actions' }),
+        hash: createAppRouteQuery(APP_ROUTES.windows, { view: 'merge' }),
         type: 'navigate',
       },
       aliases: ['combine windows'],
-      icon: 'action',
+      icon: 'merge',
       id: 'action:merge-windows',
       section: 'actions',
       showWhenEmpty: true,
       subtitle: 'Choose windows to combine',
       title: 'Merge windows',
-    }),
-    createCandidate({
-      action: {
-        hash: createAppRouteQuery(APP_ROUTES.savedWindows, {
-          focus: 'saved-merge-actions',
-        }),
-        type: 'navigate',
-      },
-      aliases: ['combine saved windows'],
-      icon: 'action',
-      id: 'action:merge-saved-windows',
-      section: 'actions',
-      showWhenEmpty: true,
-      subtitle: 'Choose saved windows to combine',
-      title: 'Merge saved windows',
     }),
     createCandidate({
       action: {
@@ -503,15 +466,16 @@ function createSavedCandidates(
       action: {
         hash: createAppRouteQuery(APP_ROUTES.savedWindows, {
           savedWindowId: savedWindow.id,
+          savedWindowUpdatedAt: savedWindow.updatedAt,
           search: savedWindow.name,
         }),
         type: 'navigate',
       },
-      directSearchValues: [savedWindow.name, 'saved window'],
+      directSearchValues: [savedWindow.name],
       icon: 'saved-window',
       id: `saved-window:${savedWindow.id}`,
       order: order++,
-      searchValues: [savedWindow.name, 'saved window', ...descendantValues],
+      searchValues: [savedWindow.name, ...descendantValues],
       section: 'saved',
       subtitle: `Saved window · ${pluralize(savedWindow.tabs.length, 'tab')}`,
       title: savedWindow.name,
@@ -521,15 +485,22 @@ function createSavedCandidates(
       const group = tab.groupKey ? groupsByKey.get(tab.groupKey) : undefined;
       const groupTitle = group ? group.title.trim() || 'Untitled group' : '';
       const domain = formatDomain(tab.url);
-      const subtitle = groupTitle ? `${groupTitle} · ${domain}` : domain;
+      const subtitle = [savedWindow.name, groupTitle, domain].filter(Boolean).join(' · ');
       candidates.push({
-        action: { pinned: tab.pinned, type: 'open-saved-tab', url: tab.url },
+        action: {
+          hash: createAppRouteQuery(APP_ROUTES.savedWindows, {
+            savedWindowId: savedWindow.id,
+            savedWindowUpdatedAt: savedWindow.updatedAt,
+            tabOrder: tab.order,
+          }),
+          type: 'navigate',
+        },
         directSearchValues: [tab.title, tab.url, groupTitle, savedWindow.name],
         ...(group ? { groupColor: group.color } : {}),
         icon: 'tab',
         id: `saved-tab:${savedWindow.id}:${tab.order}`,
         order: order++,
-        searchValues: [tab.title, tab.url, groupTitle, savedWindow.name, 'saved tab'],
+        searchValues: [tab.title, tab.url, groupTitle, savedWindow.name],
         section: 'saved',
         state: {
           active: false,
@@ -558,11 +529,12 @@ function createSavedCandidates(
           hash: createAppRouteQuery(APP_ROUTES.savedWindows, {
             groupKey: group.key,
             savedWindowId: savedWindow.id,
+            savedWindowUpdatedAt: savedWindow.updatedAt,
             search: groupTitle,
           }),
           type: 'navigate',
         },
-        directSearchValues: [groupTitle, group.color, 'saved tab group'],
+        directSearchValues: [groupTitle, group.color],
         groupColor: group.color,
         icon: 'tab-group',
         id: `saved-group:${savedWindow.id}:${group.key}`,
@@ -570,7 +542,6 @@ function createSavedCandidates(
         searchValues: [
           groupTitle,
           group.color,
-          'saved tab group',
           savedWindow.name,
           ...children.flatMap((tab) => [tab.title, tab.url]),
         ],

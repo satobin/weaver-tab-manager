@@ -1,6 +1,7 @@
 import { ListChecks, ListX, Merge, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 import { type SavedWindow } from './savedWindowModel';
 
 interface MergeSavedWindowsDialogProps {
@@ -40,6 +41,7 @@ export function MergeSavedWindowsDialog({
   selectedWindowIds,
   windows,
 }: MergeSavedWindowsDialogProps) {
+  const dialogRef = useRef<HTMLFormElement>(null);
   const firstWindowCheckboxRef = useRef<HTMLInputElement>(null);
   const allWindowsSelected =
     windows.length > 0 && windows.every((window) => selectedWindowIds.has(window.id));
@@ -69,8 +71,11 @@ export function MergeSavedWindowsDialog({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  useDismissOnCommandPaletteOpen(dialogRef, () => onClose(false));
+
   return (
     <form
+      ref={dialogRef}
       id="merge-saved-windows-dialog"
       className="merge-dialog"
       role="dialog"
