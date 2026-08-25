@@ -530,14 +530,16 @@ describe('createChromeActiveWindowsService', () => {
     });
   });
 
-  it('uses restored metadata in snapshots and sort planning while Chrome metadata is missing', async () => {
+  it('uses restored metadata in snapshots and sort planning while Chrome has a generic title', async () => {
     const { api, windows } = createApi();
     const restoredTab = windows[0]?.tabs?.[0];
     if (!restoredTab) {
       throw new Error('Missing restored tab fixture');
     }
-    delete restoredTab.title;
-    delete restoredTab.url;
+    restoredTab.pendingUrl = 'https://example.com/restored-plan';
+    restoredTab.status = 'loading';
+    restoredTab.title = 'Google Docs';
+    restoredTab.url = 'about:blank';
     const restoredMetadataService: RestoredTabMetadataService = {
       register: vi.fn(() => Promise.resolve()),
       remove: vi.fn(() => Promise.resolve()),
@@ -1480,7 +1482,13 @@ describe('createChromeActiveWindowsService', () => {
 
   it('restores closed tabs into original or replacement windows without stealing focus', async () => {
     const { api } = createApi();
-    const service = createChromeActiveWindowsService(api);
+    const restoredMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve(new Map())),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const service = createChromeActiveWindowsService(api, restoredMetadataService);
 
     await expect(
       service.restoreTabs([
@@ -1524,6 +1532,20 @@ describe('createChromeActiveWindowsService', () => {
       url: 'https://example.com/missing',
       windowId: 9,
     });
+    expect(restoredMetadataService.register).toHaveBeenNthCalledWith(1, [
+      {
+        tabId: 101,
+        title: 'Existing window tab',
+        url: 'https://example.com/existing',
+      },
+    ]);
+    expect(restoredMetadataService.register).toHaveBeenNthCalledWith(2, [
+      {
+        tabId: 102,
+        title: 'Missing window tab',
+        url: 'https://example.com/missing',
+      },
+    ]);
     expect(api.tabs.group).toHaveBeenNthCalledWith(1, { groupId: 7, tabIds: [101] });
     expect(api.tabs.group).toHaveBeenNthCalledWith(2, {
       createProperties: { windowId: 9 },
@@ -1535,6 +1557,63 @@ describe('createChromeActiveWindowsService', () => {
       title: 'Recovered',
     });
     expect(api.windows.update).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates title-registration warnings before removing a replacement placeholder', async () => {
+    const { api } = createApi();
+    const callOrder: string[] = [];
+    vi.mocked(api.windows.create).mockResolvedValue(
+      createChromeWindow({ id: 9, tabs: [createChromeTab({ id: 90, windowId: 9 })] }),
+    );
+    vi.mocked(api.tabs.remove).mockImplementation(() => {
+      callOrder.push('remove-placeholder');
+      return Promise.resolve();
+    });
+    const restoredMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => {
+        callOrder.push('register-restored-metadata');
+        return Promise.reject(new Error('Session storage unavailable'));
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve(new Map())),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const service = createChromeActiveWindowsService(api, restoredMetadataService);
+
+    await expect(
+      service.restoreTabs([
+        {
+          group: null,
+          index: 1,
+          originalTabId: 91,
+          pinned: false,
+          title: 'Existing window tab',
+          url: 'https://example.com/existing',
+          windowId: 2,
+        },
+        {
+          group: null,
+          index: 0,
+          originalTabId: 92,
+          pinned: false,
+          title: 'Recovered tab',
+          url: 'https://example.com/recovered',
+          windowId: 8,
+        },
+      ]),
+    ).resolves.toEqual({
+      failures: [],
+      restoredOriginalTabIds: [91, 92],
+      restoredTabIds: [101, 102],
+      warnings: [
+        'Restored tab titles and URLs could not be retained while pages load: Session storage unavailable',
+      ],
+    });
+    expect(callOrder).toEqual([
+      'register-restored-metadata',
+      'register-restored-metadata',
+      'remove-placeholder',
+    ]);
   });
 
   it('keeps a replacement window placeholder when every tab restore fails', async () => {

@@ -128,6 +128,7 @@ export interface RestoreSavedWindowResult {
 
 export interface OpenSavedTabInput {
   pinned: boolean;
+  title: string;
   url: string;
 }
 
@@ -527,12 +528,19 @@ export function createChromeSavedWindowsService(
       );
     },
 
-    async openTab({ pinned, url }) {
-      const createdTab = await api.tabs.create({ active: true, pinned, url });
+    async openTab({ pinned, title, url }) {
+      const createdTab = await api.tabs.create({ active: false, pinned, url });
       const tabId = getTabId(createdTab);
       if (tabId === null) {
         throw new Error('The browser created a tab without an ID.');
       }
+      try {
+        await restoredTabMetadataService.register([{ tabId, title, url }]);
+      } catch {
+        // The requested tab is already open and this API has no warning channel. Title recovery is
+        // best-effort here; failing the action would misleadingly report that the open itself failed.
+      }
+      await api.tabs.update(tabId, { active: true });
       return tabId;
     },
 

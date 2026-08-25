@@ -721,16 +721,40 @@ describe('createChromeSavedWindowsService', () => {
     'opens an individual saved URL as a new active tab with pinned=%s',
     async (pinned) => {
       const fake = createApi([createSavedWindow()]);
-      const service = createChromeSavedWindowsService(fake.api, environment);
-
-      await expect(service.openTab({ pinned, url: 'https://docs.example.com/plan' })).resolves.toBe(
-        100,
+      const restoredTabMetadataService: RestoredTabMetadataService = {
+        register: vi.fn(() => {
+          fake.callOrder.push('register-opened-tab');
+          return Promise.resolve();
+        }),
+        remove: vi.fn(() => Promise.resolve()),
+        resolve: vi.fn(() => Promise.resolve(new Map())),
+        subscribe: vi.fn(() => () => undefined),
+      };
+      const service = createChromeSavedWindowsService(
+        fake.api,
+        environment,
+        restoredTabMetadataService,
       );
+
+      await expect(
+        service.openTab({
+          pinned,
+          title: 'Plan',
+          url: 'https://docs.example.com/plan',
+        }),
+      ).resolves.toBe(100);
       expect(fake.api.tabs.create).toHaveBeenCalledWith({
-        active: true,
+        active: false,
         pinned,
         url: 'https://docs.example.com/plan',
       });
+      expect(restoredTabMetadataService.register).toHaveBeenCalledWith([
+        { tabId: 100, title: 'Plan', url: 'https://docs.example.com/plan' },
+      ]);
+      expect(fake.api.tabs.update).toHaveBeenCalledWith(100, { active: true });
+      expect(fake.callOrder.indexOf('register-opened-tab')).toBeLessThan(
+        fake.callOrder.indexOf('activate:100'),
+      );
       await expect(service.load()).resolves.toHaveLength(1);
     },
   );
@@ -738,11 +762,57 @@ describe('createChromeSavedWindowsService', () => {
   it('rejects an individual saved-tab open when Chrome omits the tab ID', async () => {
     const fake = createApi([createSavedWindow()]);
     vi.mocked(fake.api.tabs.create).mockResolvedValue(createChromeTab());
-    const service = createChromeSavedWindowsService(fake.api, environment);
+    const restoredTabMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve(new Map())),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const service = createChromeSavedWindowsService(
+      fake.api,
+      environment,
+      restoredTabMetadataService,
+    );
 
     await expect(
-      service.openTab({ pinned: false, url: 'https://docs.example.com/plan' }),
+      service.openTab({
+        pinned: false,
+        title: 'Plan',
+        url: 'https://docs.example.com/plan',
+      }),
     ).rejects.toThrow('The browser created a tab without an ID.');
+    expect(restoredTabMetadataService.register).not.toHaveBeenCalled();
+    expect(fake.api.tabs.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps an opened saved tab successful when title registration fails', async () => {
+    const fake = createApi([createSavedWindow()]);
+    const restoredTabMetadataService: RestoredTabMetadataService = {
+      register: vi.fn(() => {
+        fake.callOrder.push('register-opened-tab');
+        return Promise.reject(new Error('Session storage unavailable'));
+      }),
+      remove: vi.fn(() => Promise.resolve()),
+      resolve: vi.fn(() => Promise.resolve(new Map())),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const service = createChromeSavedWindowsService(
+      fake.api,
+      environment,
+      restoredTabMetadataService,
+    );
+
+    await expect(
+      service.openTab({
+        pinned: false,
+        title: 'Plan',
+        url: 'https://docs.example.com/plan',
+      }),
+    ).resolves.toBe(100);
+    expect(fake.api.tabs.update).toHaveBeenCalledWith(100, { active: true });
+    expect(fake.callOrder.indexOf('register-opened-tab')).toBeLessThan(
+      fake.callOrder.indexOf('activate:100'),
+    );
   });
 
   it('serializes rename and delete mutations without reviving stale records', async () => {
@@ -845,7 +915,10 @@ describe('createChromeSavedWindowsService', () => {
     const savedWindow = createSavedWindow();
     const fake = createApi([savedWindow]);
     const restoredTabMetadataService: RestoredTabMetadataService = {
-      register: vi.fn(() => Promise.resolve()),
+      register: vi.fn(() => {
+        fake.callOrder.push('register-restored-metadata');
+        return Promise.resolve();
+      }),
       remove: vi.fn(() => Promise.resolve()),
       resolve: vi.fn(() => Promise.resolve(new Map())),
       subscribe: vi.fn(() => () => undefined),
@@ -896,6 +969,9 @@ describe('createChromeSavedWindowsService', () => {
       title: 'Planning',
     });
     expect(fake.api.tabs.update).toHaveBeenCalledWith(101, { active: true });
+    expect(fake.callOrder.indexOf('register-restored-metadata')).toBeLessThan(
+      fake.callOrder.indexOf('activate:101'),
+    );
     expect(fake.callOrder.indexOf('activate:101')).toBeLessThan(
       fake.callOrder.indexOf('remove-placeholder'),
     );

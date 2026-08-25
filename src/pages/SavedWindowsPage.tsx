@@ -294,7 +294,9 @@ function SavedWindowPreview({
                     }
                     title={`Open in a new${tab.pinned ? ' pinned' : ''} tab`}
                     disabled={rowActionsDisabled}
-                    onClick={() => onOpenTab({ pinned: tab.pinned, url: tab.url })}
+                    onClick={() =>
+                      onOpenTab({ pinned: tab.pinned, title: tab.title, url: tab.url })
+                    }
                   >
                     <span className="tab-copy saved-tab-copy">
                       <strong className="tab-title">{tab.title}</strong>

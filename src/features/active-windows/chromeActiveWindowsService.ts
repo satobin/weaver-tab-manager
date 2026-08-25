@@ -1304,6 +1304,23 @@ export function createChromeActiveWindowsService(
         }
 
         if (restoredRecords.length > 0) {
+          try {
+            await restoredTabMetadataService.register(
+              restoredRecords.map(({ input, tabId }) => ({
+                tabId,
+                title: input.title,
+                url: input.url,
+              })),
+            );
+          } catch (error) {
+            const warning = `Restored tab titles and URLs could not be retained while pages load: ${describeChromeError(error)}`;
+            if (!result.warnings.includes(warning)) {
+              result.warnings.push(warning);
+            }
+          }
+        }
+
+        if (restoredRecords.length > 0) {
           for (const placeholderTabId of placeholderTabIds) {
             try {
               await api.tabs.remove(placeholderTabId);

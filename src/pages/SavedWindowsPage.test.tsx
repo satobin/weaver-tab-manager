@@ -1739,6 +1739,7 @@ describe('SavedWindowsPage', () => {
 
     expect(service.openTab).toHaveBeenCalledWith({
       pinned: true,
+      title: 'Inbox',
       url: fullUrl,
     });
     expect(service.restoreWindow).not.toHaveBeenCalled();

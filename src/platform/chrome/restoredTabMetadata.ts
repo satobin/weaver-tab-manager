@@ -1,4 +1,6 @@
 export const RESTORED_TAB_METADATA_STORAGE_KEY = 'weaver.restoredTabMetadata.v1';
+export const RESTORED_TAB_TITLE_SETTLE_DELAY_MS = 5_000;
+export const RESTORED_TAB_TITLE_MAX_SETTLE_MS = 30_000;
 
 const RESTORED_TAB_METADATA_SCHEMA_VERSION = 1;
 const RESTORED_TAB_METADATA_WRITE_LOCK = 'weaver.restoredTabMetadata.write';
@@ -19,9 +21,16 @@ export interface RestoredTabMetadataRegistration extends RestoredTabMetadata {
   tabId: number;
 }
 
+interface StoredRestoredTabMetadata extends RestoredTabMetadata {
+  baselineTitle?: string;
+  candidateSince?: number;
+  candidateTitle?: string;
+  settlingStartedAt?: number;
+}
+
 interface RestoredTabMetadataCollection {
   schemaVersion: 1;
-  tabs: Record<string, RestoredTabMetadata>;
+  tabs: Record<string, StoredRestoredTabMetadata>;
 }
 
 export interface RestoredTabMetadataChromeApi {
@@ -55,9 +64,11 @@ export interface RestoredTabMetadataService {
 
 export interface RestoredTabMetadataTracker {
   isTracked: (tabId: number) => Promise<boolean>;
+  replace: (removedTabId: number, replacementTab: chrome.tabs.Tab) => Promise<boolean>;
 }
 
 interface RestoredTabMetadataEnvironment {
+  now: () => number;
   withWriteLock: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
@@ -65,13 +76,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function parseMetadata(value: unknown): RestoredTabMetadata | null {
+function parseMetadata(value: unknown): StoredRestoredTabMetadata | null {
   if (!isRecord(value) || typeof value.title !== 'string' || typeof value.url !== 'string') {
     return null;
   }
   const title = value.title.trim();
   const url = value.url.trim();
-  return title && url ? { title, url } : null;
+  if (!title || !url) {
+    return null;
+  }
+
+  const metadata: StoredRestoredTabMetadata = { title, url };
+  const baselineTitle = typeof value.baselineTitle === 'string' ? value.baselineTitle.trim() : '';
+  const candidateTitle =
+    typeof value.candidateTitle === 'string' ? value.candidateTitle.trim() : '';
+  const candidateSince = value.candidateSince;
+  const settlingStartedAt = value.settlingStartedAt;
+  if (
+    candidateTitle &&
+    typeof candidateSince === 'number' &&
+    Number.isFinite(candidateSince) &&
+    candidateSince >= 0 &&
+    typeof settlingStartedAt === 'number' &&
+    Number.isFinite(settlingStartedAt) &&
+    settlingStartedAt >= 0 &&
+    candidateSince >= settlingStartedAt
+  ) {
+    // Older v1 records may predate baselineTitle. Treat their current candidate as the
+    // baseline so an upgrade retains the saved title conservatively instead of settling early.
+    metadata.baselineTitle = baselineTitle || candidateTitle;
+    metadata.candidateSince = candidateSince;
+    metadata.candidateTitle = candidateTitle;
+    metadata.settlingStartedAt = settlingStartedAt;
+  }
+  return metadata;
 }
 
 function parseCollection(value: unknown): RestoredTabMetadataCollection {
@@ -83,7 +121,7 @@ function parseCollection(value: unknown): RestoredTabMetadataCollection {
     return { schemaVersion: RESTORED_TAB_METADATA_SCHEMA_VERSION, tabs: {} };
   }
 
-  const tabs: Record<string, RestoredTabMetadata> = {};
+  const tabs: Record<string, StoredRestoredTabMetadata> = {};
   Object.entries(value.tabs).forEach(([tabId, candidate]) => {
     if (!Number.isInteger(Number(tabId)) || Number(tabId) < 0) {
       return;
@@ -100,20 +138,37 @@ function observedTabUrl(tab: chrome.tabs.Tab): string {
   return tab.pendingUrl?.trim() || tab.url?.trim() || '';
 }
 
-function hasTrustworthyTitle(tab: chrome.tabs.Tab, observedUrl: string): boolean {
+function observedTabTitle(tab: chrome.tabs.Tab, observedUrl: string): string | null {
   const title = tab.title?.trim() ?? '';
   if (!title) {
-    return false;
+    return null;
   }
   const normalizedTitle = title.toLowerCase();
   if (
     normalizedTitle === 'untitled' ||
     normalizedTitle === 'untitled tab' ||
-    normalizedTitle === 'new tab'
+    normalizedTitle === 'new tab' ||
+    title === observedUrl
+  ) {
+    return null;
+  }
+  return title;
+}
+
+function clearSettlingState(metadata: StoredRestoredTabMetadata): boolean {
+  if (
+    metadata.baselineTitle === undefined &&
+    metadata.candidateSince === undefined &&
+    metadata.candidateTitle === undefined &&
+    metadata.settlingStartedAt === undefined
   ) {
     return false;
   }
-  return tab.status === 'complete' || title !== observedUrl;
+  delete metadata.baselineTitle;
+  delete metadata.candidateSince;
+  delete metadata.candidateTitle;
+  delete metadata.settlingStartedAt;
+  return true;
 }
 
 async function withBrowserWriteLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -126,6 +181,7 @@ async function withBrowserWriteLock<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 const DEFAULT_ENVIRONMENT: RestoredTabMetadataEnvironment = {
+  now: Date.now,
   withWriteLock: withBrowserWriteLock,
 };
 
@@ -140,10 +196,9 @@ export function applyRestoredTabMetadata(
   if (!metadata) {
     return tab;
   }
-  const observedUrl = observedTabUrl(tab);
   return {
     ...tab,
-    title: hasTrustworthyTitle(tab, observedUrl) ? tab.title : metadata.title,
+    title: metadata.title,
     url: metadata.url,
   };
 }
@@ -318,13 +373,50 @@ export function createRestoredTabMetadataService(
         normalizedEntries.forEach(({ tabId, title, url }) => {
           const key = String(tabId);
           const current = collection.tabs[key];
-          if (current?.title === title && current.url === url) {
+          if (
+            current?.title === title &&
+            current.url === url &&
+            current.baselineTitle === undefined &&
+            current.candidateSince === undefined &&
+            current.candidateTitle === undefined &&
+            current.settlingStartedAt === undefined
+          ) {
             return;
           }
           collection.tabs[key] = { title, url };
           changed = true;
         });
         return { changed, result: undefined };
+      });
+    },
+
+    async replace(removedTabId, replacementTab) {
+      if (!Number.isInteger(removedTabId) || removedTabId < 0) {
+        return false;
+      }
+      const replacementTabId = replacementTab.id;
+      return mutate((collection) => {
+        const removedKey = String(removedTabId);
+        const metadata = collection.tabs[removedKey];
+        if (!metadata) {
+          return { changed: false, result: false };
+        }
+
+        delete collection.tabs[removedKey];
+        const replacementUrl = observedTabUrl(replacementTab);
+        const canTransfer =
+          replacementTabId !== undefined &&
+          Number.isInteger(replacementTabId) &&
+          replacementTabId >= 0 &&
+          replacementTabId !== removedTabId &&
+          replacementUrl === metadata.url;
+        if (canTransfer) {
+          collection.tabs[String(replacementTabId)] = {
+            title: metadata.title,
+            url: metadata.url,
+          };
+        }
+        return { changed: true, result: canTransfer };
       });
     },
 
@@ -370,12 +462,67 @@ export function createRestoredTabMetadataService(
             changed = true;
             return;
           }
-          if (observedUrl === metadata.url && hasTrustworthyTitle(tab, observedUrl)) {
+
+          const liveTitle = observedTabTitle(tab, observedUrl);
+          // A completed tab can still expose an app-shell title before its document data arrives.
+          // Treat the first live title as a baseline; a later title can settle after a quiet period,
+          // while the hard deadline covers pages whose first observed title was already final.
+          const canSettle =
+            observedUrl === metadata.url &&
+            tab.active &&
+            tab.status === 'complete' &&
+            liveTitle !== null;
+          if (!canSettle) {
+            changed = clearSettlingState(metadata) || changed;
+            resolved.set(tabId, { title: metadata.title, url: metadata.url });
+            return;
+          }
+
+          if (liveTitle === metadata.title) {
             delete collection.tabs[key];
             changed = true;
             return;
           }
-          resolved.set(tabId, { ...metadata });
+
+          const now = environment.now();
+          const hasInvalidClock =
+            (metadata.candidateSince !== undefined && metadata.candidateSince > now) ||
+            (metadata.settlingStartedAt !== undefined && metadata.settlingStartedAt > now);
+          if (
+            !hasInvalidClock &&
+            metadata.settlingStartedAt !== undefined &&
+            now - metadata.settlingStartedAt >= RESTORED_TAB_TITLE_MAX_SETTLE_MS
+          ) {
+            delete collection.tabs[key];
+            changed = true;
+            return;
+          }
+          if (
+            metadata.candidateTitle !== liveTitle ||
+            metadata.candidateSince === undefined ||
+            hasInvalidClock
+          ) {
+            metadata.candidateTitle = liveTitle;
+            metadata.candidateSince = now;
+            if (
+              metadata.baselineTitle === undefined ||
+              metadata.settlingStartedAt === undefined ||
+              hasInvalidClock
+            ) {
+              metadata.baselineTitle = liveTitle;
+              metadata.settlingStartedAt = now;
+            }
+            changed = true;
+          } else if (
+            metadata.baselineTitle !== liveTitle &&
+            now - metadata.candidateSince >= RESTORED_TAB_TITLE_SETTLE_DELAY_MS
+          ) {
+            delete collection.tabs[key];
+            changed = true;
+            return;
+          }
+
+          resolved.set(tabId, { title: metadata.title, url: metadata.url });
         });
         return { changed, result: resolved };
       });

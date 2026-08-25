@@ -4,6 +4,8 @@ import {
   applyRestoredTabMetadata,
   createRestoredTabMetadataService,
   RESTORED_TAB_METADATA_STORAGE_KEY,
+  RESTORED_TAB_TITLE_MAX_SETTLE_MS,
+  RESTORED_TAB_TITLE_SETTLE_DELAY_MS,
   type RestoredTabMetadataChromeApi,
 } from './restoredTabMetadata';
 
@@ -60,6 +62,19 @@ function createApi() {
   };
 }
 
+function createClock(start = 1_000) {
+  let current = start;
+  return {
+    advance: (milliseconds: number) => {
+      current += milliseconds;
+    },
+    environment: {
+      now: () => current,
+      withWriteLock: <T>(operation: () => Promise<T>) => operation(),
+    },
+  };
+}
+
 describe('restored tab metadata', () => {
   it('shares and caches the lazy tracked-tab lookup', async () => {
     const { api } = createApi();
@@ -102,10 +117,11 @@ describe('restored tab metadata', () => {
 
     await service.resolve([
       createTab({
+        active: true,
         id: 42,
         pendingUrl: undefined,
         status: 'complete',
-        title: 'Quarterly plan - Docs',
+        title: 'Quarterly plan',
         url: 'https://docs.example/plan',
       }),
       createTab({ id: 43, pendingUrl: 'https://docs.example/roadmap' }),
@@ -144,6 +160,56 @@ describe('restored tab metadata', () => {
     expect(session.get).toHaveBeenCalledTimes(2);
   });
 
+  it('atomically moves matching replacement-tab metadata and resets settling state', async () => {
+    const { api, stored } = createApi();
+    const service = createRestoredTabMetadataService(api);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    await service.resolve([
+      createTab({
+        active: true,
+        pendingUrl: undefined,
+        status: 'complete',
+        title: 'Google Docs',
+        url: 'https://docs.example/plan',
+      }),
+    ]);
+
+    await expect(
+      service.replace(
+        42,
+        createTab({ id: 84, pendingUrl: undefined, url: 'https://docs.example/plan' }),
+      ),
+    ).resolves.toBe(true);
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toEqual({
+      schemaVersion: 1,
+      tabs: {
+        84: { title: 'Quarterly plan', url: 'https://docs.example/plan' },
+      },
+    });
+    await expect(service.isTracked(42)).resolves.toBe(false);
+    await expect(service.isTracked(84)).resolves.toBe(true);
+  });
+
+  it.each([undefined, 'https://example.com/elsewhere'])(
+    'drops replacement metadata when the replacement URL is %p',
+    async (url) => {
+      const { api, stored } = createApi();
+      const service = createRestoredTabMetadataService(api);
+      await service.register([
+        { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+      ]);
+
+      await expect(
+        service.replace(42, createTab({ id: 84, pendingUrl: undefined, url })),
+      ).resolves.toBe(false);
+      expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
+      await expect(service.isTracked(42)).resolves.toBe(false);
+      await expect(service.isTracked(84)).resolves.toBe(false);
+    },
+  );
+
   it('retries a lazy lookup invalidated by an external storage change', async () => {
     const { api, emit, stored } = createApi();
     const session = api.storage?.session;
@@ -181,27 +247,249 @@ describe('restored tab metadata', () => {
     expect(session.get).toHaveBeenCalledTimes(2);
   });
 
-  it('overlays saved identity until Chrome supplies the real title and URL', async () => {
+  it('keeps a generic live title behind the saved title until it settles', async () => {
+    const { api, stored } = createApi();
+    const { advance, environment } = createClock();
+    const service = createRestoredTabMetadataService(api, environment);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    const fallback = await service.resolve([genericTab]);
+    expect(applyRestoredTabMetadata(genericTab, fallback)).toMatchObject({
+      title: 'Quarterly plan',
+      url: 'https://docs.example/plan',
+    });
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeDefined();
+
+    const session = api.storage?.session;
+    if (!session) {
+      throw new Error('Expected session storage.');
+    }
+    const writesAfterCandidate = vi.mocked(session.set).mock.calls.length;
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS - 1);
+    expect(await service.resolve([genericTab])).toEqual(fallback);
+    expect(session.set).toHaveBeenCalledTimes(writesAfterCandidate);
+
+    advance(1);
+    expect((await service.resolve([genericTab])).size).toBe(1);
+    advance(RESTORED_TAB_TITLE_MAX_SETTLE_MS - RESTORED_TAB_TITLE_SETTLE_DELAY_MS);
+    expect(await service.resolve([genericTab])).toEqual(new Map());
+    expect(applyRestoredTabMetadata(genericTab, new Map())).toMatchObject({
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('restarts settling when the live title changes', async () => {
+    const { api, stored } = createApi();
+    const { advance, environment } = createClock();
+    const service = createRestoredTabMetadataService(api, environment);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    expect((await service.resolve([genericTab])).size).toBe(1);
+
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS - 1);
+    const finalTab = { ...genericTab, title: 'Quarterly plan - Google Docs' };
+    const changedFallback = await service.resolve([finalTab]);
+    expect(applyRestoredTabMetadata(finalTab, changedFallback).title).toBe('Quarterly plan');
+
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS - 1);
+    expect((await service.resolve([finalTab])).size).toBe(1);
+    advance(1);
+    expect(await service.resolve([finalTab])).toEqual(new Map());
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('keeps the original baseline when the live title oscillates back to it', async () => {
+    const { api } = createApi();
+    const { advance, environment } = createClock();
+    const service = createRestoredTabMetadataService(api, environment);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    await service.resolve([genericTab]);
+
+    advance(1_000);
+    expect((await service.resolve([{ ...genericTab, title: 'Loading document…' }])).size).toBe(1);
+    advance(1_000);
+    expect((await service.resolve([genericTab])).size).toBe(1);
+
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS);
+    expect((await service.resolve([genericTab])).size).toBe(1);
+  });
+
+  it('retires the fallback at the absolute ceiling after a late title change', async () => {
+    const { api } = createApi();
+    const { advance, environment } = createClock();
+    const service = createRestoredTabMetadataService(api, environment);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    await service.resolve([genericTab]);
+
+    advance(RESTORED_TAB_TITLE_MAX_SETTLE_MS - 1);
+    const changedTab = { ...genericTab, title: 'Loading document…' };
+    expect((await service.resolve([changedTab])).size).toBe(1);
+
+    advance(1);
+    expect(await service.resolve([changedTab])).toEqual(new Map());
+  });
+
+  it.each([
+    ['inactive', { active: false, status: 'complete' as const }],
+    ['loading', { active: true, status: 'loading' as const }],
+    ['unloaded', { active: true, status: 'unloaded' as const }],
+  ])('resets settling when the tab becomes %s', async (_label, overrides) => {
+    const { api } = createApi();
+    const { advance, environment } = createClock();
+    const service = createRestoredTabMetadataService(api, environment);
+    await service.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    const completeTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    await service.resolve([completeTab]);
+    advance(RESTORED_TAB_TITLE_MAX_SETTLE_MS);
+
+    const interruptedTab = { ...completeTab, ...overrides };
+    const interruptedFallback = await service.resolve([interruptedTab]);
+    expect(applyRestoredTabMetadata(interruptedTab, interruptedFallback).title).toBe(
+      'Quarterly plan',
+    );
+
+    const restartedFallback = await service.resolve([completeTab]);
+    expect(applyRestoredTabMetadata(completeTab, restartedFallback).title).toBe('Quarterly plan');
+  });
+
+  it.each([undefined, '', 'Untitled', 'Untitled tab', 'New Tab', 'https://docs.example/plan'])(
+    'keeps the saved title when the completed live title is %p',
+    async (title) => {
+      const { api } = createApi();
+      const { advance, environment } = createClock();
+      const service = createRestoredTabMetadataService(api, environment);
+      await service.register([
+        { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+      ]);
+      const tab = createTab({
+        active: true,
+        pendingUrl: undefined,
+        status: 'complete',
+        title,
+        url: 'https://docs.example/plan',
+      });
+
+      expect((await service.resolve([tab])).size).toBe(1);
+      advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS * 2);
+      const fallback = await service.resolve([tab]);
+      expect(applyRestoredTabMetadata(tab, fallback).title).toBe('Quarterly plan');
+    },
+  );
+
+  it('retires the fallback immediately when the completed title matches the saved title', async () => {
     const { api, stored } = createApi();
     const service = createRestoredTabMetadataService(api);
     await service.register([
       { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
     ]);
 
-    const loadingTab = createTab();
-    const fallback = await service.resolve([loadingTab]);
-    expect(applyRestoredTabMetadata(loadingTab, fallback)).toMatchObject({
+    const loadedTab = createTab({
+      active: true,
+      discarded: false,
+      pendingUrl: undefined,
+      status: 'complete',
       title: 'Quarterly plan',
       url: 'https://docs.example/plan',
     });
+    expect(await service.resolve([loadedTab])).toEqual(new Map());
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
+  });
 
-    const loadedTab = createTab({
-      discarded: false,
+  it('continues a persisted settling deadline after a service-worker restart', async () => {
+    const { api, stored } = createApi();
+    const { advance, environment } = createClock();
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
       status: 'complete',
-      title: 'Quarterly plan - Docs',
+      title: 'Google Docs',
       url: 'https://docs.example/plan',
     });
-    expect(await service.resolve([loadedTab])).toEqual(new Map());
+    const firstService = createRestoredTabMetadataService(api, environment);
+    await firstService.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    expect((await firstService.resolve([genericTab])).size).toBe(1);
+
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS);
+    const restartedService = createRestoredTabMetadataService(api, environment);
+    expect((await restartedService.resolve([genericTab])).size).toBe(1);
+
+    advance(RESTORED_TAB_TITLE_MAX_SETTLE_MS - RESTORED_TAB_TITLE_SETTLE_DELAY_MS);
+    expect(await restartedService.resolve([genericTab])).toEqual(new Map());
+    expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
+  });
+
+  it('continues a changed-title quiet period after a service-worker restart', async () => {
+    const { api, stored } = createApi();
+    const { advance, environment } = createClock();
+    const genericTab = createTab({
+      active: true,
+      pendingUrl: undefined,
+      status: 'complete',
+      title: 'Google Docs',
+      url: 'https://docs.example/plan',
+    });
+    const finalTab = { ...genericTab, title: 'Quarterly plan - Google Docs' };
+    const firstService = createRestoredTabMetadataService(api, environment);
+    await firstService.register([
+      { tabId: 42, title: 'Quarterly plan', url: 'https://docs.example/plan' },
+    ]);
+    await firstService.resolve([genericTab]);
+    advance(1_000);
+    expect((await firstService.resolve([finalTab])).size).toBe(1);
+
+    advance(RESTORED_TAB_TITLE_SETTLE_DELAY_MS - 1);
+    const restartedService = createRestoredTabMetadataService(api, environment);
+    expect((await restartedService.resolve([finalTab])).size).toBe(1);
+
+    advance(1);
+    expect(await restartedService.resolve([finalTab])).toEqual(new Map());
     expect(stored[RESTORED_TAB_METADATA_STORAGE_KEY]).toBeUndefined();
   });
 
