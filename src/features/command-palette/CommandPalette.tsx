@@ -2,7 +2,6 @@ import {
   Archive,
   Bot,
   CirclePause,
-  Command,
   Eye,
   Info,
   Merge,
@@ -27,6 +26,7 @@ import { type ActiveWindowsService } from '../active-windows/chromeActiveWindows
 import { TabIcon } from '../active-windows/TabIcon';
 import { type ActiveWindowsDataSource, useActiveWindows } from '../active-windows/useActiveWindows';
 import { type SavedWindowsReadService, useSavedWindows } from '../saved-windows/useSavedWindows';
+import { Tooltip } from '../../ui/Tooltip';
 import { dismissTransientSurfacesForCommandPalette } from '../../ui/transientSurface';
 import {
   buildCommandPaletteSections,
@@ -59,6 +59,10 @@ function isPrimaryShortcut(
 
 function getModifierLabel(): string {
   return /Mac|iPhone|iPad|iPod/u.test(navigator.platform) ? '⌘' : 'Ctrl';
+}
+
+function formatShortcutLabel(modifierLabel: string, key: string): string {
+  return modifierLabel === '⌘' ? `${modifierLabel}${key}` : `${modifierLabel}+${key}`;
 }
 
 function getOptionId(index: number): string {
@@ -402,7 +406,7 @@ function CommandPaletteDialog({
             result.state?.pinned ||
             result.state?.suspended,
           );
-          const shortcut = index < 9 ? `${modifierLabel}${index + 1}` : null;
+          const shortcut = index < 9 ? formatShortcutLabel(modifierLabel, String(index + 1)) : null;
           return (
             <button
               className={`command-palette-result${resolvedActiveIndex === index ? ' is-active' : ''}${
@@ -475,21 +479,23 @@ function CommandPaletteDialog({
             }}
             onKeyDown={handleKeyDown}
           />
-          <button
-            className={`command-palette-clear${query ? '' : ' is-hidden'}`}
-            type="button"
-            aria-label="Clear search"
-            aria-hidden={!query}
-            tabIndex={query ? 0 : -1}
-            onKeyDown={handleKeyDown}
-            onClick={() => {
-              setQuery('');
-              setActiveIndex(0);
-              inputRef.current?.focus();
-            }}
-          >
-            <X aria-hidden="true" size={16} />
-          </button>
+          <Tooltip content="Clear search" relationship="none">
+            <button
+              className={`command-palette-clear${query ? '' : ' is-hidden'}`}
+              type="button"
+              aria-label="Clear search"
+              aria-hidden={!query}
+              tabIndex={query ? 0 : -1}
+              onKeyDown={handleKeyDown}
+              onClick={() => {
+                setQuery('');
+                setActiveIndex(0);
+                inputRef.current?.focus();
+              }}
+            >
+              <X aria-hidden="true" size={16} />
+            </button>
+          </Tooltip>
         </div>
 
         <div
@@ -554,6 +560,7 @@ export function CommandPalette({ activeWindowsService, savedWindowsService }: Co
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const modifierLabel = getModifierLabel();
+  const triggerShortcutLabel = formatShortcutLabel(modifierLabel, 'K');
 
   const openPalette = () => {
     if (!dismissTransientSurfacesForCommandPalette()) {
@@ -614,22 +621,27 @@ export function CommandPalette({ activeWindowsService, savedWindowsService }: Co
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        className="toolbar-button command-palette-trigger"
-        type="button"
-        aria-controls={DIALOG_ID}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label="Search Weaver"
-        aria-keyshortcuts="Meta+K Control+K"
-        title={`Search Weaver (${modifierLabel}K)`}
-        onClick={() => (open ? closePalette(true) : openPalette())}
+      <Tooltip
+        content={`Search Weaver (${triggerShortcutLabel})`}
+        onlyWhenLabelHidden
+        relationship="none"
       >
-        <Search aria-hidden="true" size={16} strokeWidth={1.8} />
-        <span>Search Weaver</span>
-        <kbd>{modifierLabel === '⌘' ? <Command aria-hidden="true" size={11} /> : 'Ctrl'} K</kbd>
-      </button>
+        <button
+          ref={triggerRef}
+          className="toolbar-button command-palette-trigger"
+          type="button"
+          aria-controls={DIALOG_ID}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label="Search Weaver"
+          aria-keyshortcuts="Meta+K Control+K"
+          onClick={() => (open ? closePalette(true) : openPalette())}
+        >
+          <Search aria-hidden="true" size={16} strokeWidth={1.8} />
+          <span data-tooltip-label>Search Weaver</span>
+          <kbd>{triggerShortcutLabel}</kbd>
+        </button>
+      </Tooltip>
       {open ? (
         <CommandPaletteDialog
           activeWindowsService={activeWindowsService}

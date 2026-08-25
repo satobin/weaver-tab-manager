@@ -1,6 +1,7 @@
 import { ListChecks, ListX, Merge, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import { Tooltip } from '../../ui/Tooltip';
 import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 import { type ManagedWindow } from './model';
 
@@ -72,15 +73,16 @@ export function MergeWindowsDialog({
           <h3 id="merge-dialog-title">Merge windows</h3>
           <span>{selectedWindowIds.size} selected</span>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label="Close merge windows"
-          title="Close"
-          onClick={() => onClose()}
-        >
-          <X aria-hidden="true" size={16} />
-        </button>
+        <Tooltip content="Close" relationship="none">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Close merge windows"
+            onClick={() => onClose()}
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
+        </Tooltip>
       </header>
 
       <div className="merge-window-list">

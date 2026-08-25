@@ -2,6 +2,7 @@ import { AlertTriangle, CircleHelp, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Tooltip } from '../../ui/Tooltip';
 import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 
 const POPOVER_GAP = 6;
@@ -169,15 +170,16 @@ export function DedupeRuleHelpPopover() {
                     comparison method decides when those URLs are the same page.
                   </p>
                 </div>
-                <button
-                  className="icon-button"
-                  type="button"
-                  aria-label="Close custom rule help"
-                  title="Close"
-                  onClick={() => closeHelp(true)}
-                >
-                  <X aria-hidden="true" size={17} />
-                </button>
+                <Tooltip content="Close" relationship="none">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label="Close custom rule help"
+                    onClick={() => closeHelp(true)}
+                  >
+                    <X aria-hidden="true" size={17} />
+                  </button>
+                </Tooltip>
               </header>
 
               <div className="dedupe-rule-help-content">

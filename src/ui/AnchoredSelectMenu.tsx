@@ -2,6 +2,7 @@ import { Check, ChevronDown, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { Tooltip } from './Tooltip';
 import { useDismissOnCommandPaletteOpen } from './transientSurface';
 
 import './anchoredSelectMenu.css';
@@ -170,35 +171,44 @@ export function AnchoredSelectMenu<T extends number | string>({
   };
   const SelectedIcon = selectedOption?.icon;
   const selectedLabel = selectedOption?.triggerLabel ?? selectedOption?.label ?? '';
+  const tooltipContent = triggerTitle ?? (iconOnly ? `${ariaLabel}: ${selectedLabel}` : undefined);
+  const trigger = (
+    <button
+      ref={triggerRef}
+      className={joinClassNames('anchored-select-trigger', triggerClassName)}
+      type="button"
+      aria-controls={menuId}
+      aria-expanded={open}
+      aria-haspopup="menu"
+      aria-label={`${ariaLabel}: ${selectedLabel}`}
+      disabled={disabled || options.length === 0}
+      onClick={() => (open ? closeMenu(false) : openMenu())}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          openMenu();
+        }
+      }}
+    >
+      {SelectedIcon ? (
+        <SelectedIcon className="anchored-select-trigger-icon" aria-hidden="true" size={16} />
+      ) : null}
+      {iconOnly ? null : <span>{selectedLabel}</span>}
+      {showChevron ? (
+        <ChevronDown className="anchored-select-chevron" aria-hidden="true" size={14} />
+      ) : null}
+    </button>
+  );
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        className={joinClassNames('anchored-select-trigger', triggerClassName)}
-        type="button"
-        aria-controls={menuId}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={`${ariaLabel}: ${selectedLabel}`}
-        title={triggerTitle ?? (iconOnly ? `${ariaLabel}: ${selectedLabel}` : undefined)}
-        disabled={disabled || options.length === 0}
-        onClick={() => (open ? closeMenu(false) : openMenu())}
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            openMenu();
-          }
-        }}
-      >
-        {SelectedIcon ? (
-          <SelectedIcon className="anchored-select-trigger-icon" aria-hidden="true" size={16} />
-        ) : null}
-        {iconOnly ? null : <span>{selectedLabel}</span>}
-        {showChevron ? (
-          <ChevronDown className="anchored-select-chevron" aria-hidden="true" size={14} />
-        ) : null}
-      </button>
+      {tooltipContent ? (
+        <Tooltip content={tooltipContent} relationship="none">
+          {trigger}
+        </Tooltip>
+      ) : (
+        trigger
+      )}
 
       {open && position
         ? createPortal(

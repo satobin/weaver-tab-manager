@@ -4,6 +4,12 @@ const COMMAND_PALETTE_DISMISS_EVENT = 'weaver:command-palette-dismiss-transient-
 const DISMISSIBLE_ATTRIBUTE = 'data-command-palette-dismissible';
 const DISMISSIBLE_SELECTOR = `[${DISMISSIBLE_ATTRIBUTE}="true"]`;
 const BLOCKING_SURFACE_SELECTOR = '[role="dialog"], [role="menu"], [aria-modal="true"]';
+const dismissHandlers = new Set<() => void>();
+
+export function registerCommandPaletteDismissHandler(onDismiss: () => void): () => void {
+  dismissHandlers.add(onDismiss);
+  return () => dismissHandlers.delete(onDismiss);
+}
 
 export function useDismissOnCommandPaletteOpen<T extends HTMLElement>(
   surfaceRef: RefObject<T | null>,
@@ -38,5 +44,6 @@ export function dismissTransientSurfacesForCommandPalette(): boolean {
   document.querySelectorAll<HTMLElement>(DISMISSIBLE_SELECTOR).forEach((surface) => {
     surface.dispatchEvent(new Event(COMMAND_PALETTE_DISMISS_EVENT));
   });
+  [...dismissHandlers].forEach((onDismiss) => onDismiss());
   return true;
 }

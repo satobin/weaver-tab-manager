@@ -1,6 +1,7 @@
 import { Archive, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
+import { Tooltip } from '../../ui/Tooltip';
 import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 
 interface MoveSavedTabsDialogProps {
@@ -100,16 +101,17 @@ export function MoveSavedTabsDialog({
               {pluralize(tabCount, 'selected tab')} will move from their current saved windows.
             </span>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Close move to new saved window"
-            title="Close"
-            disabled={moving}
-            onClick={() => onClose()}
-          >
-            <X aria-hidden="true" size={16} />
-          </button>
+          <Tooltip content="Close" relationship="none">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Close move to new saved window"
+              disabled={moving}
+              onClick={() => onClose()}
+            >
+              <X aria-hidden="true" size={16} />
+            </button>
+          </Tooltip>
         </header>
 
         <form

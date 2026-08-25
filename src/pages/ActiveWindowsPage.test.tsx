@@ -441,7 +441,7 @@ describe('ActiveWindowsPage', () => {
     expect(within(bannerButtons[0] as HTMLElement).getByText('1')).toHaveClass('toolbar-count');
     expect(bannerButtons[1]).toHaveAccessibleName('Exit duplicate tabs view');
     expect(bannerButtons[1]).toHaveAttribute('title', 'Exit duplicate tabs view');
-    expect(screen.getByRole('button', { name: 'Show duplicate tabs only' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Show all tabs' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -612,7 +612,9 @@ describe('ActiveWindowsPage', () => {
       within(duplicateActions).getByRole('button', { name: 'Close duplicate tabs: 0 tabs' }),
     ).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: 'Pin Pinned second copy', pressed: true }));
+    await user.click(
+      screen.getByRole('button', { name: 'Unpin Pinned second copy', pressed: true }),
+    );
 
     expect(service.unpinTab).toHaveBeenCalledWith(102);
     await waitFor(() =>
@@ -688,7 +690,7 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByText('Current copy').closest('li')).toHaveClass(
       'is-duplicate-preview-close',
     );
-    expect(screen.getByRole('button', { name: 'Pin Copy to pin', pressed: true })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Unpin Copy to pin', pressed: true })).toHaveFocus();
   });
 
   it('keeps pin and suspend controls together without nesting either action', async () => {
@@ -721,9 +723,9 @@ describe('ActiveWindowsPage', () => {
     const actions = row?.querySelector('.tab-inline-actions');
     expect(actions).not.toBeNull();
     const [pinButton, suspendButton] = within(actions as HTMLElement).getAllByRole('button');
-    expect(pinButton).toHaveAccessibleName('Pin Pinned suspended tab');
+    expect(pinButton).toHaveAccessibleName('Unpin Pinned suspended tab');
     expect(pinButton).toHaveAttribute('aria-pressed', 'true');
-    expect(suspendButton).toHaveAccessibleName('Suspend Pinned suspended tab');
+    expect(suspendButton).toHaveAccessibleName('Unsuspend Pinned suspended tab');
     expect(suspendButton).toHaveAttribute('aria-pressed', 'true');
     expect(actions?.closest('.tab-focus-button')).toBeNull();
   });
@@ -799,14 +801,14 @@ describe('ActiveWindowsPage', () => {
     const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
     await user.click(selectGroup);
     await user.type(search, 'Hidden selection');
-    expect(screen.getByRole('button', { name: 'Clear selected 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 2 selected tabs' })).toBeInTheDocument();
 
     const previewButton = screen.getByRole('button', { name: 'Show duplicate tabs only' });
     await waitFor(() => expect(previewButton).toBeEnabled());
     await user.click(previewButton);
 
     expect(search).toHaveValue('');
-    expect(screen.queryByRole('button', { name: 'Clear selected 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear 2 selected tabs' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
@@ -825,7 +827,7 @@ describe('ActiveWindowsPage', () => {
     const search = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
     await user.click(hiddenSelection);
     await user.type(search, 'Hidden selection');
-    expect(screen.getByRole('button', { name: 'Clear selected 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 1 selected tab' })).toBeInTheDocument();
 
     window.history.replaceState(
       null,
@@ -836,7 +838,7 @@ describe('ActiveWindowsPage', () => {
 
     expect(await screen.findByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
     expect(search).toHaveValue('');
-    expect(screen.queryByRole('button', { name: 'Clear selected 1' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear 1 selected tab' })).not.toBeInTheDocument();
     expect(window.location.hash).toBe(APP_ROUTES.windows);
 
     await user.click(screen.getByRole('button', { name: 'Exit duplicate tabs view' }));
@@ -977,8 +979,10 @@ describe('ActiveWindowsPage', () => {
     await user.click(selectGroup);
 
     expect(selectGroup).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Open in new window 1' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Close 1' }));
+    expect(
+      screen.getByRole('button', { name: 'Open 1 selected tab in a new window' }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Close 1 selected tab' }));
     await waitFor(() => expect(service.closeTabs).toHaveBeenCalledWith([101]));
     expect(service.closeTabs).not.toHaveBeenCalledWith(expect.arrayContaining([102]));
   });
@@ -994,15 +998,17 @@ describe('ActiveWindowsPage', () => {
     await waitFor(() => expect(previewButton).toBeEnabled());
     await user.click(previewButton);
     await user.click(screen.getByRole('checkbox', { name: 'Select Keep this tab' }));
-    expect(screen.getByRole('button', { name: 'Close 1' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Close 1 selected tab' })).toBeEnabled();
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' }), {
       target: { value: 'Close this' },
     });
 
     expect(screen.getByRole('checkbox', { name: 'Select Keep this tab' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Open in new window 0' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Close 0' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Open 0 selected tabs in a new window' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close 0 selected tabs' })).toBeDisabled();
     expect(service.closeTabs).not.toHaveBeenCalled();
   });
 
@@ -1071,8 +1077,10 @@ describe('ActiveWindowsPage', () => {
 
     const emptyHeading = await screen.findByRole('heading', { name: 'No duplicate tabs' });
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open in new window 0' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Close 0' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Open 0 selected tabs in a new window' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close 0 selected tabs' })).toBeDisabled();
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [201] }),
     );
@@ -1092,18 +1100,22 @@ describe('ActiveWindowsPage', () => {
     expect(await screen.findByRole('heading', { name: 'Window 1' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Window 2' })).toBeInTheDocument();
     expect(container.querySelector('.window-browser-icon')).not.toBeInTheDocument();
-    expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
+    const summary = screen.getByRole('status', { name: '2 windows · 3 tabs' });
+    expect(summary).toHaveTextContent(/^2 windows · 3 tabs$/);
+    expect(summary.querySelector('.window-summary-compact')).not.toBeInTheDocument();
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus first tab in Planning' })).toBeInTheDocument();
     expect(screen.getByText('Collapsed')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Pin Quarterly plan', pressed: true }),
+      screen.getByRole('button', { name: 'Unpin Quarterly plan', pressed: true }),
     ).toBeInTheDocument();
     const suspendedButton = screen.getByRole('button', {
-      name: 'Suspend Issue tracker',
+      name: 'Unsuspend Issue tracker',
       pressed: true,
     });
-    expect(suspendedButton).toHaveAttribute('title', 'Unsuspend tab');
+    expect(suspendedButton).not.toHaveAttribute('title');
+    fireEvent.pointerEnter(suspendedButton);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Unsuspend tab');
     expect(suspendedButton.querySelector('.tab-suspended-icon-pause')).toBeInTheDocument();
     expect(suspendedButton.querySelector('.tab-suspended-icon-play')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toHaveAttribute(
@@ -1370,7 +1382,7 @@ describe('ActiveWindowsPage', () => {
     expect(pinButton).toHaveAccessibleName('Pin Grouped background tab');
     expect(pinButton).toHaveAttribute('aria-pressed', 'false');
     expect(pinButton).toHaveClass('is-reveal-action');
-    expect(pinButton).toHaveAttribute('title', 'Pin tab (removes it from its group)');
+    expect(pinButton).not.toHaveAttribute('title');
     expect(pinButton).toHaveAccessibleDescription('Pinning removes this tab from its group.');
     expect(suspendButton).toHaveAccessibleName('Suspend Grouped background tab');
     expect(suspendButton).toHaveAttribute('aria-pressed', 'false');
@@ -1392,7 +1404,7 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusTab).not.toHaveBeenCalled();
     expect(service.focusWindow).not.toHaveBeenCalled();
     expect(
-      await screen.findByRole('button', { name: 'Pin Grouped background tab', pressed: true }),
+      await screen.findByRole('button', { name: 'Unpin Grouped background tab', pressed: true }),
     ).toHaveFocus();
     expect(
       screen.getByRole('button', { name: 'Suspend Grouped background tab', pressed: false }),
@@ -1406,10 +1418,10 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const unpinButton = await screen.findByRole('button', {
-      name: 'Pin Quarterly plan',
+      name: 'Unpin Quarterly plan',
       pressed: true,
     });
-    expect(unpinButton).toHaveAttribute('title', 'Unpin tab');
+    expect(unpinButton).not.toHaveAttribute('title');
     expect(unpinButton.closest('.tab-focus-button')).toBeNull();
     expect(unpinButton.querySelector('.tab-pin-icon-pinned')).toBeInTheDocument();
     expect(unpinButton.querySelector('.tab-pin-icon-unpin')).toBeInTheDocument();
@@ -1439,7 +1451,7 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const unpinButton = await screen.findByRole('button', {
-      name: 'Pin Quarterly plan',
+      name: 'Unpin Quarterly plan',
       pressed: true,
     });
     await user.click(unpinButton);
@@ -1487,10 +1499,7 @@ describe('ActiveWindowsPage', () => {
     );
     expect(unavailableSuspend).not.toBeNull();
     expect(unavailableSuspend).toHaveClass('is-reveal-action');
-    expect(unavailableSuspend).toHaveAttribute(
-      'title',
-      "Active tabs can't be suspended. Select another tab in this window first.",
-    );
+    expect(unavailableSuspend).not.toHaveAttribute('title');
     expect(unavailableSuspend?.querySelector('.tab-suspended-icon-pause')).toBeInTheDocument();
     expect(
       unavailableSuspend?.querySelector('.tab-suspended-unavailable-slash'),
@@ -1555,7 +1564,7 @@ describe('ActiveWindowsPage', () => {
       pressed: false,
     });
     expect(suspendButton).toHaveClass('is-reveal-action');
-    expect(suspendButton).toHaveAttribute('title', 'Suspend tab');
+    expect(suspendButton).not.toHaveAttribute('title');
     expect(screen.queryByRole('button', { name: 'Suspend Active tab' })).not.toBeInTheDocument();
 
     const setDragData = vi.fn();
@@ -1570,11 +1579,11 @@ describe('ActiveWindowsPage', () => {
     expect(service.focusTab).not.toHaveBeenCalled();
     expect(service.focusWindow).not.toHaveBeenCalled();
     const unsuspendButton = await screen.findByRole('button', {
-      name: 'Suspend Background tab',
+      name: 'Unsuspend Background tab',
       pressed: true,
     });
     expect(unsuspendButton).toHaveClass('is-state-action');
-    expect(unsuspendButton).toHaveAttribute('title', 'Unsuspend tab');
+    expect(unsuspendButton).not.toHaveAttribute('title');
     expect(unsuspendButton).toHaveFocus();
   });
 
@@ -1643,7 +1652,7 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const suspendedButton = await screen.findByRole('button', {
-      name: 'Suspend Issue tracker',
+      name: 'Unsuspend Issue tracker',
       pressed: true,
     });
     expect(suspendedButton.closest('.tab-focus-button')).toBeNull();
@@ -1665,7 +1674,7 @@ describe('ActiveWindowsPage', () => {
       pressed: false,
     });
     expect(suspendButton).toHaveClass('is-reveal-action');
-    expect(suspendButton).toHaveAttribute('title', 'Suspend tab');
+    expect(suspendButton).not.toHaveAttribute('title');
     expect(suspendButton).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: 'Focus Issue tracker' }));
@@ -1703,7 +1712,7 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     await user.click(
-      await screen.findByRole('button', { name: 'Suspend Issue tracker', pressed: true }),
+      await screen.findByRole('button', { name: 'Unsuspend Issue tracker', pressed: true }),
     );
 
     await waitFor(() =>
@@ -1860,14 +1869,24 @@ describe('ActiveWindowsPage', () => {
   });
 
   it('explains why one active tab remains loaded when all background tabs are suspended', async () => {
-    render(<ActiveWindowsPage service={createService()} />);
+    const user = userEvent.setup();
+    const service = createService();
+    render(<ActiveWindowsPage service={service} />);
 
     const suspendButton = await screen.findByRole('button', { name: 'Suspend tabs in Window 1' });
-    expect(suspendButton).toBeDisabled();
-    expect(suspendButton).toHaveAttribute(
-      'title',
+    expect(suspendButton).not.toBeDisabled();
+    expect(suspendButton).toHaveAttribute('aria-disabled', 'true');
+    expect(suspendButton).toHaveAccessibleDescription(
       'All background tabs are suspended. Your browser keeps the active tab loaded.',
     );
+    expect(suspendButton).not.toHaveAttribute('title');
+    suspendButton.focus();
+    expect(suspendButton).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'All background tabs are suspended. Your browser keeps the active tab loaded.',
+    );
+    await user.click(suspendButton);
+    expect(service.suspendTabs).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Unsuspend all tabs in Window 1' })).toBeEnabled();
   });
 
@@ -1879,7 +1898,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(first);
     expect(first).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Clear selected 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 1 selected tab' })).toBeInTheDocument();
     expect(screen.getByText('2 tabs (1 selected)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
 
@@ -1888,14 +1907,14 @@ describe('ActiveWindowsPage', () => {
     await user.keyboard('{/Shift}');
     expect(first).toBeChecked();
     expect(second).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Clear selected 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 2 selected tabs' })).toBeInTheDocument();
     expect(screen.getByText('2 tabs (2 selected)')).toBeInTheDocument();
     expect(screen.queryByText('2 tabs selected')).not.toBeInTheDocument();
 
     await user.keyboard('{Escape}');
     expect(first).not.toBeChecked();
     expect(second).not.toBeChecked();
-    expect(screen.queryByRole('button', { name: 'Clear selected 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear 2 selected tabs' })).not.toBeInTheDocument();
   });
 
   it('selects visible tabs per window and reports indeterminate state', async () => {
@@ -1925,7 +1944,7 @@ describe('ActiveWindowsPage', () => {
     await user.click(selectGroup);
 
     expect(selectGroup).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Clear selected 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 2 selected tabs' })).toBeInTheDocument();
     expect(
       screen.queryByRole('checkbox', { name: 'Select Issue tracker' }),
     ).not.toBeInTheDocument();
@@ -1951,14 +1970,14 @@ describe('ActiveWindowsPage', () => {
     const search = await screen.findByRole('searchbox', { name: 'Filter tabs by title or URL' });
 
     await user.type(search, 'example');
-    const selectFilteredButton = screen.getByRole('button', { name: 'Select filtered 2' });
-    expect(selectFilteredButton).toHaveAttribute('title', 'Select filtered tabs');
+    const selectFilteredButton = screen.getByRole('button', { name: 'Select 2 filtered tabs' });
+    expect(selectFilteredButton).not.toHaveAttribute('title');
     await user.click(selectFilteredButton);
     expect(screen.getByRole('checkbox', { name: 'Select Quarterly plan' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Select Issue tracker' })).toBeChecked();
 
-    const clearSelectedButton = screen.getByRole('button', { name: 'Clear selected 2' });
-    expect(clearSelectedButton).toHaveAttribute('title', 'Clear selected tabs');
+    const clearSelectedButton = screen.getByRole('button', { name: 'Clear 2 selected tabs' });
+    expect(clearSelectedButton).not.toHaveAttribute('title');
     await user.click(clearSelectedButton);
     expect(search).toHaveValue('example');
     expect(screen.getByRole('checkbox', { name: 'Select Quarterly plan' })).not.toBeChecked();
@@ -1982,7 +2001,7 @@ describe('ActiveWindowsPage', () => {
       'indeterminate',
       true,
     );
-    await user.click(screen.getByRole('button', { name: 'Open in new window 2' }));
+    await user.click(screen.getByRole('button', { name: 'Open 2 selected tabs in a new window' }));
 
     await waitFor(() => {
       expect(service.moveTabsToNewWindow).toHaveBeenCalledWith([101, 102], []);
@@ -2007,7 +2026,7 @@ describe('ActiveWindowsPage', () => {
     });
     await user.click(groupCheckbox);
     expect(groupCheckbox).toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'Open in new window 2' }));
+    await user.click(screen.getByRole('button', { name: 'Open 2 selected tabs in a new window' }));
 
     await waitFor(() => {
       expect(service.moveTabsToNewWindow).toHaveBeenCalledWith([101, 102], [7]);
@@ -2020,7 +2039,9 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     await user.click(await screen.findByRole('checkbox', { name: 'Select Reference' }));
-    const newWindowButton = screen.getByRole('button', { name: 'Open in new window 1' });
+    const newWindowButton = screen.getByRole('button', {
+      name: 'Open 1 selected tab in a new window',
+    });
 
     expect(newWindowButton).toBeDisabled();
     await user.click(newWindowButton);
@@ -2038,7 +2059,7 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(await screen.findByRole('checkbox', { name: 'Select Quarterly plan' }));
     await user.click(screen.getByRole('checkbox', { name: 'Select Issue tracker' }));
-    await user.click(screen.getByRole('button', { name: 'Close 2' }));
+    await user.click(screen.getByRole('button', { name: 'Close 2 selected tabs' }));
 
     expect(
       await screen.findByText('1 tab could not be closed. Tab is locked.'),
@@ -2176,14 +2197,14 @@ describe('ActiveWindowsPage', () => {
     const user = userEvent.setup();
     render(<ActiveWindowsPage service={createService()} />);
     const trigger = await screen.findByRole('button', { name: 'Sort all windows by: Title' });
-    expect(trigger).toHaveAttribute('title', 'Choose sort field: Title or URL');
+    expect(trigger).not.toHaveAttribute('title');
     const firstWindow = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(firstWindow).not.toBeNull();
     expect(
       within(firstWindow as HTMLElement).getByRole('button', {
         name: 'Sort Window 1 by: Title',
       }),
-    ).toHaveAttribute('title', 'Choose sort field: Title or URL');
+    ).not.toHaveAttribute('title');
     vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
       bottom: 44,
       left: 20,
@@ -2204,26 +2225,89 @@ describe('ActiveWindowsPage', () => {
     expect(screen.queryByRole('menu', { name: 'Sort all windows by' })).not.toBeInTheDocument();
   });
 
-  it('provides concise native tooltips for the main Active Windows controls', async () => {
+  it('provides shared compact tooltips for the main Active Windows controls', async () => {
     render(<ActiveWindowsPage service={createService()} />);
 
+    const search = await screen.findByRole('searchbox', {
+      name: 'Filter tabs by title or URL',
+    });
+    expect(search).toHaveAttribute('title', 'Filter tabs by title or URL');
+    expect(search.closest('label')?.parentElement).toHaveClass('toolbar-search-slot');
+    const selectFilteredButton = screen.getByRole('button', {
+      name: 'Select 3 filtered tabs',
+    });
+    expect(selectFilteredButton).not.toHaveAttribute('title');
+    expect(selectFilteredButton).toHaveClass('compact-toolbar-action', 'toolbar-primary-action');
+    expect(selectFilteredButton.querySelector('.toolbar-action-label')).toHaveTextContent(
+      'Select filtered',
+    );
+    expect(selectFilteredButton.querySelector('.toolbar-action-label')).toHaveAttribute(
+      'data-tooltip-label',
+    );
+    expect(selectFilteredButton.querySelector('.toolbar-count')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+    const openInNewWindowButton = screen.getByRole('button', {
+      name: 'Open 0 selected tabs in a new window',
+    });
+    expect(openInNewWindowButton).not.toHaveAttribute('title');
+    expect(openInNewWindowButton).toHaveClass(
+      'compact-toolbar-action',
+      'toolbar-secondary-action',
+      'toolbar-window-action',
+    );
+    expect(openInNewWindowButton.querySelector('.toolbar-count')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+    const closeButton = screen.getByRole('button', { name: 'Close 0 selected tabs' });
+    expect(closeButton).not.toHaveAttribute('title');
+    expect(closeButton).toHaveClass(
+      'compact-toolbar-action',
+      'toolbar-secondary-action',
+      'toolbar-remove-action',
+    );
+    expect(closeButton.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
+    const sortAllButton = screen.getByRole('button', {
+      name: 'Sort all windows by Title, A to Z',
+    });
+    expect(sortAllButton).not.toHaveAttribute('title');
+    expect(sortAllButton.querySelector('.sort-action-label')).toHaveTextContent('Sort all');
+    const duplicateAction = screen.getByRole('button', {
+      name: /Close duplicate tabs: \d+ tabs?/,
+    });
+    expect(duplicateAction).not.toHaveAttribute('title');
+    expect(duplicateAction.querySelector('.topbar-action-label')).toHaveAttribute(
+      'data-tooltip-label',
+    );
+    expect(screen.getByRole('button', { name: 'Show duplicate tabs only' })).not.toHaveAttribute(
+      'title',
+    );
+    const mergeButton = screen.getByRole('button', { name: 'Merge windows' });
+    expect(mergeButton).not.toHaveAttribute('title');
+    expect(mergeButton.querySelector('[data-tooltip-label]')).toHaveTextContent('Merge windows');
+    const firstWindowHeader = screen
+      .getByRole('heading', { name: 'Window 1' })
+      .closest('header') as HTMLElement;
+    const windowSortButton = within(firstWindowHeader).getByRole('button', {
+      name: 'Sort Window 1 by Title, A to Z',
+    });
+    expect(windowSortButton).not.toHaveAttribute('title');
+    expect(windowSortButton.querySelector('.sort-action-label')).toHaveAttribute(
+      'data-tooltip-label',
+    );
     expect(
-      await screen.findByRole('searchbox', { name: 'Filter tabs by title or URL' }),
-    ).toHaveAttribute('title', 'Filter tabs by title or URL');
-    expect(screen.getByRole('button', { name: 'Select filtered 3' })).toHaveAttribute(
-      'title',
-      'Select filtered tabs',
-    );
-    expect(screen.getByRole('button', { name: 'Open in new window 0' })).toHaveAttribute(
-      'title',
-      'Move selected tabs to a new window',
-    );
-    expect(screen.getByRole('button', { name: 'Close 0' })).toHaveAttribute(
-      'title',
-      'Close selected tabs',
-    );
-    const closeButton = screen.getByRole('button', { name: 'Close 0' });
-    const openInNewWindowButton = screen.getByRole('button', { name: 'Open in new window 0' });
+      within(firstWindowHeader).getByRole('button', { name: 'Save Window 1' }),
+    ).not.toHaveAttribute('title');
+    expect(
+      within(firstWindowHeader).getByRole('button', { name: 'Close Window 1' }),
+    ).not.toHaveAttribute('title');
+    expect(
+      within(firstWindowHeader).getByRole('button', { name: 'Collapse Window 1' }),
+    ).not.toHaveAttribute('title');
+    fireEvent.pointerEnter(sortAllButton);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Sort all A to Z');
     expect(openInNewWindowButton.compareDocumentPosition(closeButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -2596,9 +2680,9 @@ describe('ActiveWindowsPage', () => {
     await waitFor(() => expect(previewButton).toBeEnabled());
     await user.click(previewButton);
 
-    const previewToggle = screen.getByRole('button', { name: 'Show duplicate tabs only' });
+    const previewToggle = screen.getByRole('button', { name: 'Show all tabs' });
     expect(previewToggle).toHaveAttribute('aria-pressed', 'true');
-    expect(previewToggle).toHaveAttribute('title', 'Show all tabs');
+    expect(previewToggle).not.toHaveAttribute('title');
     expect(screen.getByRole('status', { name: 'Duplicate tabs view' })).toHaveTextContent(
       'Tabs labeled Keep stay open. Weaver protects pinned tabs and tabs linked to agents with ongoing or unclear activity. Cleanup closes only tabs labeled Close.',
     );
@@ -2731,7 +2815,7 @@ describe('ActiveWindowsPage', () => {
     ).getByRole('button', {
       name: 'Close filtered duplicate tabs: 1 tab',
     });
-    expect(closeButton).toHaveAttribute('title', 'Close filtered duplicate tabs');
+    expect(closeButton).not.toHaveAttribute('title');
     expect(
       within(screen.getByRole('status', { name: 'Duplicate tabs view' })).getByRole('button', {
         name: 'Close filtered duplicate tabs: 1 tab',
@@ -3639,7 +3723,9 @@ describe('ActiveWindowsPage', () => {
       within(closingCard as HTMLElement).queryByRole('button', { name: 'Save Window 1' }),
     ).not.toBeInTheDocument();
     expect(selectClosingWindow).not.toBeInTheDocument();
-    expect(screen.getByTitle('Sort all A to Z')).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Sort all windows by Title, A to Z' }),
+    ).toBeDisabled();
     expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
 
     act(() => listeners.forEach((listener) => listener()));

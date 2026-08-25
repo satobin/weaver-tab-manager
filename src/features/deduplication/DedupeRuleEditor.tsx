@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { Tooltip } from '../../ui/Tooltip';
 import { SettingSwitch } from '../settings/SettingSwitch';
 import { SETTINGS_FOCUS_TARGETS } from '../settings/settingsFocusTargets';
 import {
@@ -564,7 +565,6 @@ export function DedupeRuleEditor({
                   ref={importButtonRef}
                   type="button"
                   aria-label="Import custom rules"
-                  title="Import custom rules"
                   disabled={interactionDisabled}
                   onClick={() => importInputRef.current?.click()}
                 >
@@ -658,40 +658,43 @@ export function DedupeRuleEditor({
                             </div>
 
                             <div className="dedupe-rule-actions">
-                              <button
-                                className="icon-button"
-                                type="button"
-                                aria-label={`Move custom rule ${index + 1} up`}
-                                title="Move up"
-                                disabled={interactionDisabled || index === 0}
-                                onClick={() => moveCustomRule(index, -1)}
-                              >
-                                <ArrowUp aria-hidden="true" size={15} />
-                              </button>
-                              <button
-                                className="icon-button"
-                                type="button"
-                                aria-label={`Move custom rule ${index + 1} down`}
-                                title="Move down"
-                                disabled={interactionDisabled || index === customRules.length - 1}
-                                onClick={() => moveCustomRule(index, 1)}
-                              >
-                                <ArrowDown aria-hidden="true" size={15} />
-                              </button>
-                              <button
-                                className="icon-button danger-icon-button"
-                                type="button"
-                                aria-label={`Delete custom rule ${index + 1}`}
-                                title="Delete custom rule"
-                                disabled={interactionDisabled}
-                                onClick={() => {
-                                  updateCustomRules((current) =>
-                                    current.filter((candidate) => candidate.id !== rule.id),
-                                  );
-                                }}
-                              >
-                                <Trash2 aria-hidden="true" size={15} />
-                              </button>
+                              <Tooltip content="Move up" relationship="none">
+                                <button
+                                  className="icon-button"
+                                  type="button"
+                                  aria-label={`Move custom rule ${index + 1} up`}
+                                  disabled={interactionDisabled || index === 0}
+                                  onClick={() => moveCustomRule(index, -1)}
+                                >
+                                  <ArrowUp aria-hidden="true" size={15} />
+                                </button>
+                              </Tooltip>
+                              <Tooltip content="Move down" relationship="none">
+                                <button
+                                  className="icon-button"
+                                  type="button"
+                                  aria-label={`Move custom rule ${index + 1} down`}
+                                  disabled={interactionDisabled || index === customRules.length - 1}
+                                  onClick={() => moveCustomRule(index, 1)}
+                                >
+                                  <ArrowDown aria-hidden="true" size={15} />
+                                </button>
+                              </Tooltip>
+                              <Tooltip content="Delete custom rule" relationship="none">
+                                <button
+                                  className="icon-button danger-icon-button"
+                                  type="button"
+                                  aria-label={`Delete custom rule ${index + 1}`}
+                                  disabled={interactionDisabled}
+                                  onClick={() => {
+                                    updateCustomRules((current) =>
+                                      current.filter((candidate) => candidate.id !== rule.id),
+                                    );
+                                  }}
+                                >
+                                  <Trash2 aria-hidden="true" size={15} />
+                                </button>
+                              </Tooltip>
                               <SettingSwitch
                                 checked={rule.enabled}
                                 disabled={interactionDisabled}

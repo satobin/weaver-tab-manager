@@ -244,7 +244,9 @@ describe('SavedWindowsPage', () => {
     const { container } = render(<SavedWindowsPage service={createService([])} />);
 
     expect(await screen.findByRole('heading', { name: 'No saved windows' })).toBeInTheDocument();
-    expect(screen.getByText('0 saved windows · 0 tabs')).toBeInTheDocument();
+    const summary = screen.getByRole('status', { name: '0 saved windows · 0 tabs' });
+    expect(summary).toHaveTextContent(/^0 saved windows · 0 tabs$/);
+    expect(summary.querySelector('.window-summary-compact')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Refresh saved windows' })).not.toBeInTheDocument();
     expect(container.querySelector('.saved-windows-toolbar')).toBeInTheDocument();
     expect(
@@ -292,6 +294,109 @@ describe('SavedWindowsPage', () => {
     await waitFor(() => expect(onWindowCountChange).toHaveBeenLastCalledWith(2));
     unmount();
     expect(onWindowCountChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('uses coordinated tooltips for compact and icon-only saved-window actions', async () => {
+    const user = userEvent.setup();
+    const service = createService([
+      createSavedWindow({
+        tabs: [
+          {
+            active: true,
+            order: 0,
+            pinned: false,
+            title: 'Local reference',
+            url: 'file:///Users/example/Downloads/reference.svg',
+          },
+        ],
+      }),
+    ]);
+    render(<SavedWindowsPage service={service} />);
+
+    await screen.findByText('Research');
+
+    const duplicateAction = screen.getByRole('button', {
+      name: 'Remove duplicate tabs from Saved Windows: 0 tabs',
+    });
+    expect(duplicateAction).not.toHaveAttribute('title');
+    expect(duplicateAction.querySelector('[data-tooltip-label]')).toHaveTextContent(
+      'Remove duplicate tabs',
+    );
+
+    const duplicatePreview = screen.getByRole('button', {
+      name: 'Show saved duplicate tabs only',
+    });
+    expect(duplicatePreview).not.toHaveAttribute('title');
+
+    const merge = screen.getByRole('button', { name: 'Merge saved windows' });
+    expect(merge).not.toHaveAttribute('title');
+    expect(merge.querySelector('[data-tooltip-label]')).toHaveTextContent('Merge saved windows');
+
+    const search = screen.getByRole('searchbox', {
+      name: 'Filter saved windows, groups, and tabs',
+    });
+    expect(search.closest('label')?.parentElement).toHaveClass('toolbar-search-slot');
+    await user.type(search, 'local');
+    expect(screen.getByRole('button', { name: 'Clear saved-tab filter' })).not.toHaveAttribute(
+      'title',
+    );
+
+    const selectFiltered = screen.getByRole('button', { name: 'Select 1 filtered tab' });
+    expect(selectFiltered).not.toHaveAttribute('title');
+    expect(selectFiltered).toHaveClass('toolbar-primary-action');
+    expect(selectFiltered.querySelector('[data-tooltip-label]')).toHaveTextContent(
+      'Select filtered',
+    );
+
+    const sortAll = screen.getByRole('button', {
+      name: 'Sort all saved windows by Title, A to Z',
+    });
+    expect(sortAll).not.toHaveAttribute('title');
+    expect(sortAll.querySelector('[data-tooltip-label]')).toHaveTextContent('Sort all');
+
+    const move = screen.getByRole('button', {
+      name: 'Move 0 selected tabs to a new saved window',
+    });
+    const remove = screen.getByRole('button', {
+      name: 'Remove 0 selected tabs from Saved Windows',
+    });
+    expect(move).not.toHaveAttribute('title');
+    expect(remove).not.toHaveAttribute('title');
+    expect(move).toHaveClass('toolbar-secondary-action', 'toolbar-window-action');
+    expect(remove).toHaveClass('toolbar-secondary-action', 'toolbar-remove-action');
+    expect(move.querySelector('[data-tooltip-label]')).toHaveTextContent(
+      'Move to new saved window',
+    );
+    expect(remove.querySelector('[data-tooltip-label]')).toHaveTextContent('Remove tabs');
+
+    await user.click(screen.getByRole('button', { name: 'Clear saved-tab filter' }));
+    const card = screen.getByRole('article', { name: 'Research' });
+    const expand = within(card).getByRole('button', { name: 'Expand Research' });
+    expect(expand).not.toHaveAttribute('title');
+    await user.click(expand);
+
+    const windowSort = within(card).getByRole('button', {
+      name: 'Sort Research by Title, A to Z',
+    });
+    expect(windowSort).not.toHaveAttribute('title');
+    expect(windowSort.querySelector('[data-tooltip-label]')).toHaveTextContent('Sort');
+
+    const rename = within(card).getByRole('button', { name: 'Rename Research' });
+    const deleteButton = within(card).getByRole('button', { name: 'Delete Research' });
+    const removeTab = within(card).getByRole('button', {
+      name: 'Remove Local reference from Research, saved tab 1',
+    });
+    const copyUrl = within(card).getByRole('button', { name: 'Copy URL for Local reference' });
+    expect(rename).not.toHaveAttribute('title');
+    expect(deleteButton).not.toHaveAttribute('title');
+    expect(removeTab).not.toHaveAttribute('title');
+    expect(copyUrl).not.toHaveAttribute('title');
+
+    await user.hover(rename);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Rename saved window');
+    await user.click(rename);
+    expect(screen.getByRole('button', { name: 'Cancel rename' })).not.toHaveAttribute('title');
+    expect(screen.getByRole('button', { name: 'Save name' })).not.toHaveAttribute('title');
   });
 
   it('sorts one saved window or every saved window by Title or URL', async () => {
@@ -431,7 +536,7 @@ describe('SavedWindowsPage', () => {
     ).toEqual(['Alpha', 'Zulu']);
 
     await user.type(search, 'alpha');
-    await user.click(screen.getByRole('button', { name: 'Select filtered 1' }));
+    await user.click(screen.getByRole('button', { name: 'Select 1 filtered tab' }));
     expect(screen.getByRole('button', { name: 'Sort all saved windows by: Title' })).toBeDisabled();
     expect(
       within(screen.getByRole('article', { name: 'Research' })).getByRole('button', {
@@ -550,30 +655,46 @@ describe('SavedWindowsPage', () => {
     const search = await screen.findByRole('searchbox', {
       name: 'Filter saved windows, groups, and tabs',
     });
-    const selectFiltered = screen.getByRole('button', { name: 'Select filtered 2' });
+    const selectFiltered = screen.getByRole('button', { name: 'Select 2 filtered tabs' });
     expect(selectFiltered).toBeDisabled();
+    expect(selectFiltered).toHaveClass('compact-toolbar-action');
+    expect(selectFiltered.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
+    const sortAllButton = screen.getByRole('button', {
+      name: 'Sort all saved windows by Title, A to Z',
+    });
+    expect(sortAllButton.querySelector('.sort-action-label')).toHaveTextContent('Sort all');
 
     await user.type(search, 'plan');
 
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(screen.queryByText('Inbox')).not.toBeInTheDocument();
     expect(screen.getByText(/Saved .* · 1 matching tab of 2 tabs/u)).toBeInTheDocument();
-    const filteredSelection = screen.getByRole('button', { name: 'Select filtered 1' });
+    const filteredSelection = screen.getByRole('button', { name: 'Select 1 filtered tab' });
     expect(filteredSelection).toBeEnabled();
     await user.click(filteredSelection);
 
     expect(screen.getByRole('checkbox', { name: 'Select Plan in Research' })).toBeChecked();
-    const removeTabs = screen.getByRole('button', { name: 'Remove tabs 1' });
-    const moveTabs = screen.getByRole('button', { name: 'Move to new saved window 1' });
+    const removeTabs = screen.getByRole('button', {
+      name: 'Remove 1 selected tab from Saved Windows',
+    });
+    const moveTabs = screen.getByRole('button', {
+      name: 'Move 1 selected tab to a new saved window',
+    });
     expect(removeTabs).toBeEnabled();
     expect(moveTabs).toBeEnabled();
+    expect(removeTabs).toHaveClass('compact-toolbar-action');
+    expect(moveTabs).toHaveClass('compact-toolbar-action');
+    expect(removeTabs.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
+    expect(moveTabs.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
     expect(moveTabs.compareDocumentPosition(removeTabs)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.getByRole('button', { name: 'Open Plan in a new tab' })).toBeDisabled();
     expect(
       screen.getByRole('button', { name: 'Remove Plan from Research, saved tab 2' }),
     ).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: 'Remove tabs 1' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Remove 1 selected tab from Saved Windows' }),
+    );
 
     expect(service.removeSelectedTabs).toHaveBeenCalledWith([
       {
@@ -590,7 +711,9 @@ describe('SavedWindowsPage', () => {
         windowId: 'saved-1',
       },
     ]);
-    const busyRemove = screen.getByRole('button', { name: 'Remove tabs 1' });
+    const busyRemove = screen.getByRole('button', {
+      name: 'Remove 1 selected tab from Saved Windows',
+    });
     await waitFor(() => expect(busyRemove).toHaveAttribute('aria-busy', 'true'));
     expect(busyRemove).toHaveTextContent('1');
     expect(screen.getByText('Removing 1 selected tab from Saved Windows')).toBeInTheDocument();
@@ -606,6 +729,52 @@ describe('SavedWindowsPage', () => {
 
     expect(await screen.findByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('Restored 1 tab to its original saved window.')).toBeInTheDocument();
+  });
+
+  it('keeps a selection-blocked merge focusable and explains how to enable it', async () => {
+    const user = userEvent.setup();
+    const second = createSavedWindow({
+      createdAt: '2026-07-09T20:00:00.000Z',
+      groups: [],
+      id: 'saved-2',
+      name: 'Reference',
+      tabs: [
+        {
+          active: true,
+          order: 0,
+          pinned: false,
+          title: 'Plan follow-up',
+          url: 'https://docs.example.com/plan-follow-up',
+        },
+      ],
+      updatedAt: '2026-07-09T20:00:00.000Z',
+    });
+    const service = createService([createSavedWindow(), second]);
+    render(<SavedWindowsPage service={service} settingsService={createSettingsService()} />);
+
+    await user.type(
+      await screen.findByRole('searchbox', {
+        name: 'Filter saved windows, groups, and tabs',
+      }),
+      'plan',
+    );
+    await user.click(screen.getByRole('button', { name: 'Select 2 filtered tabs' }));
+
+    const mergeButton = screen.getByRole('button', { name: 'Merge saved windows' });
+    expect(mergeButton).not.toBeDisabled();
+    expect(mergeButton).toHaveAttribute('aria-disabled', 'true');
+    expect(mergeButton).toHaveAccessibleDescription(
+      'Clear selected tabs before merging saved windows',
+    );
+    mergeButton.focus();
+    expect(mergeButton).toHaveFocus();
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Clear selected tabs before merging saved windows',
+    );
+
+    await user.click(mergeButton);
+    expect(service.mergeWindows).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Merge saved windows' })).not.toBeInTheDocument();
   });
 
   it('extends saved-tab selection across one saved window with Shift', async () => {
@@ -652,7 +821,9 @@ describe('SavedWindowsPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Select Inbox in Research' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Select Plan in Research' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Select Notes in Research' })).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Move to new saved window 3' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Move 3 selected tabs to a new saved window' }),
+    ).toBeEnabled();
   });
 
   it('drops a selection when a same-revision refresh reuses its former tab order', async () => {
@@ -671,9 +842,11 @@ describe('SavedWindowsPage', () => {
       await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'inbox',
     );
-    await user.click(screen.getByRole('button', { name: 'Select filtered 1' }));
-    expect(screen.getByRole('button', { name: 'Clear selected 1' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Move to new saved window 1' }));
+    await user.click(screen.getByRole('button', { name: 'Select 1 filtered tab' }));
+    expect(screen.getByRole('button', { name: 'Clear 1 selected tab' })).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: 'Move 1 selected tab to a new saved window' }),
+    );
     const moveDialog = screen.getByRole('dialog', { name: 'Move to new saved window' });
     const moveName = within(moveDialog).getByRole('textbox', { name: 'New saved window name' });
 
@@ -702,9 +875,13 @@ describe('SavedWindowsPage', () => {
       'true',
     );
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Clear selected 1' })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole('button', { name: 'Clear 1 selected tab' }),
+      ).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: 'Remove tabs 0' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Remove 0 selected tabs from Saved Windows' }),
+    ).toBeDisabled();
 
     await user.keyboard('{Escape}');
     expect(
@@ -743,8 +920,10 @@ describe('SavedWindowsPage', () => {
       await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
-    await user.click(screen.getByRole('button', { name: 'Select filtered 2' }));
-    await user.click(screen.getByRole('button', { name: 'Move to new saved window 2' }));
+    await user.click(screen.getByRole('button', { name: 'Select 2 filtered tabs' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Move 2 selected tabs to a new saved window' }),
+    );
     const dialog = screen.getByRole('dialog', { name: 'Move to new saved window' });
     await user.type(
       within(dialog).getByRole('textbox', { name: 'New saved window name' }),
@@ -816,8 +995,10 @@ describe('SavedWindowsPage', () => {
       await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
-    await user.click(screen.getByRole('button', { name: 'Select filtered 2' }));
-    const moveTrigger = screen.getByRole('button', { name: 'Move to new saved window 2' });
+    await user.click(screen.getByRole('button', { name: 'Select 2 filtered tabs' }));
+    const moveTrigger = screen.getByRole('button', {
+      name: 'Move 2 selected tabs to a new saved window',
+    });
     await user.click(moveTrigger);
 
     let dialog = screen.getByRole('dialog', { name: 'Move to new saved window' });
@@ -833,7 +1014,7 @@ describe('SavedWindowsPage', () => {
       screen.queryByRole('dialog', { name: 'Move to new saved window' }),
     ).not.toBeInTheDocument();
     await waitFor(() => expect(moveTrigger).toHaveFocus());
-    expect(screen.getByRole('button', { name: 'Clear selected 2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 2 selected tabs' })).toBeInTheDocument();
 
     await user.click(moveTrigger);
     dialog = screen.getByRole('dialog', { name: 'Move to new saved window' });
@@ -848,7 +1029,9 @@ describe('SavedWindowsPage', () => {
       ],
       'Planning follow-up',
     );
-    const busyMove = screen.getByRole('button', { name: 'Move to new saved window 2' });
+    const busyMove = screen.getByRole('button', {
+      name: 'Move 2 selected tabs to a new saved window',
+    });
     await waitFor(() => expect(busyMove).toHaveAttribute('aria-busy', 'true'));
     expect(busyMove).toHaveTextContent('2');
     expect(screen.getByText('Moving 2 selected tabs to a new saved window')).toBeInTheDocument();
@@ -885,8 +1068,10 @@ describe('SavedWindowsPage', () => {
       await screen.findByRole('searchbox', { name: 'Filter saved windows, groups, and tabs' }),
       'plan',
     );
-    await user.click(screen.getByRole('button', { name: 'Select filtered 1' }));
-    await user.click(screen.getByRole('button', { name: 'Move to new saved window 1' }));
+    await user.click(screen.getByRole('button', { name: 'Select 1 filtered tab' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Move 1 selected tab to a new saved window' }),
+    );
     const dialog = screen.getByRole('dialog', { name: 'Move to new saved window' });
     const nameInput = within(dialog).getByRole('textbox', { name: 'New saved window name' });
     await user.type(nameInput, 'Planning follow-up');
@@ -895,7 +1080,7 @@ describe('SavedWindowsPage', () => {
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Saved storage is busy.');
     expect(nameInput).toHaveValue('Planning follow-up');
     expect(nameInput).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Clear selected 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 1 selected tab' })).toBeInTheDocument();
   });
 
   it('removes duplicates across saved windows, keeps the newer copy, and offers Undo', async () => {
@@ -1020,8 +1205,8 @@ describe('SavedWindowsPage', () => {
     await user.click(previewButton);
 
     expect(previewButton).toHaveAttribute('aria-pressed', 'true');
-    expect(previewButton).toHaveAccessibleName('Show saved duplicate tabs only');
-    expect(previewButton).toHaveAttribute('title', 'Show all saved tabs');
+    expect(previewButton).toHaveAccessibleName('Show all saved tabs');
+    expect(previewButton).not.toHaveAttribute('title');
     expect(screen.getByRole('status', { name: 'Saved duplicate tabs view' })).toHaveTextContent(
       'Weaver keeps the newest saved copy in each match',
     );
@@ -1547,7 +1732,7 @@ describe('SavedWindowsPage', () => {
     expect(openPinnedTab).toHaveClass('has-remove-action');
     expect(openPinnedTab.querySelector('.lucide-external-link')).toBeInTheDocument();
     expect(await screen.findByText('mail.example.com/inbox')).toHaveAttribute('title', fullUrl);
-    expect(removePinnedTab).toHaveAttribute('title', 'Remove tab from Saved Windows');
+    expect(removePinnedTab).not.toHaveAttribute('title');
     expect(removePinnedTab.querySelector('.lucide-x')).toBeInTheDocument();
     expect(openPinnedTab.nextElementSibling).toBe(removePinnedTab);
     await user.click(openPinnedTab);
@@ -1859,10 +2044,9 @@ describe('SavedWindowsPage', () => {
     render(<SavedWindowsPage service={service} />);
 
     await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
-    expect(screen.getByRole('button', { name: 'Copy URL for Local reference' })).toHaveAttribute(
-      'title',
-      'Copy URL',
-    );
+    expect(
+      screen.getByRole('button', { name: 'Copy URL for Local reference' }),
+    ).not.toHaveAttribute('title');
     expect(screen.queryByRole('button', { name: 'Copy URL for Web reference' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Copy URL for Local reference' }));

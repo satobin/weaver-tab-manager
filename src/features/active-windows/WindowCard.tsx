@@ -15,6 +15,7 @@ import {
 import { Fragment, useEffect, useRef } from 'react';
 
 import { SelectionCheckbox } from '../../ui/SelectionCheckbox';
+import { Tooltip } from '../../ui/Tooltip';
 import { AgentAssociatedTabIndicator } from './AgentAssociatedTabIndicator';
 import {
   formatTabLocation,
@@ -190,6 +191,7 @@ export function WindowCard({
       : suspendedTabCount === allWindowTabs.length
         ? 'All tabs are suspended'
         : 'All background tabs are suspended. Your browser keeps the active tab loaded.';
+  const suspendActionExplainsUnavailable = !disabled && suspendableTabCount === 0;
   const appendDropTarget: TabDropTarget = {
     browserIndex: -1,
     groupId: null,
@@ -312,15 +314,16 @@ export function WindowCard({
         </div>
 
         {!closing ? (
-          <button
-            className="window-collapse-button"
-            type="button"
-            aria-controls={`window-${window.id}-tabs`}
-            aria-expanded={!collapsed}
-            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${window.label}`}
-            title={`${collapsed ? 'Expand' : 'Collapse'} window`}
-            onClick={() => onToggleCollapsed(window.id)}
-          />
+          <Tooltip content={`${collapsed ? 'Expand' : 'Collapse'} window`} relationship="none">
+            <button
+              className="window-collapse-button"
+              type="button"
+              aria-controls={`window-${window.id}-tabs`}
+              aria-expanded={!collapsed}
+              aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${window.label}`}
+              onClick={() => onToggleCollapsed(window.id)}
+            />
+          </Tooltip>
         ) : null}
 
         {closing ? (
@@ -344,82 +347,100 @@ export function WindowCard({
                 disabled={disabled}
                 onChange={onSortCriterionChange}
               />
-              <button
-                className="toolbar-button sort-action-button"
-                type="button"
-                aria-label={`Sort ${window.label} by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${
-                  sortActionDirectionLabel
-                }`}
-                aria-describedby={sortMatchesCurrentOrder ? sortStateDescriptionId : undefined}
-                title={
+              <Tooltip
+                content={
                   sortMatchesCurrentOrder
                     ? `Sorted ${currentSortDirectionLabel}. Click to sort ${sortActionDirectionLabel}.`
                     : `Sort ${sortActionDirectionLabel}`
                 }
+                relationship="none"
+              >
+                <button
+                  className="toolbar-button sort-action-button"
+                  type="button"
+                  aria-label={`Sort ${window.label} by ${
+                    sortCriterion === 'title' ? 'Title' : 'URL'
+                  }, ${sortActionDirectionLabel}`}
+                  aria-describedby={sortMatchesCurrentOrder ? sortStateDescriptionId : undefined}
+                  disabled={disabled}
+                  onClick={() => {
+                    onSortWindow(window.id, {
+                      criterion: sortCriterion,
+                      direction: sortActionDirection,
+                    });
+                  }}
+                >
+                  {!sortMatchesCurrentOrder ? (
+                    <ArrowUpDown aria-hidden="true" size={17} />
+                  ) : sortDirection === 'asc' ? (
+                    <ArrowUp aria-hidden="true" size={17} />
+                  ) : (
+                    <ArrowDown aria-hidden="true" size={17} />
+                  )}
+                  <span className="sort-action-label" data-tooltip-label>
+                    Sort
+                  </span>
+                  {sortMatchesCurrentOrder ? (
+                    <span id={sortStateDescriptionId} className="sr-only">
+                      Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
+                      {currentSortDirectionLabel}.
+                    </span>
+                  ) : null}
+                </button>
+              </Tooltip>
+            </div>
+            <Tooltip content="Save window" relationship="none">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Save ${window.label}`}
+                disabled={disabled}
+                onClick={(event) => onSaveWindow(window.id, event.currentTarget)}
+              >
+                <Save aria-hidden="true" size={17} />
+              </button>
+            </Tooltip>
+            <Tooltip
+              content={suspendButtonTitle}
+              relationship={suspendActionExplainsUnavailable ? 'description' : 'none'}
+            >
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Suspend tabs in ${window.label}`}
+                aria-disabled={suspendActionExplainsUnavailable || undefined}
                 disabled={disabled}
                 onClick={() => {
-                  onSortWindow(window.id, {
-                    criterion: sortCriterion,
-                    direction: sortActionDirection,
-                  });
+                  if (!suspendActionExplainsUnavailable) {
+                    onSuspendWindow(window.id);
+                  }
                 }}
               >
-                {!sortMatchesCurrentOrder ? (
-                  <ArrowUpDown aria-hidden="true" size={17} />
-                ) : sortDirection === 'asc' ? (
-                  <ArrowUp aria-hidden="true" size={17} />
-                ) : (
-                  <ArrowDown aria-hidden="true" size={17} />
-                )}
-                <span className="sort-action-label">Sort</span>
-                {sortMatchesCurrentOrder ? (
-                  <span id={sortStateDescriptionId} className="sr-only">
-                    Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
-                    {currentSortDirectionLabel}.
-                  </span>
-                ) : null}
+                <Pause aria-hidden="true" size={17} />
               </button>
-            </div>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={`Save ${window.label}`}
-              title="Save window"
-              disabled={disabled}
-              onClick={(event) => onSaveWindow(window.id, event.currentTarget)}
-            >
-              <Save aria-hidden="true" size={17} />
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={`Suspend tabs in ${window.label}`}
-              title={suspendButtonTitle}
-              disabled={disabled || suspendableTabCount === 0}
-              onClick={() => onSuspendWindow(window.id)}
-            >
-              <Pause aria-hidden="true" size={17} />
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={`Unsuspend all tabs in ${window.label}`}
-              title="Unsuspend all tabs"
-              disabled={disabled || suspendedTabCount === 0}
-              onClick={() => onUnsuspendWindow(window.id)}
-            >
-              <Play aria-hidden="true" size={17} />
-            </button>
-            <button
-              className="icon-button danger-icon-button"
-              type="button"
-              aria-label={`Close ${window.label}`}
-              title="Close window"
-              disabled={disabled}
-              onClick={() => onCloseWindow(window.id)}
-            >
-              <X aria-hidden="true" size={17} />
-            </button>
+            </Tooltip>
+            <Tooltip content="Unsuspend all tabs" relationship="none">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`Unsuspend all tabs in ${window.label}`}
+                disabled={disabled || suspendedTabCount === 0}
+                onClick={() => onUnsuspendWindow(window.id)}
+              >
+                <Play aria-hidden="true" size={17} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Close window" relationship="none">
+              <button
+                className="icon-button danger-icon-button"
+                type="button"
+                aria-label={`Close ${window.label}`}
+                disabled={disabled}
+                onClick={() => onCloseWindow(window.id)}
+              >
+                <X aria-hidden="true" size={17} />
+              </button>
+            </Tooltip>
           </div>
         ) : null}
       </header>
@@ -699,65 +720,26 @@ export function WindowCard({
                       {tab.active ? <span className="sr-only">Active tab</span> : null}
                     </button>
                     <div className="tab-inline-actions">
-                      <button
-                        className={`tab-pin-button ${tab.pinned ? 'is-state-action' : 'is-reveal-action'}`}
-                        type="button"
-                        data-tab-action-id={tab.id}
-                        draggable={false}
-                        aria-describedby={
-                          !tab.pinned && tab.groupId !== null ? pinGroupDescriptionId : undefined
-                        }
-                        aria-label={`Pin ${tab.title}`}
-                        aria-pressed={tab.pinned}
-                        title={
+                      <Tooltip
+                        content={
                           tab.pinned
                             ? 'Unpin tab'
                             : tab.groupId !== null
                               ? 'Pin tab (removes it from its group)'
                               : 'Pin tab'
                         }
-                        disabled={disabled}
-                        onDragStart={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (tab.pinned) {
-                            onUnpinTab(tab.id);
-                          } else {
-                            onPinTab(tab.id);
-                          }
-                        }}
+                        relationship="none"
                       >
-                        <Pin
-                          className="tab-pin-icon tab-pin-icon-pinned"
-                          aria-hidden="true"
-                          size={13}
-                        />
-                        {tab.pinned ? (
-                          <PinOff
-                            className="tab-pin-icon tab-pin-icon-unpin"
-                            aria-hidden="true"
-                            size={13}
-                          />
-                        ) : null}
-                        {!tab.pinned && tab.groupId !== null ? (
-                          <span id={pinGroupDescriptionId} className="sr-only">
-                            Pinning removes this tab from its group.
-                          </span>
-                        ) : null}
-                      </button>
-                      {!suspendUnavailable ? (
                         <button
-                          className={`tab-suspended-button ${suspended ? 'is-state-action' : 'is-reveal-action'}`}
+                          className={`tab-pin-button ${tab.pinned ? 'is-state-action' : 'is-reveal-action'}`}
                           type="button"
                           data-tab-action-id={tab.id}
                           draggable={false}
-                          aria-describedby={suspended ? suspendedDescriptionId : undefined}
-                          aria-label={`Suspend ${tab.title}`}
-                          aria-pressed={suspended}
-                          title={suspended ? 'Unsuspend tab' : 'Suspend tab'}
+                          aria-describedby={
+                            !tab.pinned && tab.groupId !== null ? pinGroupDescriptionId : undefined
+                          }
+                          aria-label={`${tab.pinned ? 'Unpin' : 'Pin'} ${tab.title}`}
+                          aria-pressed={tab.pinned}
                           disabled={disabled}
                           onDragStart={(event) => {
                             event.preventDefault();
@@ -765,46 +747,100 @@ export function WindowCard({
                           }}
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (suspended) {
-                              onUnsuspendTab(tab.id);
+                            if (tab.pinned) {
+                              onUnpinTab(tab.id);
                             } else {
-                              onSuspendTab(tab.id);
+                              onPinTab(tab.id);
                             }
                           }}
                         >
-                          <Pause
-                            className="tab-suspended-icon tab-suspended-icon-pause"
+                          <Pin
+                            className="tab-pin-icon tab-pin-icon-pinned"
                             aria-hidden="true"
                             size={13}
                           />
-                          {suspended ? (
-                            <Play
-                              className="tab-suspended-icon tab-suspended-icon-play"
+                          {tab.pinned ? (
+                            <PinOff
+                              className="tab-pin-icon tab-pin-icon-unpin"
                               aria-hidden="true"
                               size={13}
                             />
                           ) : null}
-                          {suspended ? (
-                            <span id={suspendedDescriptionId} className="sr-only">
-                              Suspended. {suspendedBehavior}
+                          {!tab.pinned && tab.groupId !== null ? (
+                            <span id={pinGroupDescriptionId} className="sr-only">
+                              Pinning removes this tab from its group.
                             </span>
                           ) : null}
                         </button>
-                      ) : (
-                        <>
-                          <span
-                            className="tab-suspended-button is-reveal-action is-unavailable-action"
+                      </Tooltip>
+                      {!suspendUnavailable ? (
+                        <Tooltip
+                          content={suspended ? 'Unsuspend tab' : 'Suspend tab'}
+                          relationship="none"
+                        >
+                          <button
+                            className={`tab-suspended-button ${suspended ? 'is-state-action' : 'is-reveal-action'}`}
+                            type="button"
+                            data-tab-action-id={tab.id}
                             draggable={false}
-                            aria-hidden="true"
-                            title="Active tabs can't be suspended. Select another tab in this window first."
+                            aria-describedby={suspended ? suspendedDescriptionId : undefined}
+                            aria-label={`${suspended ? 'Unsuspend' : 'Suspend'} ${tab.title}`}
+                            aria-pressed={suspended}
+                            disabled={disabled}
+                            onDragStart={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (suspended) {
+                                onUnsuspendTab(tab.id);
+                              } else {
+                                onSuspendTab(tab.id);
+                              }
+                            }}
                           >
                             <Pause
                               className="tab-suspended-icon tab-suspended-icon-pause"
                               aria-hidden="true"
                               size={13}
                             />
-                            <span className="tab-suspended-unavailable-slash" aria-hidden="true" />
-                          </span>
+                            {suspended ? (
+                              <Play
+                                className="tab-suspended-icon tab-suspended-icon-play"
+                                aria-hidden="true"
+                                size={13}
+                              />
+                            ) : null}
+                            {suspended ? (
+                              <span id={suspendedDescriptionId} className="sr-only">
+                                Suspended. {suspendedBehavior}
+                              </span>
+                            ) : null}
+                          </button>
+                        </Tooltip>
+                      ) : (
+                        <>
+                          <Tooltip
+                            content="Active tabs can't be suspended. Select another tab in this window first."
+                            relationship="none"
+                          >
+                            <span
+                              className="tab-suspended-button is-reveal-action is-unavailable-action"
+                              draggable={false}
+                              aria-hidden="true"
+                            >
+                              <Pause
+                                className="tab-suspended-icon tab-suspended-icon-pause"
+                                aria-hidden="true"
+                                size={13}
+                              />
+                              <span
+                                className="tab-suspended-unavailable-slash"
+                                aria-hidden="true"
+                              />
+                            </span>
+                          </Tooltip>
                           <span id={suspendUnavailableDescriptionId} className="sr-only">
                             Active tabs cannot be suspended. Select another tab in this window
                             first.
@@ -812,24 +848,25 @@ export function WindowCard({
                         </>
                       )}
                     </div>
-                    <button
-                      className="tab-close-button"
-                      type="button"
-                      draggable={false}
-                      aria-label={`Close ${tab.title}, tab ${index + 1} of ${window.tabs.length}`}
-                      title="Close tab"
-                      disabled={disabled}
-                      onDragStart={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onCloseTab(tab.id);
-                      }}
-                    >
-                      <X aria-hidden="true" size={15} />
-                    </button>
+                    <Tooltip content="Close tab" relationship="none">
+                      <button
+                        className="tab-close-button"
+                        type="button"
+                        draggable={false}
+                        aria-label={`Close ${tab.title}, tab ${index + 1} of ${window.tabs.length}`}
+                        disabled={disabled}
+                        onDragStart={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onCloseTab(tab.id);
+                        }}
+                      >
+                        <X aria-hidden="true" size={15} />
+                      </button>
+                    </Tooltip>
                   </div>
                 </li>
               </Fragment>

@@ -1,6 +1,7 @@
 import { PanelTopClose, Save, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import { Tooltip } from '../../ui/Tooltip';
 import { useDismissOnCommandPaletteOpen } from '../../ui/transientSurface';
 import { type SaveWindowResult } from './savedWindowsService';
 
@@ -109,16 +110,17 @@ export function SaveWindowDialog({
               {windowLabel} · {tabCount} {tabCount === 1 ? 'tab' : 'tabs'}
             </span>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Close save window"
-            title="Close"
-            disabled={savingAction !== null}
-            onClick={() => onClose()}
-          >
-            <X aria-hidden="true" size={16} />
-          </button>
+          <Tooltip content="Close" relationship="none">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Close save window"
+              disabled={savingAction !== null}
+              onClick={() => onClose()}
+            >
+              <X aria-hidden="true" size={16} />
+            </button>
+          </Tooltip>
         </header>
 
         <form

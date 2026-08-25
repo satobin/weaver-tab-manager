@@ -59,6 +59,7 @@ import { createSettingsService, type SettingsService } from '../features/setting
 import { useSettings } from '../features/settings/useSettings';
 import { EmptyState } from '../ui/EmptyState';
 import { SelectionCheckbox } from '../ui/SelectionCheckbox';
+import { Tooltip } from '../ui/Tooltip';
 
 interface SavedWindowsPageProps {
   actionPortalTarget?: Element | null;
@@ -315,30 +316,32 @@ function SavedWindowPreview({
                     <ExternalLink className="saved-tab-open-icon" aria-hidden="true" size={14} />
                   </button>
                   {onRemoveTab ? (
-                    <button
-                      className="tab-close-button saved-tab-remove-button"
-                      type="button"
-                      aria-label={`Remove ${tab.title} from ${savedWindow.name}, saved tab ${tab.order + 1}`}
-                      aria-busy={removing || undefined}
-                      title="Remove tab from Saved Windows"
-                      disabled={rowActionsDisabled}
-                      onClick={(event) => onRemoveTab(tab, event.currentTarget)}
-                    >
-                      <X aria-hidden="true" size={15} />
-                    </button>
+                    <Tooltip content="Remove tab from Saved Windows" relationship="none">
+                      <button
+                        className="tab-close-button saved-tab-remove-button"
+                        type="button"
+                        aria-label={`Remove ${tab.title} from ${savedWindow.name}, saved tab ${tab.order + 1}`}
+                        aria-busy={removing || undefined}
+                        disabled={rowActionsDisabled}
+                        onClick={(event) => onRemoveTab(tab, event.currentTarget)}
+                      >
+                        <X aria-hidden="true" size={15} />
+                      </button>
+                    </Tooltip>
                   ) : null}
                 </div>
                 {isLocalFileUrl(tab.url) ? (
-                  <button
-                    className="saved-tab-copy-url-button"
-                    type="button"
-                    aria-label={`Copy URL for ${tab.title}`}
-                    title="Copy URL"
-                    disabled={rowActionsDisabled}
-                    onClick={() => onCopyTabUrl(tab.url, tab.title)}
-                  >
-                    <Copy aria-hidden="true" size={14} />
-                  </button>
+                  <Tooltip content="Copy URL" relationship="none">
+                    <button
+                      className="saved-tab-copy-url-button"
+                      type="button"
+                      aria-label={`Copy URL for ${tab.title}`}
+                      disabled={rowActionsDisabled}
+                      onClick={() => onCopyTabUrl(tab.url, tab.title)}
+                    >
+                      <Copy aria-hidden="true" size={14} />
+                    </button>
+                  </Tooltip>
                 ) : null}
               </div>
             </div>
@@ -1481,8 +1484,6 @@ export function SavedWindowsPage({
     status === 'loading'
       ? 'Loading saved windows'
       : `${pluralize(windows.length, 'saved window')} · ${pluralize(savedTabCount, 'tab')}`;
-  const compactTotalSummary =
-    status === 'loading' ? 'Loading' : `${windows.length}s · ${savedTabCount}t`;
   const paletteRevealAnnouncement = (() => {
     if (!paletteRevealResolution || paletteRevealResolution.kind === 'missing-window') {
       return null;
@@ -1498,12 +1499,7 @@ export function SavedWindowsPage({
   const headerStatus = (
     <div className="saved-window-header-status">
       <span className="window-summary" role="status" aria-label={totalSummary} aria-live="polite">
-        <span className="window-summary-full" aria-hidden="true">
-          {totalSummary}
-        </span>
-        <span className="window-summary-compact" aria-hidden="true">
-          {compactTotalSummary}
-        </span>
+        {totalSummary}
       </span>
     </div>
   );
@@ -1517,60 +1513,86 @@ export function SavedWindowsPage({
     operation !== null ||
     selectedTabCount > 0 ||
     (!duplicatePreviewMode && duplicatePlan.duplicateGroupCount === 0);
+  const mergeSavedWindowsDisabled =
+    status !== 'ready' ||
+    windows.length < 2 ||
+    operation !== null ||
+    duplicatePreviewMode ||
+    selectedTabCount > 0;
+  const mergeSavedWindowsSelectionBlocked =
+    selectedTabCount > 0 &&
+    status === 'ready' &&
+    windows.length >= 2 &&
+    operation === null &&
+    !duplicatePreviewMode;
 
   const bulkActionControls = (
     <div className="topbar-window-actions">
       <div className="duplicate-preview-control">
         <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
-          <button
-            className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${removingDuplicates ? ' is-removing-duplicates' : ''}`}
-            type="button"
-            aria-label={
-              removingDuplicates
-                ? 'Removing duplicate tabs from Saved Windows'
-                : `Remove duplicate tabs from Saved Windows: ${pluralize(duplicatePlan.duplicateTabCount, 'tab')}`
-            }
-            aria-busy={removingDuplicates || undefined}
-            title="Remove duplicate tabs from Saved Windows; keeps the newest saved copy"
-            disabled={
-              status !== 'ready' ||
-              settingsLoading ||
-              duplicatePlan.duplicateTabCount === 0 ||
-              selectedTabCount > 0 ||
-              operation !== null
-            }
-            onClick={() => void removeDuplicateTabs()}
+          <Tooltip
+            content="Remove duplicate tabs from Saved Windows; keeps the newest saved copy"
+            relationship="none"
           >
-            <CopyX aria-hidden="true" size={16} />
-            <span className="topbar-action-label">Remove duplicate tabs</span>
-            <span className="toolbar-count" aria-hidden={removingDuplicates || undefined}>
-              {duplicatePlan.duplicateTabCount}
-            </span>
-          </button>
-          <button
-            ref={duplicatePreviewButtonRef}
-            className="toolbar-button topbar-duplicate-preview-button"
-            type="button"
-            aria-label="Show saved duplicate tabs only"
-            aria-pressed={duplicatePreviewMode}
-            title={duplicatePreviewMode ? 'Show all saved tabs' : 'Show saved duplicate tabs only'}
-            disabled={duplicatePreviewDisabled}
-            onClick={() => {
-              if (duplicatePreviewMode) {
-                exitDuplicatePreview();
-                return;
+            <button
+              className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${removingDuplicates ? ' is-removing-duplicates' : ''}`}
+              type="button"
+              aria-label={
+                removingDuplicates
+                  ? 'Removing duplicate tabs from Saved Windows'
+                  : `Remove duplicate tabs from Saved Windows: ${pluralize(duplicatePlan.duplicateTabCount, 'tab')}`
               }
-              closeMergeDialog(false);
-              closeMoveDialog(false);
-              clearTabSelection();
-              updateQuery('');
-              setDeletingId(null);
-              setRenamingId(null);
-              setDuplicatePreviewMode(true);
-            }}
+              aria-busy={removingDuplicates || undefined}
+              disabled={
+                status !== 'ready' ||
+                settingsLoading ||
+                duplicatePlan.duplicateTabCount === 0 ||
+                selectedTabCount > 0 ||
+                operation !== null
+              }
+              onClick={() => void removeDuplicateTabs()}
+            >
+              <CopyX aria-hidden="true" size={16} />
+              <span className="topbar-action-label" data-tooltip-label>
+                Remove duplicate tabs
+              </span>
+              <span className="toolbar-count" aria-hidden={removingDuplicates || undefined}>
+                {duplicatePlan.duplicateTabCount}
+              </span>
+            </button>
+          </Tooltip>
+          <Tooltip
+            content={
+              duplicatePreviewMode ? 'Show all saved tabs' : 'Show saved duplicate tabs only'
+            }
+            relationship="none"
           >
-            <Eye aria-hidden="true" size={16} />
-          </button>
+            <button
+              ref={duplicatePreviewButtonRef}
+              className="toolbar-button topbar-duplicate-preview-button"
+              type="button"
+              aria-label={
+                duplicatePreviewMode ? 'Show all saved tabs' : 'Show saved duplicate tabs only'
+              }
+              aria-pressed={duplicatePreviewMode}
+              disabled={duplicatePreviewDisabled}
+              onClick={() => {
+                if (duplicatePreviewMode) {
+                  exitDuplicatePreview();
+                  return;
+                }
+                closeMergeDialog(false);
+                closeMoveDialog(false);
+                clearTabSelection();
+                updateQuery('');
+                setDeletingId(null);
+                setRenamingId(null);
+                setDuplicatePreviewMode(true);
+              }}
+            >
+              <Eye aria-hidden="true" size={16} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1580,40 +1602,49 @@ export function SavedWindowsPage({
         role="group"
         aria-label="Merge saved windows"
       >
-        <button
-          ref={mergeButtonRef}
-          className={`toolbar-button topbar-merge-button${mergingSavedWindows ? ' is-merging-saved-windows' : ''}`}
-          type="button"
-          aria-label={
-            mergingSavedWindows && pendingMergeCount !== null
-              ? `Merging ${pluralize(pendingMergeCount, 'saved window')}`
-              : 'Merge saved windows'
-          }
-          aria-busy={mergingSavedWindows || undefined}
-          aria-controls="merge-saved-windows-dialog"
-          aria-expanded={mergeDialogOpen}
-          aria-haspopup="dialog"
-          title={
-            selectedTabCount > 0
+        <Tooltip
+          content={
+            mergeSavedWindowsSelectionBlocked
               ? 'Clear selected tabs before merging saved windows'
               : 'Merge saved windows'
           }
-          disabled={
-            status !== 'ready' ||
-            windows.length < 2 ||
-            operation !== null ||
-            duplicatePreviewMode ||
-            selectedTabCount > 0
-          }
-          onClick={() => (mergeDialogOpen ? closeMergeDialog() : openMergeDialog())}
+          onlyWhenLabelHidden={!mergeSavedWindowsSelectionBlocked}
+          relationship={mergeSavedWindowsSelectionBlocked ? 'description' : 'none'}
         >
-          <Merge aria-hidden="true" size={16} />
-          <span>
-            {mergingSavedWindows && pendingMergeCount !== null
-              ? `Merging ${pendingMergeCount}...`
-              : 'Merge saved windows'}
-          </span>
-        </button>
+          <button
+            ref={mergeButtonRef}
+            className={`toolbar-button topbar-merge-button${mergingSavedWindows ? ' is-merging-saved-windows' : ''}`}
+            type="button"
+            aria-label={
+              mergingSavedWindows && pendingMergeCount !== null
+                ? `Merging ${pluralize(pendingMergeCount, 'saved window')}`
+                : 'Merge saved windows'
+            }
+            aria-busy={mergingSavedWindows || undefined}
+            aria-controls="merge-saved-windows-dialog"
+            aria-expanded={mergeDialogOpen}
+            aria-haspopup="dialog"
+            aria-disabled={mergeSavedWindowsSelectionBlocked || undefined}
+            disabled={mergeSavedWindowsDisabled && !mergeSavedWindowsSelectionBlocked}
+            onClick={() => {
+              if (mergeSavedWindowsDisabled) {
+                return;
+              }
+              if (mergeDialogOpen) {
+                closeMergeDialog();
+              } else {
+                openMergeDialog();
+              }
+            }}
+          >
+            <Merge aria-hidden="true" size={16} />
+            <span data-tooltip-label>
+              {mergingSavedWindows && pendingMergeCount !== null
+                ? `Merging ${pendingMergeCount}...`
+                : 'Merge saved windows'}
+            </span>
+          </button>
+        </Tooltip>
 
         {mergeDialogOpen ? (
           <MergeSavedWindowsDialog
@@ -1663,55 +1694,70 @@ export function SavedWindowsPage({
 
       <div className="active-windows-toolbar saved-tabs-toolbar">
         <div className="active-toolbar-main">
-          <label className="window-search">
-            <Search aria-hidden="true" size={17} />
-            <span className="sr-only">Filter saved windows, groups, and tabs</span>
-            <input
-              ref={searchInputRef}
-              type="text"
-              role="searchbox"
-              value={query}
-              placeholder="Filter tabs"
-              title="Filter saved windows, groups, and tabs"
-              disabled={status !== 'ready' || operation !== null || duplicatePreviewMode}
-              onChange={(event) => updateQuery(event.target.value)}
-            />
-            <button
-              className={`window-search-clear${query ? '' : ' is-hidden'}`}
-              type="button"
-              aria-label="Clear saved-tab filter"
-              aria-hidden={!query}
-              tabIndex={query ? 0 : -1}
-              title="Clear filter"
-              disabled={!query || status !== 'ready' || operation !== null}
-              onClick={() => {
-                updateQuery('');
-                queueMicrotask(() => searchInputRef.current?.focus());
-              }}
-            >
-              <X aria-hidden="true" size={15} />
-            </button>
-          </label>
+          <div className="toolbar-search-slot">
+            <label className="window-search">
+              <Search aria-hidden="true" size={17} />
+              <span className="sr-only">Filter saved windows, groups, and tabs</span>
+              <input
+                ref={searchInputRef}
+                type="text"
+                role="searchbox"
+                value={query}
+                placeholder="Filter tabs"
+                title="Filter saved windows, groups, and tabs"
+                disabled={status !== 'ready' || operation !== null || duplicatePreviewMode}
+                onChange={(event) => updateQuery(event.target.value)}
+              />
+              <Tooltip content="Clear filter" relationship="none">
+                <button
+                  className={`window-search-clear${query ? '' : ' is-hidden'}`}
+                  type="button"
+                  aria-label="Clear saved-tab filter"
+                  aria-hidden={!query}
+                  tabIndex={query ? 0 : -1}
+                  disabled={!query || status !== 'ready' || operation !== null}
+                  onClick={() => {
+                    updateQuery('');
+                    queueMicrotask(() => searchInputRef.current?.focus());
+                  }}
+                >
+                  <X aria-hidden="true" size={15} />
+                </button>
+              </Tooltip>
+            </label>
+          </div>
 
-          <button
-            className="toolbar-button"
-            type="button"
-            aria-pressed={selectedTabCount > 0}
-            title={selectedTabCount > 0 ? 'Clear selected tabs' : 'Select filtered tabs'}
-            disabled={
-              status !== 'ready' ||
-              operation !== null ||
-              duplicatePreviewMode ||
-              (selectedTabCount === 0 && (!hasFilter || visibleTabKeys.length === 0))
-            }
-            onClick={toggleFilteredSelection}
+          <Tooltip
+            content={selectedTabCount > 0 ? 'Clear selected tabs' : 'Select filtered tabs'}
+            onlyWhenLabelHidden
+            relationship="none"
           >
-            <ListChecks aria-hidden="true" size={16} />
-            <span>{selectedTabCount > 0 ? 'Clear selected' : 'Select filtered'}</span>
-            <span className="toolbar-count">
-              {selectedTabCount > 0 ? selectedTabCount : visibleTabKeys.length}
-            </span>
-          </button>
+            <button
+              className="toolbar-button compact-toolbar-action toolbar-primary-action"
+              type="button"
+              aria-label={
+                selectedTabCount > 0
+                  ? `Clear ${pluralize(selectedTabCount, 'selected tab')}`
+                  : `Select ${pluralize(visibleTabKeys.length, 'filtered tab')}`
+              }
+              aria-pressed={selectedTabCount > 0}
+              disabled={
+                status !== 'ready' ||
+                operation !== null ||
+                duplicatePreviewMode ||
+                (selectedTabCount === 0 && (!hasFilter || visibleTabKeys.length === 0))
+              }
+              onClick={toggleFilteredSelection}
+            >
+              <ListChecks aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                {selectedTabCount > 0 ? 'Clear selected' : 'Select filtered'}
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {selectedTabCount > 0 ? selectedTabCount : visibleTabKeys.length}
+              </span>
+            </button>
+          </Tooltip>
 
           <div className="sort-controls" role="group" aria-label="Sort all saved windows">
             <SortCriterionMenu
@@ -1725,73 +1771,99 @@ export function SavedWindowsPage({
               }
               onChange={setSortCriterion}
             />
-            <button
-              className="toolbar-button sort-action-button"
-              type="button"
-              aria-label={`Sort all saved windows by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${globalSortActionDirectionLabel}`}
-              aria-describedby={
-                globalSortMatchesCurrentOrder ? 'saved-global-sort-state-description' : undefined
-              }
-              title={
+            <Tooltip
+              content={
                 globalSortMatchesCurrentOrder
                   ? `Sorted ${currentGlobalSortDirectionLabel}. Click to sort ${globalSortActionDirectionLabel}.`
                   : `Sort all ${globalSortActionDirectionLabel}`
               }
-              disabled={
-                status !== 'ready' ||
-                windows.length === 0 ||
-                operation !== null ||
-                duplicatePreviewMode ||
-                selectedTabCount > 0
-              }
-              onClick={() => void applyGlobalSort()}
+              relationship="none"
             >
-              {!globalSortMatchesCurrentOrder ? (
-                <ArrowUpDown aria-hidden="true" size={17} />
-              ) : sortDirection === 'asc' ? (
-                <ArrowUp aria-hidden="true" size={17} />
-              ) : (
-                <ArrowDown aria-hidden="true" size={17} />
-              )}
-              <span>Sort all</span>
-              {globalSortMatchesCurrentOrder ? (
-                <span id="saved-global-sort-state-description" className="sr-only">
-                  Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
-                  {currentGlobalSortDirectionLabel}.
+              <button
+                className="toolbar-button sort-action-button"
+                type="button"
+                aria-label={`Sort all saved windows by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${globalSortActionDirectionLabel}`}
+                aria-describedby={
+                  globalSortMatchesCurrentOrder ? 'saved-global-sort-state-description' : undefined
+                }
+                disabled={
+                  status !== 'ready' ||
+                  windows.length === 0 ||
+                  operation !== null ||
+                  duplicatePreviewMode ||
+                  selectedTabCount > 0
+                }
+                onClick={() => void applyGlobalSort()}
+              >
+                {!globalSortMatchesCurrentOrder ? (
+                  <ArrowUpDown aria-hidden="true" size={17} />
+                ) : sortDirection === 'asc' ? (
+                  <ArrowUp aria-hidden="true" size={17} />
+                ) : (
+                  <ArrowDown aria-hidden="true" size={17} />
+                )}
+                <span className="sort-action-label" data-tooltip-label>
+                  Sort all
                 </span>
-              ) : null}
-            </button>
+                {globalSortMatchesCurrentOrder ? (
+                  <span id="saved-global-sort-state-description" className="sr-only">
+                    Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
+                    {currentGlobalSortDirectionLabel}.
+                  </span>
+                ) : null}
+              </button>
+            </Tooltip>
           </div>
 
-          <button
-            ref={moveTabsButtonRef}
-            className={`toolbar-button saved-tabs-move-button${movingSelectedTabs ? ' is-merging-saved-windows' : ''}`}
-            type="button"
-            aria-busy={movingSelectedTabs || undefined}
-            aria-controls="move-saved-tabs-dialog"
-            aria-expanded={moveDialogOpen}
-            aria-haspopup="dialog"
-            title="Move selected tabs to a new saved window"
-            disabled={selectedTabCount === 0 || operation !== null || duplicatePreviewMode}
-            onClick={openMoveDialog}
+          <Tooltip
+            content="Move selected tabs to a new saved window"
+            onlyWhenLabelHidden
+            relationship="none"
           >
-            <AppWindow aria-hidden="true" size={16} />
-            <span>Move to new saved window</span>
-            <span className="toolbar-count">{displayedSelectedTabCount}</span>
-          </button>
+            <button
+              ref={moveTabsButtonRef}
+              className={`toolbar-button compact-toolbar-action toolbar-secondary-action toolbar-window-action saved-tabs-move-button${movingSelectedTabs ? ' is-merging-saved-windows' : ''}`}
+              type="button"
+              aria-label={`Move ${pluralize(displayedSelectedTabCount, 'selected tab')} to a new saved window`}
+              aria-busy={movingSelectedTabs || undefined}
+              aria-controls="move-saved-tabs-dialog"
+              aria-expanded={moveDialogOpen}
+              aria-haspopup="dialog"
+              disabled={selectedTabCount === 0 || operation !== null || duplicatePreviewMode}
+              onClick={openMoveDialog}
+            >
+              <AppWindow aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                Move to new saved window
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {displayedSelectedTabCount}
+              </span>
+            </button>
+          </Tooltip>
 
-          <button
-            className={`toolbar-button danger-toolbar-button duplicate-removal-button${removingSelectedTabs ? ' is-removing-duplicates' : ''}`}
-            type="button"
-            aria-busy={removingSelectedTabs || undefined}
-            title="Remove selected tabs from Saved Windows"
-            disabled={selectedTabCount === 0 || operation !== null || duplicatePreviewMode}
-            onClick={() => void removeSelectedTabs()}
+          <Tooltip
+            content="Remove selected tabs from Saved Windows"
+            onlyWhenLabelHidden
+            relationship="none"
           >
-            <X aria-hidden="true" size={16} />
-            <span>Remove tabs</span>
-            <span className="toolbar-count">{displayedSelectedTabCount}</span>
-          </button>
+            <button
+              className={`toolbar-button danger-toolbar-button compact-toolbar-action toolbar-secondary-action toolbar-remove-action duplicate-removal-button${removingSelectedTabs ? ' is-removing-duplicates' : ''}`}
+              type="button"
+              aria-label={`Remove ${pluralize(displayedSelectedTabCount, 'selected tab')} from Saved Windows`}
+              aria-busy={removingSelectedTabs || undefined}
+              disabled={selectedTabCount === 0 || operation !== null || duplicatePreviewMode}
+              onClick={() => void removeSelectedTabs()}
+            >
+              <X aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                Remove tabs
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {displayedSelectedTabCount}
+              </span>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -2098,15 +2170,19 @@ export function SavedWindowsPage({
                   </div>
 
                   {!duplicatePreviewMode ? (
-                    <button
-                      className="window-collapse-button"
-                      type="button"
-                      aria-label={`${expanded ? 'Collapse' : 'Expand'} ${savedWindow.name}`}
-                      aria-expanded={expanded}
-                      aria-controls={`saved-window-${savedWindow.id}-preview`}
-                      title={`${expanded ? 'Collapse' : 'Expand'} saved window`}
-                      onClick={() => toggleExpanded(savedWindow.id)}
-                    />
+                    <Tooltip
+                      content={`${expanded ? 'Collapse' : 'Expand'} saved window`}
+                      relationship="none"
+                    >
+                      <button
+                        className="window-collapse-button"
+                        type="button"
+                        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${savedWindow.name}`}
+                        aria-expanded={expanded}
+                        aria-controls={`saved-window-${savedWindow.id}-preview`}
+                        onClick={() => toggleExpanded(savedWindow.id)}
+                      />
+                    </Tooltip>
                   ) : null}
 
                   {!duplicatePreviewMode ? (
@@ -2124,42 +2200,50 @@ export function SavedWindowsPage({
                             updateWindowSortSelection(savedWindow.id, { criterion })
                           }
                         />
-                        <button
-                          className="toolbar-button sort-action-button"
-                          type="button"
-                          aria-label={`Sort ${savedWindow.name} by ${windowSortSelection.criterion === 'title' ? 'Title' : 'URL'}, ${windowSortActionDirectionLabel}`}
-                          aria-describedby={
-                            windowSortMatchesCurrentOrder ? windowSortStateDescriptionId : undefined
-                          }
-                          title={
+                        <Tooltip
+                          content={
                             windowSortMatchesCurrentOrder
                               ? `Sorted ${currentWindowSortDirectionLabel}. Click to sort ${windowSortActionDirectionLabel}.`
                               : `Sort ${windowSortActionDirectionLabel}`
                           }
-                          disabled={disabled}
-                          onClick={() =>
-                            void applyWindowSort(savedWindow.id, {
-                              criterion: windowSortSelection.criterion,
-                              direction: windowSortActionDirection,
-                            })
-                          }
+                          relationship="none"
                         >
-                          {!windowSortMatchesCurrentOrder ? (
-                            <ArrowUpDown aria-hidden="true" size={17} />
-                          ) : windowSortSelection.direction === 'asc' ? (
-                            <ArrowUp aria-hidden="true" size={17} />
-                          ) : (
-                            <ArrowDown aria-hidden="true" size={17} />
-                          )}
-                          <span className="sort-action-label">Sort</span>
-                          {windowSortMatchesCurrentOrder ? (
-                            <span id={windowSortStateDescriptionId} className="sr-only">
-                              Currently sorted by{' '}
-                              {windowSortSelection.criterion === 'title' ? 'Title' : 'URL'},{' '}
-                              {currentWindowSortDirectionLabel}.
+                          <button
+                            className="toolbar-button sort-action-button"
+                            type="button"
+                            aria-label={`Sort ${savedWindow.name} by ${windowSortSelection.criterion === 'title' ? 'Title' : 'URL'}, ${windowSortActionDirectionLabel}`}
+                            aria-describedby={
+                              windowSortMatchesCurrentOrder
+                                ? windowSortStateDescriptionId
+                                : undefined
+                            }
+                            disabled={disabled}
+                            onClick={() =>
+                              void applyWindowSort(savedWindow.id, {
+                                criterion: windowSortSelection.criterion,
+                                direction: windowSortActionDirection,
+                              })
+                            }
+                          >
+                            {!windowSortMatchesCurrentOrder ? (
+                              <ArrowUpDown aria-hidden="true" size={17} />
+                            ) : windowSortSelection.direction === 'asc' ? (
+                              <ArrowUp aria-hidden="true" size={17} />
+                            ) : (
+                              <ArrowDown aria-hidden="true" size={17} />
+                            )}
+                            <span className="sort-action-label" data-tooltip-label>
+                              Sort
                             </span>
-                          ) : null}
-                        </button>
+                            {windowSortMatchesCurrentOrder ? (
+                              <span id={windowSortStateDescriptionId} className="sr-only">
+                                Currently sorted by{' '}
+                                {windowSortSelection.criterion === 'title' ? 'Title' : 'URL'},{' '}
+                                {currentWindowSortDirectionLabel}.
+                              </span>
+                            ) : null}
+                          </button>
+                        </Tooltip>
                       </div>
                       <button
                         className="toolbar-button primary-button saved-window-restore-button"
@@ -2173,30 +2257,32 @@ export function SavedWindowsPage({
                         <ArchiveRestore aria-hidden="true" size={16} />
                         <span>Restore</span>
                       </button>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        aria-label={`Rename ${savedWindow.name}`}
-                        title="Rename saved window"
-                        disabled={disabled}
-                        onClick={() => startRename(sourceSavedWindow)}
-                      >
-                        <Pencil aria-hidden="true" size={16} />
-                      </button>
-                      <button
-                        className="icon-button danger-icon-button"
-                        type="button"
-                        aria-label={`Delete ${savedWindow.name}`}
-                        title="Delete saved window"
-                        disabled={disabled}
-                        onClick={() => {
-                          setRenamingId(null);
-                          setDeletingId(savedWindow.id);
-                          setActionError(null);
-                        }}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                      </button>
+                      <Tooltip content="Rename saved window" relationship="none">
+                        <button
+                          className="icon-button"
+                          type="button"
+                          aria-label={`Rename ${savedWindow.name}`}
+                          disabled={disabled}
+                          onClick={() => startRename(sourceSavedWindow)}
+                        >
+                          <Pencil aria-hidden="true" size={16} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Delete saved window" relationship="none">
+                        <button
+                          className="icon-button danger-icon-button"
+                          type="button"
+                          aria-label={`Delete ${savedWindow.name}`}
+                          disabled={disabled}
+                          onClick={() => {
+                            setRenamingId(null);
+                            setDeletingId(savedWindow.id);
+                            setActionError(null);
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                        </button>
+                      </Tooltip>
                     </div>
                   ) : null}
                 </header>
@@ -2220,25 +2306,27 @@ export function SavedWindowsPage({
                         onChange={(event) => setRenameValue(event.target.value)}
                       />
                     </label>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      aria-label="Cancel rename"
-                      title="Cancel"
-                      disabled={disabled}
-                      onClick={() => setRenamingId(null)}
-                    >
-                      <X aria-hidden="true" size={16} />
-                    </button>
-                    <button
-                      className="icon-button primary-icon-button"
-                      type="submit"
-                      aria-label="Save name"
-                      title="Save name"
-                      disabled={disabled}
-                    >
-                      <Save aria-hidden="true" size={16} />
-                    </button>
+                    <Tooltip content="Cancel" relationship="none">
+                      <button
+                        className="icon-button"
+                        type="button"
+                        aria-label="Cancel rename"
+                        disabled={disabled}
+                        onClick={() => setRenamingId(null)}
+                      >
+                        <X aria-hidden="true" size={16} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Save name" relationship="none">
+                      <button
+                        className="icon-button primary-icon-button"
+                        type="submit"
+                        aria-label="Save name"
+                        disabled={disabled}
+                      >
+                        <Save aria-hidden="true" size={16} />
+                      </button>
+                    </Tooltip>
                   </form>
                 ) : null}
 

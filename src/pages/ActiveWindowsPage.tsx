@@ -75,6 +75,7 @@ import {
 import { createSettingsService, type SettingsService } from '../features/settings/settingsService';
 import { useSettings } from '../features/settings/useSettings';
 import { EmptyState } from '../ui/EmptyState';
+import { Tooltip } from '../ui/Tooltip';
 
 interface ActiveWindowsPageProps {
   actionPortalTarget?: Element | null;
@@ -2089,9 +2090,6 @@ export function ActiveWindowsPage({
   const totalSummary = displayedSnapshotTotals
     ? `${pluralize(displayedSnapshotTotals.windowCount, 'window')} · ${pluralize(displayedSnapshotTotals.tabCount, 'tab')}`
     : 'Loading windows';
-  const compactTotalSummary = displayedSnapshotTotals
-    ? `${displayedSnapshotTotals.windowCount}w · ${displayedSnapshotTotals.tabCount}t`
-    : 'Loading';
   const visiblePendingWindowClose =
     [...pendingWindowCloses.values()]
       .reverse()
@@ -2100,12 +2098,7 @@ export function ActiveWindowsPage({
   const headerStatus = (
     <div className="active-window-header-status">
       <span className="window-summary" role="status" aria-label={totalSummary} aria-live="polite">
-        <span className="window-summary-full" aria-hidden="true">
-          {totalSummary}
-        </span>
-        <span className="window-summary-compact" aria-hidden="true">
-          {compactTotalSummary}
-        </span>
+        {totalSummary}
       </span>
     </div>
   );
@@ -2185,70 +2178,78 @@ export function ActiveWindowsPage({
   const removeDuplicatesControl = (
     <div className="duplicate-preview-control">
       <div className="duplicate-split-button" role="group" aria-label="Duplicate tab actions">
-        <button
-          className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${isRemovingDuplicates ? ' is-removing-duplicates' : ''}`}
-          type="button"
-          aria-label={
-            isRemovingDuplicates
-              ? 'Closing duplicate tabs'
-              : `${duplicateActionLabel}: ${pluralize(displayedDuplicateActionCount, 'tab')}`
-          }
-          title={duplicateActionLabel}
-          disabled={duplicateActionDisabled}
-          aria-busy={isRemovingDuplicates || undefined}
-          onClick={() => void removeDuplicateTabs()}
-        >
-          <CopyX aria-hidden="true" size={16} />
-          <span className="topbar-action-label">{duplicateActionLabel}</span>
-          <span className="toolbar-count" aria-hidden={isRemovingDuplicates || undefined}>
-            {displayedDuplicateActionCount}
-          </span>
-        </button>
-        <button
-          ref={duplicatePreviewButtonRef}
-          className="toolbar-button topbar-duplicate-preview-button"
-          type="button"
-          aria-label="Show duplicate tabs only"
-          aria-pressed={duplicatePreviewMode}
-          title={duplicatePreviewMode ? 'Show all tabs' : 'Show duplicate tabs only'}
-          disabled={duplicatePreviewDisabled}
-          onClick={() => {
-            if (duplicatePreviewMode) {
-              closeMergeDialog(false);
-              setDuplicatePreviewMode(false);
-              return;
+        <Tooltip content={duplicateActionLabel} onlyWhenLabelHidden relationship="none">
+          <button
+            className={`toolbar-button topbar-remove-duplicates-button duplicate-removal-button${isRemovingDuplicates ? ' is-removing-duplicates' : ''}`}
+            type="button"
+            aria-label={
+              isRemovingDuplicates
+                ? 'Closing duplicate tabs'
+                : `${duplicateActionLabel}: ${pluralize(displayedDuplicateActionCount, 'tab')}`
             }
-            enterDuplicatePreview();
-          }}
+            disabled={duplicateActionDisabled}
+            aria-busy={isRemovingDuplicates || undefined}
+            onClick={() => void removeDuplicateTabs()}
+          >
+            <CopyX aria-hidden="true" size={16} />
+            <span className="topbar-action-label" data-tooltip-label>
+              {duplicateActionLabel}
+            </span>
+            <span className="toolbar-count" aria-hidden={isRemovingDuplicates || undefined}>
+              {displayedDuplicateActionCount}
+            </span>
+          </button>
+        </Tooltip>
+        <Tooltip
+          content={duplicatePreviewMode ? 'Show all tabs' : 'Show duplicate tabs only'}
+          relationship="none"
         >
-          <Eye aria-hidden="true" size={16} />
-        </button>
+          <button
+            ref={duplicatePreviewButtonRef}
+            className="toolbar-button topbar-duplicate-preview-button"
+            type="button"
+            aria-label={duplicatePreviewMode ? 'Show all tabs' : 'Show duplicate tabs only'}
+            aria-pressed={duplicatePreviewMode}
+            disabled={duplicatePreviewDisabled}
+            onClick={() => {
+              if (duplicatePreviewMode) {
+                closeMergeDialog(false);
+                setDuplicatePreviewMode(false);
+                return;
+              }
+              enterDuplicatePreview();
+            }}
+          >
+            <Eye aria-hidden="true" size={16} />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
   const mergeControl = (
     <div className="merge-control" ref={mergeControlRef} role="group" aria-label="Merge windows">
-      <button
-        ref={mergeButtonRef}
-        className="toolbar-button topbar-merge-button"
-        type="button"
-        aria-label="Merge windows"
-        aria-controls="merge-windows-dialog"
-        aria-expanded={mergeDialogOpen}
-        aria-haspopup="dialog"
-        title="Merge windows"
-        disabled={
-          duplicatePreviewMode ||
-          !snapshot ||
-          snapshot.windows.length < 2 ||
-          operationLabel !== null ||
-          hasPendingWindowCloses
-        }
-        onClick={() => (mergeDialogOpen ? closeMergeDialog() : openMergeDialog())}
-      >
-        <Merge aria-hidden="true" size={16} />
-        <span>Merge windows</span>
-      </button>
+      <Tooltip content="Merge windows" onlyWhenLabelHidden relationship="none">
+        <button
+          ref={mergeButtonRef}
+          className="toolbar-button topbar-merge-button"
+          type="button"
+          aria-label="Merge windows"
+          aria-controls="merge-windows-dialog"
+          aria-expanded={mergeDialogOpen}
+          aria-haspopup="dialog"
+          disabled={
+            duplicatePreviewMode ||
+            !snapshot ||
+            snapshot.windows.length < 2 ||
+            operationLabel !== null ||
+            hasPendingWindowCloses
+          }
+          onClick={() => (mergeDialogOpen ? closeMergeDialog() : openMergeDialog())}
+        >
+          <Merge aria-hidden="true" size={16} />
+          <span data-tooltip-label>Merge windows</span>
+        </button>
+      </Tooltip>
 
       {mergeDialogOpen && snapshot ? (
         <MergeWindowsDialog
@@ -2295,49 +2296,64 @@ export function ActiveWindowsPage({
 
       <div className="active-windows-toolbar">
         <div className="active-toolbar-main">
-          <label className="window-search">
-            <Search aria-hidden="true" size={17} />
-            <span className="sr-only">Filter tabs by title or URL</span>
-            <input
-              type="text"
-              role="searchbox"
-              value={query}
-              placeholder="Filter tabs"
-              title="Filter tabs by title or URL"
-              disabled={!snapshot}
-              onChange={(event) => updateQuery(event.target.value)}
-            />
-            <button
-              className={`window-search-clear${query ? '' : ' is-hidden'}`}
-              type="button"
-              aria-label="Clear filter"
-              aria-hidden={!query}
-              tabIndex={query ? 0 : -1}
-              title="Clear filter"
-              disabled={!query || !snapshot}
-              onClick={() => updateQuery('')}
-            >
-              <X aria-hidden="true" size={15} />
-            </button>
-          </label>
+          <div className="toolbar-search-slot">
+            <label className="window-search">
+              <Search aria-hidden="true" size={17} />
+              <span className="sr-only">Filter tabs by title or URL</span>
+              <input
+                type="text"
+                role="searchbox"
+                value={query}
+                placeholder="Filter tabs"
+                title="Filter tabs by title or URL"
+                disabled={!snapshot}
+                onChange={(event) => updateQuery(event.target.value)}
+              />
+              <Tooltip content="Clear filter" relationship="none">
+                <button
+                  className={`window-search-clear${query ? '' : ' is-hidden'}`}
+                  type="button"
+                  aria-label="Clear filter"
+                  aria-hidden={!query}
+                  tabIndex={query ? 0 : -1}
+                  disabled={!query || !snapshot}
+                  onClick={() => updateQuery('')}
+                >
+                  <X aria-hidden="true" size={15} />
+                </button>
+              </Tooltip>
+            </label>
+          </div>
 
-          <button
-            className="toolbar-button"
-            type="button"
-            disabled={
-              operationLabel !== null ||
-              (!selectionButtonClears && (!hasFilter || visibleTabIds.length === 0))
-            }
-            aria-pressed={selectionButtonClears}
-            title={selectionButtonClears ? 'Clear selected tabs' : 'Select filtered tabs'}
-            onClick={toggleFilteredSelection}
+          <Tooltip
+            content={selectionButtonClears ? 'Clear selected tabs' : 'Select filtered tabs'}
+            onlyWhenLabelHidden
+            relationship="none"
           >
-            <ListChecks aria-hidden="true" size={16} />
-            <span>{selectionButtonClears ? 'Clear selected' : 'Select filtered'}</span>
-            <span className="toolbar-count">
-              {selectionButtonClears ? selection.selectedCount : visibleTabIds.length}
-            </span>
-          </button>
+            <button
+              className="toolbar-button compact-toolbar-action toolbar-primary-action"
+              type="button"
+              disabled={
+                operationLabel !== null ||
+                (!selectionButtonClears && (!hasFilter || visibleTabIds.length === 0))
+              }
+              aria-label={
+                selectionButtonClears
+                  ? `Clear ${pluralize(selection.selectedCount, 'selected tab')}`
+                  : `Select ${pluralize(visibleTabIds.length, 'filtered tab')}`
+              }
+              aria-pressed={selectionButtonClears}
+              onClick={toggleFilteredSelection}
+            >
+              <ListChecks aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                {selectionButtonClears ? 'Clear selected' : 'Select filtered'}
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {selectionButtonClears ? selection.selectedCount : visibleTabIds.length}
+              </span>
+            </button>
+          </Tooltip>
 
           <div className="sort-controls" role="group" aria-label="Sort all windows">
             <SortCriterionMenu
@@ -2351,72 +2367,92 @@ export function ActiveWindowsPage({
               }
               onChange={setSortCriterion}
             />
-            <button
-              className="toolbar-button sort-action-button"
-              type="button"
-              aria-label={`Sort all windows by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${
-                globalSortActionDirectionLabel
-              }`}
-              aria-describedby={
-                globalSortMatchesCurrentOrder ? 'global-sort-state-description' : undefined
-              }
-              title={
+            <Tooltip
+              content={
                 globalSortMatchesCurrentOrder
                   ? `Sorted ${currentGlobalSortDirectionLabel}. Click to sort ${globalSortActionDirectionLabel}.`
                   : `Sort all ${globalSortActionDirectionLabel}`
               }
-              disabled={
-                !snapshot ||
-                duplicatePreviewMode ||
-                snapshot.windows.length === 0 ||
-                settingsLoading ||
-                operationLabel !== null ||
-                hasPendingWindowCloses
-              }
-              onClick={() => void applyGlobalSort()}
+              relationship="none"
             >
-              {!globalSortMatchesCurrentOrder ? (
-                <ArrowUpDown aria-hidden="true" size={17} />
-              ) : sortDirection === 'asc' ? (
-                <ArrowUp aria-hidden="true" size={17} />
-              ) : (
-                <ArrowDown aria-hidden="true" size={17} />
-              )}
-              <span>Sort all</span>
-              {globalSortMatchesCurrentOrder ? (
-                <span id="global-sort-state-description" className="sr-only">
-                  Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
-                  {currentGlobalSortDirectionLabel}.
-                </span>
-              ) : null}
-            </button>
+              <button
+                className="toolbar-button sort-action-button"
+                type="button"
+                aria-label={`Sort all windows by ${sortCriterion === 'title' ? 'Title' : 'URL'}, ${
+                  globalSortActionDirectionLabel
+                }`}
+                aria-describedby={
+                  globalSortMatchesCurrentOrder ? 'global-sort-state-description' : undefined
+                }
+                disabled={
+                  !snapshot ||
+                  duplicatePreviewMode ||
+                  snapshot.windows.length === 0 ||
+                  settingsLoading ||
+                  operationLabel !== null ||
+                  hasPendingWindowCloses
+                }
+                onClick={() => void applyGlobalSort()}
+              >
+                {!globalSortMatchesCurrentOrder ? (
+                  <ArrowUpDown aria-hidden="true" size={17} />
+                ) : sortDirection === 'asc' ? (
+                  <ArrowUp aria-hidden="true" size={17} />
+                ) : (
+                  <ArrowDown aria-hidden="true" size={17} />
+                )}
+                <span className="sort-action-label">Sort all</span>
+                {globalSortMatchesCurrentOrder ? (
+                  <span id="global-sort-state-description" className="sr-only">
+                    Currently sorted by {sortCriterion === 'title' ? 'Title' : 'URL'},{' '}
+                    {currentGlobalSortDirectionLabel}.
+                  </span>
+                ) : null}
+              </button>
+            </Tooltip>
           </div>
 
           {actionPortalTarget === undefined ? windowActionControls : null}
 
-          <button
-            className="toolbar-button"
-            type="button"
-            title="Move selected tabs to a new window"
-            disabled={!canMoveSelectedTabsToNewWindow || operationLabel !== null}
-            onClick={() => void moveSelectedTabs()}
+          <Tooltip
+            content="Open selected tabs in a new window"
+            onlyWhenLabelHidden
+            relationship="none"
           >
-            <AppWindow aria-hidden="true" size={16} />
-            <span>Open in new window</span>
-            <span className="toolbar-count">{actionSelectedCount}</span>
-          </button>
+            <button
+              className="toolbar-button compact-toolbar-action toolbar-secondary-action toolbar-window-action"
+              type="button"
+              aria-label={`Open ${pluralize(actionSelectedCount, 'selected tab')} in a new window`}
+              disabled={!canMoveSelectedTabsToNewWindow || operationLabel !== null}
+              onClick={() => void moveSelectedTabs()}
+            >
+              <AppWindow aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                Open in new window
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {actionSelectedCount}
+              </span>
+            </button>
+          </Tooltip>
 
-          <button
-            className="toolbar-button danger-toolbar-button"
-            type="button"
-            title="Close selected tabs"
-            disabled={actionSelectedCount === 0 || operationLabel !== null}
-            onClick={() => void closeSelectedTabs()}
-          >
-            <X aria-hidden="true" size={16} />
-            <span>Close</span>
-            <span className="toolbar-count">{actionSelectedCount}</span>
-          </button>
+          <Tooltip content="Close selected tabs" onlyWhenLabelHidden relationship="none">
+            <button
+              className="toolbar-button danger-toolbar-button compact-toolbar-action toolbar-secondary-action toolbar-remove-action"
+              type="button"
+              aria-label={`Close ${pluralize(actionSelectedCount, 'selected tab')}`}
+              disabled={actionSelectedCount === 0 || operationLabel !== null}
+              onClick={() => void closeSelectedTabs()}
+            >
+              <X aria-hidden="true" size={16} />
+              <span className="toolbar-action-label" data-tooltip-label>
+                Close
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {actionSelectedCount}
+              </span>
+            </button>
+          </Tooltip>
         </div>
 
         {showToolbarStatus ? (

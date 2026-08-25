@@ -89,6 +89,69 @@ function createSavedService() {
 }
 
 describe('CommandPalette', () => {
+  it('shows the shortcut tooltip only after the visible trigger label collapses', () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    try {
+      render(
+        <div className="app-shell">
+          <CommandPalette
+            activeWindowsService={createActiveService()}
+            savedWindowsService={createSavedService()}
+          />
+        </div>,
+      );
+
+      const trigger = screen.getByRole('button', { name: 'Search Weaver' });
+      const label = screen.getByText('Search Weaver');
+      const getClientRects = vi.spyOn(label, 'getClientRects');
+      getClientRects.mockReturnValue([{} as DOMRect] as unknown as DOMRectList);
+
+      expect(trigger).not.toHaveAttribute('title');
+      expect(label).toHaveAttribute('data-tooltip-label');
+      expect(within(trigger).getByText('Ctrl+K').tagName).toBe('KBD');
+      fireEvent.pointerEnter(trigger);
+      void act(() => vi.advanceTimersByTime(500));
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+      getClientRects.mockReturnValue([] as unknown as DOMRectList);
+      fireEvent.pointerLeave(trigger);
+      fireEvent.pointerEnter(trigger);
+      void act(() => vi.advanceTimersByTime(250));
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Search Weaver (Ctrl+K)');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it('provides a custom tooltip for the clear-search icon', async () => {
+    const user = userEvent.setup();
+    render(
+      <div className="app-shell">
+        <CommandPalette
+          activeWindowsService={createActiveService()}
+          savedWindowsService={createSavedService()}
+        />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    await user.type(screen.getByRole('combobox', { name: 'Search Weaver' }), 'notion');
+    const clearSearch = screen.getByRole('button', { name: 'Clear search' });
+    expect(clearSearch).not.toHaveAttribute('title');
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(clearSearch);
+      void act(() => vi.advanceTimersByTime(250));
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Clear search');
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('exposes the dialog combobox contract', async () => {
     const user = userEvent.setup();
     const activeService = createActiveService();
@@ -125,7 +188,9 @@ describe('CommandPalette', () => {
         />
       </div>,
     );
-    await user.click(screen.getByRole('button', { name: 'Search Weaver' }));
+    const trigger = screen.getByRole('button', { name: 'Search Weaver' });
+    expect(within(trigger).getByText('⌘K').tagName).toBe('KBD');
+    await user.click(trigger);
     const input = screen.getByRole('combobox', { name: 'Search Weaver' });
     await user.type(input, 'notion');
 
@@ -146,8 +211,9 @@ describe('CommandPalette', () => {
     expect(fleetStates?.querySelector('.is-active')).toBeInTheDocument();
     expect(fleetStates?.querySelector('.is-agent')).toBeInTheDocument();
     expect(fleetStates?.querySelector('.is-pinned')).toBeInTheDocument();
-    expect(fleetOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
-    expect(fleetOption).toHaveTextContent(/⌘[1-9]/u);
+    expect(fleetOption.querySelector('.command-palette-result-shortcut')).toHaveTextContent(
+      /^⌘[1-9]$/u,
+    );
     expect(fleetOption).not.toHaveTextContent(/Focus|Open|Go/u);
     const roadmapOption = within(listbox).getByRole('option', { name: /Notion roadmap/u });
     expect(roadmapOption).toHaveAccessibleDescription(/Suspended tab/u);
@@ -159,6 +225,7 @@ describe('CommandPalette', () => {
   });
 
   it('keeps empty state and shortcut rails present for Action results', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
     const user = userEvent.setup();
     render(
       <div className="app-shell">
@@ -174,11 +241,15 @@ describe('CommandPalette', () => {
       name: /^Preview duplicate tabs\./u,
     });
     expect(previewOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
-    expect(previewOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
+    expect(previewOption.querySelector('.command-palette-result-shortcut')).toHaveTextContent(
+      /^Ctrl\+[1-9]$/u,
+    );
 
     const mergeOption = screen.getByRole('option', { name: /^Merge windows\./u });
     expect(mergeOption.querySelector('.command-palette-result-states')).toBeEmptyDOMElement();
-    expect(mergeOption.querySelector('.command-palette-result-shortcut')).toBeInTheDocument();
+    expect(mergeOption.querySelector('.command-palette-result-shortcut')).toHaveTextContent(
+      /^Ctrl\+[1-9]$/u,
+    );
   });
 
   it('updates live result states and keeps one valid selection after source changes', async () => {

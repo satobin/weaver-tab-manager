@@ -174,6 +174,7 @@ a {
   position: sticky;
   top: 0;
   z-index: 10;
+  container: topbar / inline-size;
   grid-area: topbar;
   display: flex;
   align-items: center;
@@ -213,12 +214,20 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   display: none;
 }
 
+.topbar-page-status {
+  min-width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
 .active-window-header-status,
 .saved-window-header-status {
   display: flex;
-  flex: 0 0 auto;
+  min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
+  overflow: hidden;
 }
 
 .active-window-header-status .window-summary,
@@ -270,6 +279,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   position: sticky;
   top: var(--topbar-height);
   z-index: 9;
+  container: active-toolbar / inline-size;
   display: flex;
   min-height: 58px;
   align-items: center;
@@ -292,8 +302,10 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 
 .sort-controls .sort-criterion-trigger {
   position: relative;
-  width: 76px;
-  padding: 0 7px 0 9px;
+  width: 64px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 0 5px 0 8px;
   border: 1px solid var(--border-strong);
   border-radius: 6px 0 0 6px;
   background: var(--surface);
@@ -355,9 +367,19 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   justify-content: flex-end;
 }
 
+.toolbar-search-slot {
+  display: flex;
+  min-width: 158px;
+  flex: 1 1 158px;
+  max-width: 315px;
+}
+
 .window-search {
   display: grid;
+  width: 100%;
   height: var(--active-toolbar-control-height, 36px);
+  min-width: 0;
+  max-width: 315px;
   grid-template-columns: 18px minmax(0, 1fr) 24px;
   align-items: center;
   gap: 7px;
@@ -366,9 +388,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   border-radius: 6px;
   background: var(--surface);
   color: var(--text-muted);
-  width: 315px;
-  flex: 0 1 315px;
-  max-width: 315px;
 }
 
 .toolbar-button {
@@ -407,6 +426,11 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .toolbar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.topbar-merge-button[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.56;
 }
@@ -474,6 +498,9 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .window-summary {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--text-muted);
   font-size: 12px;
@@ -481,10 +508,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.window-summary-compact {
-  display: none;
 }
 
 .icon-button {
@@ -501,7 +524,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   cursor: pointer;
 }
 
-.icon-button:hover:not(:disabled) {
+.icon-button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text);
@@ -518,7 +541,8 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   color: var(--danger-text);
 }
 
-.icon-button:disabled {
+.icon-button:disabled,
+.icon-button[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.62;
 }
@@ -718,6 +742,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .window-card {
+  container: window-card / inline-size;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border-strong);
@@ -956,8 +981,10 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 
 .window-sort-controls .sort-criterion-trigger {
   position: relative;
-  width: 68px;
-  padding: 0 4px 0 8px;
+  width: 56px;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 0 3px 0 7px;
   border: 1px solid var(--border-strong);
   border-radius: 6px 0 0 6px;
   background: var(--surface);
@@ -3588,7 +3615,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   display: grid;
   width: 100%;
   min-height: 48px;
-  grid-template-columns: 28px minmax(0, 1fr) 84px 36px;
+  grid-template-columns: 28px minmax(0, 1fr) 84px max-content;
   align-items: center;
   gap: 8px;
   padding: 6px;
@@ -3817,7 +3844,8 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .command-palette-result-shortcut {
-  width: 36px;
+  width: auto;
+  min-width: 36px;
   box-sizing: border-box;
   grid-column: 4;
   justify-self: end;
@@ -4301,24 +4329,18 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   border: 0;
 }
 
-@media (max-width: 1100px) {
-  .command-palette-trigger {
-    min-width: 34px;
-    width: 34px;
-    padding-inline: 0;
-  }
-
-  .command-palette-trigger > span,
-  .command-palette-trigger > kbd {
-    display: none;
-  }
-
+@container topbar (max-width: 850px) {
   .topbar-merge-button {
     width: 34px;
     padding-inline: 0;
   }
 
-  .topbar-merge-button span,
+  .topbar-merge-button span {
+    display: none;
+  }
+}
+
+@container topbar (max-width: 800px) {
   .topbar-remove-duplicates-button .topbar-action-label {
     display: none;
   }
@@ -4326,6 +4348,111 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   .topbar-remove-duplicates-button {
     gap: 5px;
     padding-inline: 7px;
+  }
+}
+
+@container topbar (max-width: 700px) {
+  .command-palette-trigger {
+    min-width: 84px;
+    width: 84px;
+    justify-content: center;
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .command-palette-trigger > span {
+    display: none;
+  }
+
+  .command-palette-trigger > kbd {
+    margin-left: 0;
+  }
+}
+
+@container active-toolbar (max-width: 920px) {
+  .active-toolbar-main > .toolbar-remove-action {
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .active-toolbar-main > .toolbar-remove-action .toolbar-action-label {
+    display: none;
+  }
+
+  .active-toolbar-main > .sort-controls .sort-action-button {
+    width: 36px;
+    flex-basis: 36px;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .active-toolbar-main > .sort-controls .sort-action-label {
+    display: none;
+  }
+}
+
+@container active-toolbar (max-width: 700px) {
+  .active-toolbar-main > .toolbar-primary-action {
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .active-toolbar-main > .toolbar-primary-action .toolbar-action-label {
+    display: none;
+  }
+}
+
+@container active-toolbar (max-width: 625px) {
+  .active-toolbar-main > .saved-tabs-move-button {
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .active-toolbar-main > .saved-tabs-move-button .toolbar-action-label {
+    display: none;
+  }
+}
+
+@container active-toolbar (max-width: 600px) {
+  .active-toolbar-main > .toolbar-window-action:not(.saved-tabs-move-button) {
+    gap: 5px;
+    padding-inline: 7px;
+  }
+
+  .active-toolbar-main > .toolbar-window-action:not(.saved-tabs-move-button) .toolbar-action-label {
+    display: none;
+  }
+}
+
+@container active-toolbar (max-width: 520px) {
+  .active-toolbar-main,
+  .active-toolbar-status {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .active-toolbar-status {
+    justify-content: space-between;
+  }
+
+  .toolbar-search-slot {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex: 0 0 100%;
+  }
+}
+
+@container window-card (max-width: 440px) {
+  .window-sort-controls .sort-action-button {
+    width: 30px;
+    flex-basis: 30px;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .window-sort-controls .sort-action-label {
+    display: none;
   }
 }
 
@@ -4373,14 +4500,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 
   .topbar {
     padding-inline: 16px;
-  }
-
-  .window-summary-full {
-    display: none;
-  }
-
-  .window-summary-compact {
-    display: inline;
   }
 
   .main-content {
@@ -4536,17 +4655,6 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
     gap: 5px;
   }
 
-  .window-sort-controls .sort-action-button {
-    width: 30px;
-    flex-basis: 30px;
-    gap: 0;
-    padding-inline: 0;
-  }
-
-  .window-sort-controls .sort-action-label {
-    display: none;
-  }
-
   .settings-rule-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -4661,10 +4769,11 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
     justify-content: space-between;
   }
 
-  .window-search {
+  .toolbar-search-slot {
     width: 100%;
+    min-width: 0;
     max-width: none;
-    flex: 1 1 100%;
+    flex: 0 0 100%;
   }
 
   .window-summary {
@@ -4688,7 +4797,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   }
 
   .command-palette-result {
-    grid-template-columns: 28px minmax(0, 1fr) 84px 38px;
+    grid-template-columns: 28px minmax(0, 1fr) 84px max-content;
     gap: 7px;
   }
 
