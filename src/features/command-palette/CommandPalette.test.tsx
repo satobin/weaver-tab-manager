@@ -195,10 +195,16 @@ describe('CommandPalette', () => {
     await user.type(input, 'notion');
 
     const listbox = screen.getByRole('listbox', { name: 'Weaver search results' });
-    expect(within(listbox).getByRole('group', { name: /Open tabs 2/u })).toBeVisible();
-    expect(within(listbox).getByRole('group', { name: /Tab groups 2/u })).toBeVisible();
-    expect(within(listbox).getByRole('group', { name: /Saved Window\/Tabs 2/u })).toBeVisible();
-    expect(within(listbox).getByRole('group', { name: /Settings 2/u })).toBeVisible();
+    const openTabsGroup = within(listbox).getByRole('group', {
+      name: 'Open tabs, 2 results',
+    });
+    expect(openTabsGroup).toBeVisible();
+    expect(within(openTabsGroup).getByText('2')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(listbox).getByRole('group', { name: 'Tab groups, 2 results' })).toBeVisible();
+    expect(
+      within(listbox).getByRole('group', { name: 'Saved Window/Tabs, 2 results' }),
+    ).toBeVisible();
+    expect(within(listbox).getByRole('group', { name: 'Settings, 2 results' })).toBeVisible();
     const fleetOption = within(listbox).getByRole('option', { name: /Fleet capacity plan/u });
     expect(fleetOption).toHaveAccessibleName('Fleet capacity plan — Notion. Planning · notion.so');
     expect(fleetOption).toHaveAccessibleDescription(

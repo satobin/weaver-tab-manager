@@ -175,11 +175,21 @@ describe('Popup', () => {
     expect(actionSection).not.toBeNull();
     const currentWindowActions = within(actionSection as HTMLElement);
     expect(currentWindowActions.getByRole('group', { name: 'Sort current window' })).toBeVisible();
-    expect(
-      currentWindowActions.getByRole('button', { name: 'Close duplicate tabs 0' }),
-    ).toBeVisible();
-    expect(currentWindowActions.getByRole('button', { name: 'Suspend tabs 1' })).toBeVisible();
-    expect(currentWindowActions.getByRole('button', { name: 'Unsuspend all 0' })).toBeVisible();
+    const closeDuplicates = currentWindowActions.getByRole('button', {
+      name: 'Close duplicate tabs, 0 found',
+    });
+    const suspendTabs = currentWindowActions.getByRole('button', {
+      name: 'Suspend tabs, 1 tab available',
+    });
+    const unsuspendTabs = currentWindowActions.getByRole('button', {
+      name: 'Unsuspend all, 0 tabs suspended',
+    });
+    expect(closeDuplicates).toBeVisible();
+    expect(suspendTabs).toBeVisible();
+    expect(unsuspendTabs).toBeVisible();
+    expect(within(closeDuplicates).getByText('0')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(suspendTabs).getByText('1')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(unsuspendTabs).getByText('0')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('requests the full manager and closes', async () => {
@@ -501,7 +511,9 @@ describe('Popup', () => {
     const sortButton = screen.getByRole('button', {
       name: 'Sort current window by Title, A to Z',
     });
-    const dedupeButton = await screen.findByRole('button', { name: 'Close duplicate tabs 1' });
+    const dedupeButton = await screen.findByRole('button', {
+      name: 'Close duplicate tabs, 1 found',
+    });
     await user.click(sortButton);
 
     expect(sortButton).toHaveTextContent('Sort');
@@ -574,12 +586,14 @@ describe('Popup', () => {
     });
     renderPopup(service);
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs, 1 found' }));
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [101] }),
     );
-    expect(await screen.findByRole('button', { name: 'Close duplicate tabs 0' })).toBeDisabled();
+    expect(
+      await screen.findByRole('button', { name: 'Close duplicate tabs, 0 found' }),
+    ).toBeDisabled();
     expect(service.loadSnapshot).toHaveBeenCalledTimes(2);
     expect(screen.getByText('1 duplicate tab removed.')).toBeInTheDocument();
 
@@ -636,7 +650,7 @@ describe('Popup', () => {
     });
     renderPopup(service);
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs, 1 found' }));
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [103] }),
@@ -669,7 +683,7 @@ describe('Popup', () => {
     });
     renderPopup(service);
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs, 1 found' }));
 
     expect(service.closeDuplicateTabs).toHaveBeenCalledWith(
       expect.objectContaining({ tabIds: [102] }),
@@ -706,7 +720,7 @@ describe('Popup', () => {
     });
     renderPopup(service);
 
-    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Close duplicate tabs, 1 found' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(
@@ -733,7 +747,7 @@ describe('Popup', () => {
     renderPopup(service, createPopupSettingsService(false));
 
     const closeDuplicatesButton = await screen.findByRole('button', {
-      name: 'Close duplicate tabs 1',
+      name: 'Close duplicate tabs, 1 found',
     });
     await waitFor(() => expect(closeDuplicatesButton).toBeEnabled(), { timeout: 5_000 });
   });
@@ -772,7 +786,7 @@ describe('Popup', () => {
     expect(
       await screen.findByText('1 tab suspended · Resumes or reloads when opened'),
     ).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'Suspend tabs 1' }));
+    await user.click(await screen.findByRole('button', { name: 'Suspend tabs, 1 tab available' }));
 
     expect(service.suspendTabs).toHaveBeenCalledWith([102]);
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
@@ -780,13 +794,13 @@ describe('Popup', () => {
     expect(
       await screen.findByText('2 tabs suspended · Resumes or reloads when opened'),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Unsuspend all 2' }));
+    await user.click(screen.getByRole('button', { name: 'Unsuspend all, 2 tabs suspended' }));
 
     expect(service.unsuspendTabs).toHaveBeenCalledWith([102, 103]);
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
     expect(screen.queryByText('0 suspended')).not.toBeInTheDocument();
     expect(screen.queryByText(/tabs? suspended · Resumes or reloads/)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Unsuspend all 0' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Unsuspend all, 0 tabs suspended' })).toBeDisabled();
     expect(closeWindow).not.toHaveBeenCalled();
   });
 

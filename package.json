@@ -14,7 +14,7 @@
   "homepage": "https://github.com/satobin/weaver-tab-manager#readme",
   "type": "module",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.15 <25"
   },
   "packageManager": "pnpm@11.7.0",
   "scripts": {
@@ -60,16 +60,16 @@
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
-    "@vitejs/plugin-react": "4.7.0",
+    "@vitejs/plugin-react": "5.2.0",
     "adm-zip": "0.6.0",
     "eslint": "9.39.5",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.3",
     "globals": "17.8.0",
-    "jsdom": "26.1.0",
+    "jsdom": "30.0.1",
     "prettier": "3.7.4",
-    "typescript": "5.9.3",
+    "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vite": "6.4.3",
     "vitest": "4.1.10"

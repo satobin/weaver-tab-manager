@@ -55,6 +55,10 @@ function defaultManagerShortcut(): string {
   return getSuggestedOpenManagerShortcut(navigator.platform);
 }
 
+function pluralizeCount(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
 export function Popup({
   service: providedService,
   settingsService: providedSettingsService,
@@ -461,11 +465,12 @@ export function Popup({
               }
               disabled={dedupeUnavailable || pendingAction !== null}
               aria-busy={pendingAction === 'dedupe'}
+              aria-label={`Close duplicate tabs, ${duplicatePlan.duplicateTabIds.length} found`}
               onClick={() => void removeDuplicateTabs()}
             >
               <CopyX aria-hidden="true" size={16} />
               <span>Close duplicate tabs</span>
-              <small>{duplicatePlan.duplicateTabIds.length}</small>
+              <small aria-hidden="true">{duplicatePlan.duplicateTabIds.length}</small>
             </button>
             <button
               className="popup-quick-action popup-duplicate-preview-action"
@@ -491,12 +496,13 @@ export function Popup({
               }
               disabled={suspendableTabIds.length === 0 || pendingAction !== null}
               aria-busy={pendingAction === 'suspend'}
+              aria-label={`Suspend tabs, ${pluralizeCount(suspendableTabIds.length, 'tab')} available`}
               title="Suspend loaded background tabs in this window. Tabs resume or reload when opened."
               onClick={() => void changeCurrentWindowSuspension('suspend')}
             >
               <Pause aria-hidden="true" size={16} />
               <span>Suspend tabs</span>
-              <small>{suspendableTabIds.length}</small>
+              <small aria-hidden="true">{suspendableTabIds.length}</small>
             </button>
             <button
               className="popup-quick-action"
@@ -506,12 +512,13 @@ export function Popup({
               }
               disabled={suspendedTabIds.length === 0 || pendingAction !== null}
               aria-busy={pendingAction === 'unsuspend'}
+              aria-label={`Unsuspend all, ${pluralizeCount(suspendedTabIds.length, 'tab')} suspended`}
               title="Unsuspend every suspended tab in this window now."
               onClick={() => void changeCurrentWindowSuspension('unsuspend')}
             >
               <Play aria-hidden="true" size={16} />
               <span>Unsuspend all</span>
-              <small>{suspendedTabIds.length}</small>
+              <small aria-hidden="true">{suspendedTabIds.length}</small>
             </button>
             {suspendedTabIds.length > 0 ? (
               <span className="popup-suspension-state">

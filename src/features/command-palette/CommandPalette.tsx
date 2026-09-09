@@ -379,21 +379,17 @@ function CommandPaletteDialog({
 
   let resultIndex = 0;
   const renderedSections = sections.map((section: CommandPaletteSection) => {
-    const headingId = `command-palette-section-${section.id}`;
+    const resultCountLabel = `${section.results.length} result${section.results.length === 1 ? '' : 's'}`;
     return (
       <div
         className="command-palette-section"
         key={section.id}
         role="group"
-        aria-labelledby={headingId}
+        aria-label={`${section.label}, ${resultCountLabel}`}
       >
-        <div className="command-palette-section-heading" id={headingId}>
+        <div className="command-palette-section-heading">
           <span>{section.label}</span>
-          <span
-            aria-label={`${section.results.length} result${section.results.length === 1 ? '' : 's'}`}
-          >
-            {section.results.length}
-          </span>
+          <span aria-hidden="true">{section.results.length}</span>
         </div>
         {section.results.map((result) => {
           const index = resultIndex++;
