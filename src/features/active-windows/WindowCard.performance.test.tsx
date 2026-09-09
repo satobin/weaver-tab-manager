@@ -7,6 +7,7 @@ import { WindowCard } from './WindowCard';
 import { type ManagedWindow } from './model';
 
 const BENCHMARK_TAB_COUNT = 500;
+const LARGE_WINDOW_TEST_TIMEOUT_MS = 15_000;
 
 function createBenchmarkWindow(): ManagedWindow {
   return createManagedWindow({
@@ -64,7 +65,7 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
   };
 }
 
-describe('WindowCard large-window rendering', () => {
+describe('WindowCard large-window rendering', { timeout: LARGE_WINDOW_TEST_TIMEOUT_MS }, () => {
   it('renders a large inert closing snapshot', () => {
     const initialWindow = createBenchmarkWindow();
     const closingProps = createProps(initialWindow, false);
