@@ -395,36 +395,36 @@ describe('Popup', () => {
     expect(closeWindow).not.toHaveBeenCalled();
   });
 
-  it('sorts the current window with default or customized options without closing', async () => {
+  it('defaults the current window sort to URL and supports choosing Title without closing', async () => {
     const user = userEvent.setup();
     const service = createService();
     renderPopup(service);
 
     const sortButton = await screen.findByRole('button', {
-      name: 'Sort current window by Title, A to Z',
+      name: 'Sort current window by URL, A to Z',
     });
     expect(sortButton.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
     await user.click(sortButton);
 
     await waitFor(() => {
       expect(service.sortWindow).toHaveBeenCalledWith(1, {
-        criterion: 'title',
+        criterion: 'url',
         direction: 'asc',
       });
     });
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(2));
 
-    await user.click(screen.getByRole('button', { name: 'Sort current window by: Title' }));
-    await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
+    await user.click(screen.getByRole('button', { name: 'Sort current window by: URL' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Title' }));
     const reverseSortButton = screen.getByRole('button', {
-      name: 'Sort current window by URL, A to Z',
+      name: 'Sort current window by Title, A to Z',
     });
     expect(reverseSortButton.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
     await user.click(reverseSortButton);
 
     await waitFor(() => {
       expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
-        criterion: 'url',
+        criterion: 'title',
         direction: 'asc',
       });
     });
@@ -439,8 +439,18 @@ describe('Popup', () => {
       windows: [
         createManagedWindow({
           tabs: [
-            createManagedTab({ active: true, id: 101, title: 'Zulu' }),
-            createManagedTab({ id: 102, index: 1, title: 'Alpha' }),
+            createManagedTab({
+              active: true,
+              id: 101,
+              title: 'Alpha',
+              url: 'https://example.test/zulu',
+            }),
+            createManagedTab({
+              id: 102,
+              index: 1,
+              title: 'Zulu',
+              url: 'https://example.test/alpha',
+            }),
           ],
         }),
       ],
@@ -449,8 +459,14 @@ describe('Popup', () => {
       windows: [
         createManagedWindow({
           tabs: [
-            createManagedTab({ id: 102, title: 'Alpha' }),
-            createManagedTab({ active: true, id: 101, index: 1, title: 'Zulu' }),
+            createManagedTab({ id: 102, title: 'Zulu', url: 'https://example.test/alpha' }),
+            createManagedTab({
+              active: true,
+              id: 101,
+              index: 1,
+              title: 'Alpha',
+              url: 'https://example.test/zulu',
+            }),
           ],
         }),
       ],
@@ -461,12 +477,12 @@ describe('Popup', () => {
     renderPopup(service);
 
     const sortAscending = await screen.findByRole('button', {
-      name: 'Sort current window by Title, A to Z',
+      name: 'Sort current window by URL, A to Z',
     });
     await user.click(sortAscending);
 
     const sortDescending = await screen.findByRole('button', {
-      name: 'Sort current window by Title, Z to A',
+      name: 'Sort current window by URL, Z to A',
     });
     expect(sortDescending.querySelector('.lucide-arrow-up')).toBeInTheDocument();
     expect(sortDescending).toHaveFocus();
@@ -474,7 +490,7 @@ describe('Popup', () => {
 
     await waitFor(() =>
       expect(service.sortWindow).toHaveBeenLastCalledWith(1, {
-        criterion: 'title',
+        criterion: 'url',
         direction: 'desc',
       }),
     );
@@ -509,7 +525,7 @@ describe('Popup', () => {
 
     const sortControls = await screen.findByRole('group', { name: 'Sort current window' });
     const sortButton = screen.getByRole('button', {
-      name: 'Sort current window by Title, A to Z',
+      name: 'Sort current window by URL, A to Z',
     });
     const dedupeButton = await screen.findByRole('button', {
       name: 'Close duplicate tabs, 1 found',
@@ -519,7 +535,7 @@ describe('Popup', () => {
     expect(sortButton).toHaveTextContent('Sort');
     expect(dedupeButton).toHaveTextContent('Close duplicate tabs');
     expect(sortControls).toHaveAttribute('data-operation-locked', 'true');
-    expect(screen.getByRole('button', { name: 'Sort current window by: Title' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sort current window by: URL' })).toBeDisabled();
     expect(dedupeButton).toHaveAttribute('data-operation-locked', 'true');
     expect(sortButton).toBeDisabled();
     expect(dedupeButton).toBeDisabled();

@@ -33,6 +33,7 @@ interface WindowCardProps {
   allWindowTabs: readonly ManagedTab[];
   collapsed: boolean;
   closing?: boolean;
+  closingTabIds?: ReadonlySet<number>;
   disabled: boolean;
   extensionOrigin: string;
   draggedGroupId: number | null;
@@ -42,6 +43,7 @@ interface WindowCardProps {
   duplicatePreviewKeepTabIds?: ReadonlySet<number>;
   groupActionTabs?: readonly ManagedTab[];
   mergeSelected: boolean;
+  onCloseSelectedTabs: (windowId: number) => void;
   onCloseTab: (tabId: number) => void;
   onCloseWindow: (windowId: number) => void;
   onFocusTab: (windowId: number, tabId: number) => void;
@@ -97,6 +99,7 @@ export function WindowCard({
   allWindowTabs,
   collapsed,
   closing = false,
+  closingTabIds,
   disabled: disabledProp,
   extensionOrigin,
   draggedGroupId,
@@ -106,6 +109,7 @@ export function WindowCard({
   duplicatePreviewKeepTabIds,
   groupActionTabs = allWindowTabs,
   mergeSelected,
+  onCloseSelectedTabs,
   onCloseTab,
   onCloseWindow,
   onFocusTab,
@@ -172,6 +176,8 @@ export function WindowCard({
   });
   const visibleTabIds = window.tabs.map((tab) => tab.id);
   const selectedCount = visibleTabIds.filter((tabId) => selectedTabIds.has(tabId)).length;
+  const selectedWindowTabCount = allWindowTabs.filter((tab) => selectedTabIds.has(tab.id)).length;
+  const closeSelectedTabsLabel = `Close ${selectedWindowTabCount} selected ${selectedWindowTabCount === 1 ? 'tab' : 'tabs'} in ${window.label}`;
   const allSelected = visibleTabIds.length > 0 && selectedCount === visibleTabIds.length;
   const suspendableTabCount = allWindowTabs.filter(
     (tab) => !tab.active && !isTabSuspended(tab),
@@ -251,6 +257,7 @@ export function WindowCard({
         .join(' ')}
       data-window-id={window.id}
       aria-busy={closing || undefined}
+      data-operation-locked={closingTabIds?.size && !closing ? true : undefined}
       aria-labelledby={`window-${window.id}-title`}
       onDragLeave={(event) => {
         const nextTarget = event.relatedTarget;
@@ -408,6 +415,7 @@ export function WindowCard({
                 className="icon-button"
                 type="button"
                 aria-label={`Suspend tabs in ${window.label}`}
+                data-action-unavailable={suspendableTabCount === 0 || undefined}
                 aria-disabled={suspendActionExplainsUnavailable || undefined}
                 disabled={disabled}
                 onClick={() => {
@@ -424,21 +432,38 @@ export function WindowCard({
                 className="icon-button"
                 type="button"
                 aria-label={`Unsuspend all tabs in ${window.label}`}
+                data-action-unavailable={suspendedTabCount === 0 || undefined}
                 disabled={disabled || suspendedTabCount === 0}
                 onClick={() => onUnsuspendWindow(window.id)}
               >
                 <Play aria-hidden="true" size={17} />
               </button>
             </Tooltip>
-            <Tooltip content="Close window" relationship="none">
+            <Tooltip
+              content={selectedWindowTabCount > 0 ? closeSelectedTabsLabel : 'Close window'}
+              relationship="none"
+            >
               <button
-                className="icon-button danger-icon-button"
+                className={`icon-button danger-icon-button${selectedWindowTabCount > 0 ? ' window-close-selected-button' : ''}`}
                 type="button"
-                aria-label={`Close ${window.label}`}
+                aria-label={
+                  selectedWindowTabCount > 0 ? closeSelectedTabsLabel : `Close ${window.label}`
+                }
                 disabled={disabled}
-                onClick={() => onCloseWindow(window.id)}
+                onClick={() => {
+                  if (selectedWindowTabCount > 0) {
+                    onCloseSelectedTabs(window.id);
+                  } else {
+                    onCloseWindow(window.id);
+                  }
+                }}
               >
                 <X aria-hidden="true" size={17} />
+                {selectedWindowTabCount > 0 ? (
+                  <span className="toolbar-count" aria-hidden="true">
+                    {selectedWindowTabCount}
+                  </span>
+                ) : null}
               </button>
             </Tooltip>
           </div>
@@ -646,7 +671,24 @@ export function WindowCard({
                     </div>
                   ) : null}
 
-                  <div className="tab-row">
+                  <div
+                    className="tab-row"
+                    onMouseDownCapture={(event) => {
+                      if (event.button === 1) {
+                        event.preventDefault();
+                      }
+                    }}
+                    onAuxClick={(event) => {
+                      if (event.button !== 1) {
+                        return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!disabled) {
+                        onCloseTab(tab.id);
+                      }
+                    }}
+                  >
                     <span className="tab-drag-handle" title="Drag tab" aria-hidden="true">
                       <GripVertical size={14} />
                     </span>
@@ -854,6 +896,7 @@ export function WindowCard({
                         type="button"
                         draggable={false}
                         aria-label={`Close ${tab.title}, tab ${index + 1} of ${window.tabs.length}`}
+                        aria-busy={closingTabIds?.has(tab.id) || undefined}
                         disabled={disabled}
                         onDragStart={(event) => {
                           event.preventDefault();

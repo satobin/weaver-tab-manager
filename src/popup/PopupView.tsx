@@ -76,7 +76,7 @@ export function Popup({
   useAppearance(settings.colorMode);
   const [managerShortcut, setManagerShortcut] = useState<string | null>(defaultManagerShortcut);
   const [query, setQuery] = useState('');
-  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
+  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('url');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedSortSelection, setAppliedSortSelection] = useState<AppliedSortSelection | null>(
     null,

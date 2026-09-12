@@ -93,7 +93,7 @@ type SavedDuplicatePreviewOutcome = 'close' | 'keep';
 type SavedWindowSortSelection = Pick<TabSortOptions, 'criterion' | 'direction'>;
 
 const DEFAULT_SAVED_WINDOW_SORT_SELECTION: SavedWindowSortSelection = {
-  criterion: 'title',
+  criterion: 'url',
   direction: 'asc',
 };
 
@@ -271,7 +271,27 @@ function SavedWindowPreview({
                 </div>
               </div>
             ) : null}
-            <div className={rowClassName}>
+            <div
+              className={rowClassName}
+              onMouseDownCapture={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault();
+                }
+              }}
+              onAuxClick={(event) => {
+                if (event.button !== 1) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const trigger = event.currentTarget.querySelector<HTMLButtonElement>(
+                  '.saved-tab-remove-button',
+                );
+                if (!rowActionsDisabled && trigger) {
+                  onRemoveTab?.(tab, trigger);
+                }
+              }}
+            >
               {onToggleTab ? (
                 <SelectionCheckbox
                   ariaLabel={`Select ${tab.title} in ${savedWindow.name}`}
@@ -384,7 +404,7 @@ export function SavedWindowsPage({
   const [paletteRevealTarget, setPaletteRevealTarget] = useState<SavedWindowRevealRequest | null>(
     null,
   );
-  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
+  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('url');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
     useState<TabSortOptions | null>(null);
@@ -937,7 +957,9 @@ export function SavedWindowsPage({
     operationRef.current = true;
     setOperation({ id, type });
     setActionError(null);
-    setActionNotice(null);
+    if (type !== 'remove-tab') {
+      setActionNotice(null);
+    }
     return true;
   };
 
@@ -1229,6 +1251,7 @@ export function SavedWindowsPage({
         undoMessage: `Restored "${tab.title}" to "${savedWindow.name}".`,
       });
     } catch (error) {
+      setActionNotice(null);
       setActionError(describeActionError(error));
     } finally {
       finishOperation();
@@ -2127,6 +2150,9 @@ export function SavedWindowsPage({
                   .join(' ')}
                 id={getPaletteSavedWindowTargetId(savedWindow.id)}
                 aria-labelledby={`saved-window-${savedWindow.id}-title`}
+                data-operation-locked={
+                  operation?.type === 'remove-tab' && selectedTabCount === 0 ? 'true' : undefined
+                }
                 key={savedWindow.id}
               >
                 <header className="window-card-header">

@@ -137,7 +137,7 @@ interface PendingWindowCloseFocus {
 }
 type PendingWindowCloseResultFocus = 'error' | 'page' | { savedWindowId: string } | null;
 const DEFAULT_WINDOW_SORT_SELECTION: WindowSortSelection = {
-  criterion: 'title',
+  criterion: 'url',
   direction: 'asc',
 };
 const NEW_WINDOW_TARGET_SWITCH_DISTANCE = 12;
@@ -326,7 +326,7 @@ export function ActiveWindowsPage({
     () => new Set(),
   );
   const [query, setQuery] = useState('');
-  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('title');
+  const [sortCriterion, setSortCriterion] = useState<SortCriterion>('url');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [appliedGlobalSortSelection, setAppliedGlobalSortSelection] =
     useState<TabSortOptions | null>(null);
@@ -353,6 +353,7 @@ export function ActiveWindowsPage({
   >([]);
   const [duplicateUndoTabs, setDuplicateUndoTabs] = useState<readonly RestorableTab[] | null>(null);
   const [operationLabel, setOperationLabel] = useState<string | null>(null);
+  const [closingTabIds, setClosingTabIds] = useState<ReadonlySet<number>>(new Set());
   const [duplicateRemovalTabIds, setDuplicateRemovalTabIds] = useState<readonly number[] | null>(
     null,
   );
@@ -1528,6 +1529,7 @@ export function ActiveWindowsPage({
     if (!beginOperation('Closing tab')) {
       return;
     }
+    setClosingTabIds(new Set([tabId]));
     try {
       const result = await service.closeTabs([tabId]);
       setTabsSelected(result.closedTabIds, false);
@@ -1536,20 +1538,29 @@ export function ActiveWindowsPage({
     } catch {
       setOperationError('The browser could not close that tab.');
     } finally {
+      setClosingTabIds(new Set());
       finishOperation();
     }
   };
 
-  const closeSelectedTabs = async () => {
+  const closeSelectedTabs = async (windowId?: number) => {
+    const windowTabIds = new Set(
+      snapshot?.windows.find((window) => window.id === windowId)?.tabs.map((tab) => tab.id),
+    );
+    const tabIdsToClose =
+      windowId === undefined
+        ? actionSelectedTabIdsInOrder
+        : actionSelectedTabIdsInOrder.filter((tabId) => windowTabIds.has(tabId));
     if (
-      actionSelectedCount === 0 ||
-      !beginOperation(`Closing ${pluralize(actionSelectedCount, 'tab')}`)
+      tabIdsToClose.length === 0 ||
+      !beginOperation(`Closing ${pluralize(tabIdsToClose.length, 'tab')}`)
     ) {
       return;
     }
+    setClosingTabIds(new Set(tabIdsToClose));
     try {
-      const result = await service.closeTabs(actionSelectedTabIdsInOrder);
-      if (result.failures.length === 0) {
+      const result = await service.closeTabs(tabIdsToClose);
+      if (windowId === undefined && result.failures.length === 0) {
         clearSelection();
       } else {
         setTabsSelected(result.closedTabIds, false);
@@ -1559,6 +1570,7 @@ export function ActiveWindowsPage({
     } catch {
       setOperationError('The browser could not close the selected tabs.');
     } finally {
+      setClosingTabIds(new Set());
       finishOperation();
     }
   };
@@ -2272,7 +2284,8 @@ export function ActiveWindowsPage({
     </div>
   );
   const showToolbarStatus =
-    (operationLabel !== null && !isRemovingDuplicates) || headerPortalTarget === undefined;
+    (operationLabel !== null && !isRemovingDuplicates && closingTabIds.size === 0) ||
+    headerPortalTarget === undefined;
 
   return (
     <section
@@ -2457,7 +2470,7 @@ export function ActiveWindowsPage({
 
         {showToolbarStatus ? (
           <div className="active-toolbar-status">
-            {operationLabel && !isRemovingDuplicates ? (
+            {operationLabel && !isRemovingDuplicates && closingTabIds.size === 0 ? (
               <span className="operation-summary" role="status">
                 {operationLabel}
               </span>
@@ -2717,6 +2730,7 @@ export function ActiveWindowsPage({
                         allWindowTabs={allWindowTabs}
                         collapsed={windowClosing ? false : collapsedWindowIds.has(window.id)}
                         closing={windowClosing}
+                        closingTabIds={closingTabIds}
                         disabled={operationLabel !== null}
                         {...(duplicatePreviewMode
                           ? {
@@ -2730,6 +2744,7 @@ export function ActiveWindowsPage({
                         draggedTabIds={draggedTabIds}
                         dropTarget={tabDropTarget}
                         mergeSelected={mergeDialogOpen && visibleMergeWindowIds.has(window.id)}
+                        onCloseSelectedTabs={(windowId) => void closeSelectedTabs(windowId)}
                         onCloseTab={(tabId) => void closeTab(tabId)}
                         onCloseWindow={(windowId) => void closeWindow(windowId)}
                         onSortCriterionChange={(criterion) =>

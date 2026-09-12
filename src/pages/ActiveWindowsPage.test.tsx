@@ -1262,17 +1262,17 @@ describe('ActiveWindowsPage', () => {
       within(columns[0] as HTMLElement).queryByRole('heading', { name: 'Window 4' }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Sort Window 1 by: Title' }));
-    await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(screen.getByRole('button', { name: 'Sort Window 1 by URL, A to Z' }));
-    await screen.findByRole('button', { name: 'Sort Window 1 by URL, Z to A' });
+    await user.click(screen.getByRole('button', { name: 'Sort Window 1 by: URL' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Title' }));
+    await user.click(screen.getByRole('button', { name: 'Sort Window 1 by Title, A to Z' }));
+    await screen.findByRole('button', { name: 'Sort Window 1 by Title, Z to A' });
     expect(notifyResize).toBeDefined();
     act(() => notifyResize?.(459));
 
     await waitFor(() => expect(container.querySelectorAll('.window-grid-column')).toHaveLength(1));
-    expect(screen.getByRole('button', { name: 'Sort Window 1 by: URL' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort Window 1 by: Title' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Sort Window 1 by URL, Z to A' }),
+      screen.getByRole('button', { name: 'Sort Window 1 by Title, Z to A' }),
     ).toBeInTheDocument();
   });
 
@@ -1743,7 +1743,7 @@ describe('ActiveWindowsPage', () => {
     const titleButton = within(header as HTMLElement).getByRole('button', { name: 'Window 1' });
     const collapseState = heading.querySelector('.window-collapse-state');
     const sortButton = within(header as HTMLElement).getByRole('button', {
-      name: 'Sort Window 1 by Title, A to Z',
+      name: 'Sort Window 1 by URL, A to Z',
     });
     const selectAllCheckbox = within(header as HTMLElement).getByRole('checkbox', {
       name: 'Select all visible tabs in Window 1',
@@ -2068,32 +2068,271 @@ describe('ActiveWindowsPage', () => {
     expect(screen.getByRole('checkbox', { name: 'Select Issue tracker' })).toBeChecked();
   });
 
-  it('closes one tab from its row action without affecting other tabs', async () => {
+  it('closes only the selected tabs in its window and preserves selection in other windows', async () => {
     const user = userEvent.setup();
     const service = createService();
     vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [102], failures: [] });
     render(<ActiveWindowsPage service={service} />);
 
-    await user.click(
-      await screen.findByRole('button', { name: 'Close Issue tracker, tab 2 of 2' }),
-    );
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Issue tracker' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Reference' }));
+    const closeSelected = screen.getByRole('button', {
+      name: 'Close 1 selected tab in Window 1',
+    });
+    expect(closeSelected).toHaveTextContent('1');
+    expect(screen.queryByRole('button', { name: 'Close Window 1' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Close 1 selected tab in Window 2' }),
+    ).toHaveTextContent('1');
 
-    await waitFor(() => expect(service.closeTabs).toHaveBeenCalledWith([102]));
-    expect(service.closeTabs).toHaveBeenCalledTimes(1);
+    await user.click(closeSelected);
+
+    await waitFor(() => {
+      expect(service.closeTabs).toHaveBeenCalledExactlyOnceWith([102]);
+      expect(screen.getByRole('checkbox', { name: 'Select Issue tracker' })).not.toBeChecked();
+    });
+    expect(service.closeWindow).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Select Reference' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Quarterly plan' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Close Window 1' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Close 1 selected tab in Window 2' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear 1 selected tab' })).toBeInTheDocument();
   });
 
-  it('closes a whole window through its card action', async () => {
+  it('includes selected tabs hidden by the filter in the window close count and action', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.closeTabs).mockResolvedValue({ closedTabIds: [101, 102], failures: [] });
+    render(<ActiveWindowsPage service={service} />);
+
+    await user.type(
+      await screen.findByRole('searchbox', { name: 'Filter tabs by title or URL' }),
+      'Quarterly',
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Select all tabs in Planning' }));
+    expect(
+      screen.queryByRole('checkbox', { name: 'Select Issue tracker' }),
+    ).not.toBeInTheDocument();
+    const closeSelected = screen.getByRole('button', {
+      name: 'Close 2 selected tabs in Window 1',
+    });
+    expect(closeSelected).toHaveTextContent('2');
+
+    await user.click(closeSelected);
+
+    await waitFor(() => expect(service.closeTabs).toHaveBeenCalledExactlyOnceWith([101, 102]));
+    expect(service.closeWindow).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Select Quarterly plan' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Close Window 1' })).toBeInTheDocument();
+  });
+
+  it('retains failed window-scoped closes and selections in other windows', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    vi.mocked(service.closeTabs).mockResolvedValue({
+      closedTabIds: [101],
+      failures: [{ message: 'Tab is locked.', tabId: 102 }],
+    });
+    render(<ActiveWindowsPage service={service} />);
+
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select all visible tabs in Window 1' }),
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Select Reference' }));
+    await user.click(screen.getByRole('button', { name: 'Close 2 selected tabs in Window 1' }));
+
+    expect(
+      await screen.findByText('1 tab could not be closed. Tab is locked.'),
+    ).toBeInTheDocument();
+    expect(service.closeTabs).toHaveBeenCalledExactlyOnceWith([101, 102]);
+    expect(service.closeWindow).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Select Quarterly plan' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Issue tracker' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Reference' })).toBeChecked();
+    expect(
+      screen.getByRole('button', { name: 'Close 1 selected tab in Window 1' }),
+    ).toHaveTextContent('1');
+    expect(
+      screen.getByRole('button', { name: 'Close 1 selected tab in Window 2' }),
+    ).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: 'Clear 2 selected tabs' })).toBeInTheDocument();
+  });
+
+  it('keeps cards steady while closing selected tabs from a window header', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    let finishClose: (() => void) | undefined;
+    const closePending = new Promise<Awaited<ReturnType<ActiveWindowsService['closeTabs']>>>(
+      (resolve) => {
+        finishClose = () => resolve({ closedTabIds: [101, 102], failures: [] });
+      },
+    );
+    vi.mocked(service.closeTabs).mockReturnValue(closePending);
+    const { container: headerPortalTarget } = render(<header />);
+    const { container } = render(
+      <ActiveWindowsPage headerPortalTarget={headerPortalTarget} service={service} />,
+    );
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select all visible tabs in Window 1' }),
+    );
+    const closeSelected = screen.getByRole('button', {
+      name: 'Close 2 selected tabs in Window 1',
+    });
+    const targetCloseButtons = [
+      screen.getByRole('button', { name: 'Close Quarterly plan, tab 1 of 2' }),
+      screen.getByRole('button', { name: 'Close Issue tracker, tab 2 of 2' }),
+    ];
+    const cards = Array.from(container.querySelectorAll('.window-card'));
+    expect(cards).toHaveLength(2);
+    expect(container.querySelector('.active-toolbar-status')).not.toBeInTheDocument();
+
+    await user.click(closeSelected);
+
+    expect(service.closeTabs).toHaveBeenCalledExactlyOnceWith([101, 102]);
+    expect(closeSelected).toBeDisabled();
+    expect(container.querySelector('.active-toolbar-status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Closing 2 tabs')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.tab-close-button[aria-busy="true"]')).toHaveLength(2);
+    for (const button of targetCloseButtons) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('aria-busy', 'true');
+    }
+    for (const [index, card] of cards.entries()) {
+      expect(container.querySelectorAll('.window-card')[index]).toBe(card);
+      expect(card).toHaveAttribute('data-operation-locked', 'true');
+      expect(card).not.toHaveAttribute('aria-busy');
+    }
+    expect(screen.getByRole('button', { name: 'Close Window 2' })).toBeDisabled();
+
+    await act(async () => {
+      finishClose?.();
+      await closePending;
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Close Window 1' })).toBeEnabled(),
+    );
+    for (const [index, card] of cards.entries()) {
+      expect(container.querySelectorAll('.window-card')[index]).toBe(card);
+      expect(card).not.toHaveAttribute('data-operation-locked');
+    }
+    expect(container.querySelector('.tab-close-button[aria-busy="true"]')).not.toBeInTheDocument();
+    expect(container.querySelector('.active-toolbar-status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close Window 2' })).toBeEnabled();
+  });
+
+  it.each([
+    { trigger: 'X click', fails: false },
+    { trigger: 'middle click', fails: false },
+    { trigger: 'X click', fails: true },
+    { trigger: 'middle click', fails: true },
+  ])('keeps cards steady on $trigger (fails: $fails)', async ({ trigger, fails }) => {
+    const user = userEvent.setup();
+    const service = createService();
+    const initialSnapshot = await service.loadSnapshot();
+    let finishClose: (() => void) | undefined;
+    const closePending = new Promise<Awaited<ReturnType<ActiveWindowsService['closeTabs']>>>(
+      (resolve, reject) => {
+        finishClose = () => {
+          if (fails) {
+            reject(new Error('Tab is locked.'));
+          } else {
+            resolve({ closedTabIds: [102], failures: [] });
+          }
+        };
+      },
+    );
+    vi.mocked(service.closeTabs).mockReturnValue(closePending);
+    const { container: headerPortalTarget } = render(<header />);
+    const { container } = render(
+      <ActiveWindowsPage headerPortalTarget={headerPortalTarget} service={service} />,
+    );
+    const closeButton = await screen.findByRole('button', {
+      name: 'Close Issue tracker, tab 2 of 2',
+    });
+    const cards = Array.from(container.querySelectorAll('.window-card'));
+    expect(cards).toHaveLength(2);
+    expect(container.querySelector('.active-toolbar-status')).not.toBeInTheDocument();
+
+    if (trigger === 'X click') {
+      await user.click(closeButton);
+    } else {
+      await user.pointer({ keys: '[MouseMiddle]', target: screen.getByText('Issue tracker') });
+    }
+
+    expect(service.closeTabs).toHaveBeenCalledExactlyOnceWith([102]);
+    expect(container.querySelector('.active-toolbar-status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Closing tab')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.tab-close-button[aria-busy="true"]')).toHaveLength(1);
+    expect(closeButton).toHaveAttribute('aria-busy', 'true');
+    for (const [index, card] of cards.entries()) {
+      expect(container.querySelectorAll('.window-card')[index]).toBe(card);
+      expect(card).toHaveAttribute('data-operation-locked', 'true');
+      expect(card).not.toHaveAttribute('aria-busy');
+      for (const button of within(card as HTMLElement).getAllByRole('button', {
+        name: /^Close /,
+      })) {
+        expect(button).toBeDisabled();
+      }
+      expect(
+        within(card as HTMLElement).getByRole('button', { name: `Save Window ${index + 1}` }),
+      ).toBeDisabled();
+      for (const checkbox of within(card as HTMLElement).getAllByRole('checkbox')) {
+        expect(checkbox).toBeDisabled();
+      }
+    }
+
+    if (!fails) {
+      vi.mocked(service.loadSnapshot).mockResolvedValue(
+        createActiveWindowsSnapshot({
+          windows: initialSnapshot.windows.map((window) => ({
+            ...window,
+            tabs: window.tabs.filter((tab) => tab.id !== 102),
+          })),
+        }),
+      );
+    }
+    await act(async () => {
+      finishClose?.();
+      await closePending.catch(() => undefined);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Window 1' })).toBeEnabled(),
+    );
+    for (const [index, card] of cards.entries()) {
+      expect(container.querySelectorAll('.window-card')[index]).toBe(card);
+      expect(card).not.toHaveAttribute('data-operation-locked');
+    }
+    expect(container.querySelector('.tab-close-button[aria-busy="true"]')).not.toBeInTheDocument();
+    expect(screen.getByText('Quarterly plan')).toBeInTheDocument();
+    expect(screen.getByText('Reference')).toBeInTheDocument();
+    if (fails) {
+      expect(screen.getByText('The browser could not close that tab.')).toBeInTheDocument();
+      expect(closeButton).toBeEnabled();
+      expect(screen.getByText('Issue tracker')).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByText('Issue tracker')).not.toBeInTheDocument();
+    }
+  });
+
+  it('closes a whole window when only another window has selected tabs', async () => {
     const user = userEvent.setup();
     const service = createService();
     render(<ActiveWindowsPage service={service} />);
 
-    await user.click(await screen.findByRole('button', { name: 'Close Window 2' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Quarterly plan' }));
+    await user.click(screen.getByRole('button', { name: 'Close Window 2' }));
 
     expect(service.closeWindow).toHaveBeenCalledTimes(1);
     expect(service.closeWindow).toHaveBeenCalledWith(2);
+    expect(service.closeTabs).not.toHaveBeenCalled();
   });
 
-  it('sorts each window independently and retains a separate global sort choice', async () => {
+  it('defaults every sort to URL and keeps per-window and global choices independent', async () => {
     const user = userEvent.setup();
     const service = createService();
     render(<ActiveWindowsPage service={service} />);
@@ -2109,12 +2348,12 @@ describe('ActiveWindowsPage', () => {
 
     await user.click(
       within(currentWindow as HTMLElement).getByRole('button', {
-        name: 'Sort Window 1 by: Title',
+        name: 'Sort Window 1 by: URL',
       }),
     );
-    await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Title' }));
     const currentWindowSort = within(currentWindow as HTMLElement).getByRole('button', {
-      name: 'Sort Window 1 by URL, A to Z',
+      name: 'Sort Window 1 by Title, A to Z',
     });
     expect(currentWindowSort).toHaveTextContent('Sort');
     expect(currentWindowSort.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
@@ -2122,34 +2361,33 @@ describe('ActiveWindowsPage', () => {
     const reverseCurrentWindowSort = await within(currentWindow as HTMLElement).findByRole(
       'button',
       {
-        name: 'Sort Window 1 by URL, Z to A',
+        name: 'Sort Window 1 by Title, Z to A',
       },
     );
     expect(reverseCurrentWindowSort.querySelector('.lucide-arrow-up')).toBeInTheDocument();
     expect(reverseCurrentWindowSort).toHaveFocus();
     await user.click(reverseCurrentWindowSort);
     expect(service.sortWindow).toHaveBeenCalledWith(1, {
-      criterion: 'url',
+      criterion: 'title',
       direction: 'desc',
     });
 
     await user.click(
       within(otherWindow as HTMLElement).getByRole('button', {
-        name: 'Sort Window 2 by Title, A to Z',
+        name: 'Sort Window 2 by URL, A to Z',
       }),
     );
     expect(service.sortWindow).toHaveBeenLastCalledWith(2, {
-      criterion: 'title',
+      criterion: 'url',
       direction: 'asc',
     });
     expect(
       within(otherWindow as HTMLElement).getByRole('button', {
-        name: 'Sort Window 2 by Title, Z to A',
+        name: 'Sort Window 2 by URL, Z to A',
       }),
-    ).toHaveAccessibleDescription('Currently sorted by Title, A to Z.');
+    ).toHaveAccessibleDescription('Currently sorted by URL, A to Z.');
 
-    await user.click(screen.getByRole('button', { name: 'Sort all windows by: Title' }));
-    await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
+    expect(screen.getByRole('button', { name: 'Sort all windows by: URL' })).toBeInTheDocument();
     const globalSort = screen.getByRole('button', {
       name: 'Sort all windows by URL, A to Z',
     });
@@ -2179,7 +2417,7 @@ describe('ActiveWindowsPage', () => {
     render(<ActiveWindowsPage service={service} />);
 
     const sortButton = await screen.findByRole('button', {
-      name: 'Sort all windows by Title, A to Z',
+      name: 'Sort all windows by URL, A to Z',
     });
     await user.click(sortButton);
 
@@ -2196,13 +2434,13 @@ describe('ActiveWindowsPage', () => {
   it('opens the global sort menu from its control and dismisses it on outside click', async () => {
     const user = userEvent.setup();
     render(<ActiveWindowsPage service={createService()} />);
-    const trigger = await screen.findByRole('button', { name: 'Sort all windows by: Title' });
+    const trigger = await screen.findByRole('button', { name: 'Sort all windows by: URL' });
     expect(trigger).not.toHaveAttribute('title');
     const firstWindow = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(firstWindow).not.toBeNull();
     expect(
       within(firstWindow as HTMLElement).getByRole('button', {
-        name: 'Sort Window 1 by: Title',
+        name: 'Sort Window 1 by: URL',
       }),
     ).not.toHaveAttribute('title');
     vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
@@ -2216,7 +2454,7 @@ describe('ActiveWindowsPage', () => {
     const menu = screen.getByRole('menu', { name: 'Sort all windows by' });
     expect(menu.parentElement).toBe(document.body);
     expect(menu).toHaveStyle({ left: '20px', top: '48px', width: '96px' });
-    expect(screen.getByRole('menuitemradio', { name: 'Title' })).toHaveAttribute(
+    expect(screen.getByRole('menuitemradio', { name: 'URL' })).toHaveAttribute(
       'aria-checked',
       'true',
     );
@@ -2270,7 +2508,7 @@ describe('ActiveWindowsPage', () => {
     );
     expect(closeButton.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
     const sortAllButton = screen.getByRole('button', {
-      name: 'Sort all windows by Title, A to Z',
+      name: 'Sort all windows by URL, A to Z',
     });
     expect(sortAllButton).not.toHaveAttribute('title');
     expect(sortAllButton.querySelector('.sort-action-label')).toHaveTextContent('Sort all');
@@ -2291,7 +2529,7 @@ describe('ActiveWindowsPage', () => {
       .getByRole('heading', { name: 'Window 1' })
       .closest('header') as HTMLElement;
     const windowSortButton = within(firstWindowHeader).getByRole('button', {
-      name: 'Sort Window 1 by Title, A to Z',
+      name: 'Sort Window 1 by URL, A to Z',
     });
     expect(windowSortButton).not.toHaveAttribute('title');
     expect(windowSortButton.querySelector('.sort-action-label')).toHaveAttribute(
@@ -3723,9 +3961,7 @@ describe('ActiveWindowsPage', () => {
       within(closingCard as HTMLElement).queryByRole('button', { name: 'Save Window 1' }),
     ).not.toBeInTheDocument();
     expect(selectClosingWindow).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Sort all windows by Title, A to Z' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sort all windows by URL, A to Z' })).toBeDisabled();
     expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
 
     act(() => listeners.forEach((listener) => listener()));

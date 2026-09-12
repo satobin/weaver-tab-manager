@@ -33,6 +33,7 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
     dropTarget: null,
     extensionOrigin: 'chrome-extension://weaver/',
     mergeSelected: false,
+    onCloseSelectedTabs: vi.fn(),
     onCloseTab: vi.fn(),
     onCloseWindow: vi.fn(),
     onFocusTab: vi.fn(),

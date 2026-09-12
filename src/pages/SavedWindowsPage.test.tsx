@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -349,7 +349,7 @@ describe('SavedWindowsPage', () => {
     );
 
     const sortAll = screen.getByRole('button', {
-      name: 'Sort all saved windows by Title, A to Z',
+      name: 'Sort all saved windows by URL, A to Z',
     });
     expect(sortAll).not.toHaveAttribute('title');
     expect(sortAll.querySelector('[data-tooltip-label]')).toHaveTextContent('Sort all');
@@ -376,7 +376,7 @@ describe('SavedWindowsPage', () => {
     await user.click(expand);
 
     const windowSort = within(card).getByRole('button', {
-      name: 'Sort Research by Title, A to Z',
+      name: 'Sort Research by URL, A to Z',
     });
     expect(windowSort).not.toHaveAttribute('title');
     expect(windowSort.querySelector('[data-tooltip-label]')).toHaveTextContent('Sort');
@@ -399,7 +399,7 @@ describe('SavedWindowsPage', () => {
     expect(screen.getByRole('button', { name: 'Save name' })).not.toHaveAttribute('title');
   });
 
-  it('sorts one saved window or every saved window by Title or URL', async () => {
+  it('defaults saved-window sorting to URL and allows choosing Title independently', async () => {
     const user = userEvent.setup();
     const research = createSavedWindow({
       groups: [],
@@ -454,13 +454,13 @@ describe('SavedWindowsPage', () => {
     await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
     let researchCard = screen.getByRole('article', { name: 'Research' });
     const researchSort = within(researchCard).getByRole('button', {
-      name: 'Sort Research by Title, A to Z',
+      name: 'Sort Research by URL, A to Z',
     });
     expect(researchSort.querySelector('.lucide-arrow-up-down')).toBeInTheDocument();
     await user.click(researchSort);
 
     expect(service.sortWindow).toHaveBeenCalledWith('saved-1', {
-      criterion: 'title',
+      criterion: 'url',
       direction: 'asc',
     });
     researchCard = screen.getByRole('article', { name: 'Research' });
@@ -468,24 +468,33 @@ describe('SavedWindowsPage', () => {
       [...researchCard.querySelectorAll('.saved-tab-row .saved-tab-copy strong')].map(
         (element) => element.textContent,
       ),
-    ).toEqual(['Pinned', 'Alpha', 'Zulu']);
+    ).toEqual(['Pinned', 'Zulu', 'Alpha']);
     const reverseResearchSort = within(researchCard).getByRole('button', {
-      name: 'Sort Research by Title, Z to A',
+      name: 'Sort Research by URL, Z to A',
     });
-    expect(reverseResearchSort).toHaveAccessibleDescription('Currently sorted by Title, A to Z.');
+    expect(reverseResearchSort).toHaveAccessibleDescription('Currently sorted by URL, A to Z.');
     expect(reverseResearchSort.querySelector('.lucide-arrow-up')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Sort all saved windows by: Title' }));
-    await user.click(screen.getByRole('menuitemradio', { name: 'URL' }));
-    await user.click(screen.getByRole('button', { name: 'Sort all saved windows by URL, A to Z' }));
+    await user.click(screen.getByRole('button', { name: 'Sort all saved windows by: URL' }));
+    expect(screen.getByRole('menuitemradio', { name: 'URL' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.click(screen.getByRole('menuitemradio', { name: 'Title' }));
+    expect(
+      within(researchCard).getByRole('button', { name: 'Sort Research by: URL' }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: 'Sort all saved windows by Title, A to Z' }),
+    );
 
     expect(service.sortAllWindows).toHaveBeenCalledWith({
-      criterion: 'url',
+      criterion: 'title',
       direction: 'asc',
     });
     expect(
-      await screen.findByRole('button', { name: 'Sort all saved windows by URL, Z to A' }),
-    ).toHaveAccessibleDescription('Currently sorted by URL, A to Z.');
+      await screen.findByRole('button', { name: 'Sort all saved windows by Title, Z to A' }),
+    ).toHaveAccessibleDescription('Currently sorted by Title, A to Z.');
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
   });
 
@@ -520,9 +529,9 @@ describe('SavedWindowsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Expand Research' }));
     await user.type(search, 'alpha');
     const card = screen.getByRole('article', { name: 'Research' });
-    await user.click(within(card).getByRole('button', { name: 'Sort Research by Title, A to Z' }));
+    await user.click(within(card).getByRole('button', { name: 'Sort Research by URL, A to Z' }));
     expect(service.sortWindow).toHaveBeenCalledWith('saved-1', {
-      criterion: 'title',
+      criterion: 'url',
       direction: 'asc',
     });
     expect(search).toHaveValue('alpha');
@@ -537,10 +546,10 @@ describe('SavedWindowsPage', () => {
 
     await user.type(search, 'alpha');
     await user.click(screen.getByRole('button', { name: 'Select 1 filtered tab' }));
-    expect(screen.getByRole('button', { name: 'Sort all saved windows by: Title' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Sort all saved windows by: URL' })).toBeDisabled();
     expect(
       within(screen.getByRole('article', { name: 'Research' })).getByRole('button', {
-        name: 'Sort Research by: Title',
+        name: 'Sort Research by: URL',
       }),
     ).toBeDisabled();
   });
@@ -610,7 +619,7 @@ describe('SavedWindowsPage', () => {
     expect(headingName?.nextElementSibling).toBe(collapseState);
     expect(collapse.parentElement).toBe(header);
     expect(collapse).not.toContainElement(
-      within(card).getByRole('button', { name: 'Sort Research by: Title' }),
+      within(card).getByRole('button', { name: 'Sort Research by: URL' }),
     );
     expect(within(card).getByRole('button', { name: 'Restore Research' })).toHaveTextContent(
       'Restore',
@@ -660,7 +669,7 @@ describe('SavedWindowsPage', () => {
     expect(selectFiltered).toHaveClass('compact-toolbar-action');
     expect(selectFiltered.querySelector('.toolbar-count')).toHaveAttribute('aria-hidden', 'true');
     const sortAllButton = screen.getByRole('button', {
-      name: 'Sort all saved windows by Title, A to Z',
+      name: 'Sort all saved windows by URL, A to Z',
     });
     expect(sortAllButton.querySelector('.sort-action-label')).toHaveTextContent('Sort all');
 
@@ -1792,6 +1801,212 @@ describe('SavedWindowsPage', () => {
     expect(await screen.findByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('Restored "Plan" to "Research".')).toBeInTheDocument();
     expect(search).toHaveValue('plan');
+  });
+
+  it.each(['title', 'url', 'row'] as const)(
+    'removes a saved tab by middle-clicking its %s and supports Undo without opening it',
+    async (targetKind) => {
+      const user = userEvent.setup();
+      const savedWindow = createSavedWindow();
+      const service = createService([savedWindow]);
+      render(<SavedWindowsPage service={service} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
+      const title = screen.getByText('Plan');
+      const row = title.closest('.saved-tab-row') as HTMLElement;
+      const target =
+        targetKind === 'title'
+          ? title
+          : targetKind === 'url'
+            ? within(row).getByText('docs.example.com/plan')
+            : row;
+      const search = screen.getByRole('searchbox', {
+        name: 'Filter saved windows, groups, and tabs',
+      });
+      search.focus();
+
+      expect(fireEvent.mouseDown(target, { button: 1 })).toBe(false);
+      expect(service.removeSelectedTabs).not.toHaveBeenCalled();
+      expect(
+        fireEvent(
+          target,
+          new MouseEvent('auxclick', { bubbles: true, button: 1, cancelable: true }),
+        ),
+      ).toBe(false);
+
+      expect(await screen.findByText('Removed "Plan" from "Research".')).toBeInTheDocument();
+      expect(service.removeSelectedTabs).toHaveBeenCalledExactlyOnceWith([
+        {
+          expectedTab: savedWindow.tabs[1],
+          expectedWindowUpdatedAt: savedWindow.updatedAt,
+          tabOrder: 1,
+          windowId: savedWindow.id,
+        },
+      ]);
+      expect(service.openTab).not.toHaveBeenCalled();
+      expect(screen.queryByText('Plan')).not.toBeInTheDocument();
+      expect(search).toHaveFocus();
+
+      await user.click(screen.getByRole('button', { name: 'Undo' }));
+      expect(await screen.findByText('Plan')).toBeInTheDocument();
+      expect(service.undoMutation).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ['close button', 'success'],
+    ['middle click', 'success'],
+    ['close button', 'failure'],
+    ['middle click', 'failure'],
+  ] as const)(
+    'keeps saved cards stable and locked during %s removal through %s',
+    async (trigger, outcome) => {
+      const user = userEvent.setup();
+      const service = createService([
+        createSavedWindow(),
+        createSavedWindow({
+          id: 'saved-2',
+          name: 'Reading',
+          groups: [],
+          tabs: [
+            {
+              active: true,
+              order: 0,
+              pinned: false,
+              title: 'Notes',
+              url: 'file:///tmp/notes.txt',
+            },
+          ],
+        }),
+      ]);
+      const removeGate = createDeferred<void>();
+      const originalRemove = service.removeSelectedTabs;
+      vi.mocked(service.removeSelectedTabs).mockImplementationOnce(async (references) => {
+        await removeGate.promise;
+        if (outcome === 'failure') {
+          throw new Error('Saved storage is busy.');
+        }
+        return originalRemove(references);
+      });
+      render(<SavedWindowsPage service={service} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
+      await user.click(screen.getByRole('button', { name: 'Expand Reading' }));
+      const cards = screen.getAllByRole('article');
+      const removeInbox = screen.getByRole('button', {
+        name: 'Remove Inbox from Research, saved tab 1',
+      });
+      const removePlan = screen.getByRole('button', {
+        name: 'Remove Plan from Research, saved tab 2',
+      });
+      const selection = screen.getByRole('checkbox', { name: 'Select Plan in Research' });
+      const remove = async (title: string, button: HTMLElement) => {
+        if (trigger === 'close button') {
+          await user.click(button);
+        } else {
+          await user.pointer({ target: screen.getByText(title), keys: '[MouseMiddle]' });
+        }
+      };
+
+      await user.click(selection);
+      cards.forEach((card) => expect(card).not.toHaveAttribute('data-operation-locked'));
+      expect(removeInbox).toBeDisabled();
+      await remove('Inbox', removeInbox);
+      expect(service.removeSelectedTabs).not.toHaveBeenCalled();
+
+      await user.click(selection);
+      await remove('Plan', removePlan);
+      await waitFor(() => expect(removePlan).toHaveAttribute('aria-busy', 'true'));
+      cards.forEach((card, index) => {
+        expect(screen.getAllByRole('article')[index]).toBe(card);
+        expect(card).toHaveAttribute('data-operation-locked', 'true');
+        within(card)
+          .getAllByRole('checkbox')
+          .forEach((checkbox) => expect(checkbox).toBeDisabled());
+        within(card)
+          .getAllByRole('button')
+          .filter((button) => !button.classList.contains('window-collapse-button'))
+          .forEach((button) => expect(button).toBeDisabled());
+      });
+      await remove('Inbox', removeInbox);
+      expect(service.removeSelectedTabs).toHaveBeenCalledTimes(1);
+      expect(service.openTab).not.toHaveBeenCalled();
+
+      await act(async () => {
+        removeGate.resolve(undefined);
+        await removeGate.promise;
+      });
+      expect(
+        await screen.findByText(
+          outcome === 'success' ? 'Removed "Plan" from "Research".' : 'Saved storage is busy.',
+        ),
+      ).toBeInTheDocument();
+      cards.forEach((card, index) => {
+        expect(screen.getAllByRole('article')[index]).toBe(card);
+        expect(card).not.toHaveAttribute('data-operation-locked');
+      });
+      expect(removeInbox).toBeEnabled();
+      if (outcome === 'failure') {
+        expect(removePlan).toBeEnabled();
+      }
+    },
+  );
+
+  it('keeps the previous Undo notice in place while removing another saved tab', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    render(<SavedWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Remove Plan from Research, saved tab 2' }),
+    );
+    const message = await screen.findByText('Removed "Plan" from "Research".');
+    const notice = message.closest('.inline-notice');
+    const undo = screen.getByRole('button', { name: 'Undo' });
+    const removeGate = createDeferred<void>();
+    const originalRemove = service.removeSelectedTabs;
+    vi.mocked(service.removeSelectedTabs).mockImplementationOnce(async (references) => {
+      await removeGate.promise;
+      return originalRemove(references);
+    });
+
+    await user.pointer({ target: screen.getByText('Inbox'), keys: '[MouseMiddle]' });
+    expect(message).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBe(undo);
+    expect(undo).toBeDisabled();
+
+    await act(async () => {
+      removeGate.resolve(undefined);
+      await removeGate.promise;
+    });
+    expect(
+      (
+        await screen.findByText('Removed "Inbox" from "Research". Removed the empty saved window.')
+      ).closest('.inline-notice'),
+    ).toBe(notice);
+    expect(screen.getByRole('button', { name: 'Undo' })).toBe(undo);
+    expect(undo).toBeEnabled();
+  });
+
+  it('keeps left-click opening and ignores right clicks and saved group middle clicks', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    render(<SavedWindowsPage service={service} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Expand Research' }));
+    await user.pointer({ target: screen.getByText('Planning'), keys: '[MouseMiddle]' });
+    await user.pointer({ target: screen.getByText('Plan'), keys: '[MouseRight]' });
+    expect(service.removeSelectedTabs).not.toHaveBeenCalled();
+    expect(service.openTab).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Open Plan in a new tab' }));
+    expect(service.openTab).toHaveBeenCalledExactlyOnceWith({
+      pinned: false,
+      title: 'Plan',
+      url: 'https://docs.example.com/plan',
+    });
+    expect(service.removeSelectedTabs).not.toHaveBeenCalled();
   });
 
   it('consumes palette searches for saved windows and tab groups on the current route', async () => {

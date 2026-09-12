@@ -524,6 +524,15 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   cursor: pointer;
 }
 
+.window-close-selected-button {
+  display: inline-flex;
+  width: auto;
+  flex-basis: auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+}
+
 .icon-button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--border-strong);
   background: var(--surface-hover);
@@ -4168,6 +4177,40 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 .saved-tab-copy-url-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+.window-card[data-operation-locked='true']
+  :is(
+    .toolbar-button,
+    .icon-button,
+    .sort-criterion-trigger,
+    .tab-close-button,
+    .saved-tab-copy-url-button
+  ):disabled:not([data-action-unavailable='true']),
+.window-card[data-operation-locked='true'] .saved-tab-open-button:disabled .saved-tab-open-icon,
+.window-card[data-operation-locked='true'] .tab-inline-actions .is-state-action:disabled,
+.window-card[data-operation-locked='true']
+  .tab-row:is(:hover, :focus-within)
+  .tab-inline-actions
+  .is-reveal-action:disabled {
+  opacity: 1;
+}
+
+.window-card[data-operation-locked='true'] .primary-button:disabled {
+  border-color: var(--primary-border);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.window-card[data-operation-locked='true'] .tab-close-button:disabled[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.5;
+}
+
+@media (hover: none) {
+  .window-card[data-operation-locked='true'] .tab-inline-actions .is-reveal-action:disabled {
+    opacity: 1;
+  }
 }
 
 .saved-tab-meta {
