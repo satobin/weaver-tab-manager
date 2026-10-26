@@ -1498,6 +1498,37 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   justify-self: center;
 }
 
+.tab-group-heading.has-collapse-control {
+  grid-template-columns: 34px 26px minmax(0, 1fr);
+}
+
+.tab-group-collapse-button {
+  display: grid;
+  width: 26px;
+  min-height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tab-group-collapse-button:is(:hover, :focus-visible):not(:disabled) {
+  background: color-mix(in srgb, var(--tab-group-color) 28%, var(--surface-muted));
+  color: var(--text);
+}
+
+.tab-group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-group-focus-button small {
+  flex-shrink: 0;
+}
+
 .tab-group-focus-button,
 .saved-group-copy {
   display: flex;
@@ -1517,6 +1548,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
 }
 
 .tab-group-focus-button {
+  padding-left: 4px;
   cursor: grab;
 }
 
@@ -1580,6 +1612,10 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   grid-template-columns: 22px 30px minmax(0, 1fr) auto 34px;
   align-items: stretch;
   background: var(--surface);
+}
+
+.tab-row[hidden] {
+  display: none;
 }
 
 .tab-list-item[class*='group-color-'] .tab-row {

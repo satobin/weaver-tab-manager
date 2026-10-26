@@ -325,6 +325,10 @@ export function ActiveWindowsPage({
   const [collapsedWindowIds, setCollapsedWindowIds] = useState<ReadonlySet<number>>(
     () => new Set(),
   );
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<ReadonlySet<number>>(() => new Set());
+  const [filteredCollapsedGroupIds, setFilteredCollapsedGroupIds] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const [query, setQuery] = useState('');
   const [sortCriterion, setSortCriterion] = useState<SortCriterion>('url');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -337,6 +341,8 @@ export function ActiveWindowsPage({
     ReadonlyMap<number, TabSortOptions>
   >(() => new Map());
   const [duplicatePreviewMode, setDuplicatePreviewMode] = useState(false);
+  const displayedCollapsedGroupIds =
+    query.trim() || duplicatePreviewMode ? filteredCollapsedGroupIds : collapsedGroupIds;
   const [paletteViewRequest, setPaletteViewRequest] = useState<PaletteViewRequest | null>(null);
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [mergeDialogHorizontalOffset, setMergeDialogHorizontalOffset] = useState(0);
@@ -725,6 +731,7 @@ export function ActiveWindowsPage({
           pendingWindowCloses.has(activeWindow.id)
             ? false
             : collapsedWindowIds.has(activeWindow.id),
+          displayedCollapsedGroupIds,
         ),
     );
 
@@ -740,6 +747,7 @@ export function ActiveWindowsPage({
     );
   }, [
     collapsedWindowIds,
+    displayedCollapsedGroupIds,
     displayedWindowsById,
     duplicatePreviewMode,
     layoutWindows,
@@ -1183,6 +1191,20 @@ export function ActiveWindowsPage({
     });
   };
 
+  const toggleGroupCollapsed = (groupId: number) => {
+    const setCollapsed =
+      query.trim() || duplicatePreviewMode ? setFilteredCollapsedGroupIds : setCollapsedGroupIds;
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
   const closeMergeDialog = useCallback((restoreFocus = true) => {
     setMergeDialogOpen(false);
     if (restoreFocus) {
@@ -1339,6 +1361,7 @@ export function ActiveWindowsPage({
     clearSelection();
     setQuery('');
     setDuplicatePreviewMode(true);
+    setFilteredCollapsedGroupIds(new Set());
   }, [clearSelection, closeMergeDialog]);
 
   useEffect(() => {
@@ -1381,6 +1404,7 @@ export function ActiveWindowsPage({
       clearSelection();
     }
     setQuery(nextQuery);
+    setFilteredCollapsedGroupIds(new Set());
   };
 
   const toggleFilteredSelection = () => {
@@ -2729,6 +2753,7 @@ export function ActiveWindowsPage({
                       <WindowCard
                         allWindowTabs={allWindowTabs}
                         collapsed={windowClosing ? false : collapsedWindowIds.has(window.id)}
+                        collapsedGroupIds={displayedCollapsedGroupIds}
                         closing={windowClosing}
                         closingTabIds={closingTabIds}
                         disabled={operationLabel !== null}
@@ -2763,6 +2788,7 @@ export function ActiveWindowsPage({
                         onSetTabsSelected={setTabsSelected}
                         onToggleTabSelected={toggleTabSelected}
                         onToggleCollapsed={toggleWindowCollapsed}
+                        onToggleGroupCollapsed={toggleGroupCollapsed}
                         onFocusWindow={(windowId) => void focusWindow(windowId)}
                         onFocusTab={(windowId, tabId) => void focusTab(windowId, tabId)}
                         onPinTab={(tabId) => void setTabPinned(tabId, true)}

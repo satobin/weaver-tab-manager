@@ -13,6 +13,7 @@ function createProps(
   return {
     allWindowTabs: window.tabs,
     collapsed: false,
+    collapsedGroupIds: new Set(),
     disabled: false,
     draggedGroupId: null,
     draggedTabIds: new Set(),
@@ -38,6 +39,7 @@ function createProps(
     onTabDragStart: vi.fn(),
     onTabDrop: vi.fn(),
     onToggleCollapsed: vi.fn(),
+    onToggleGroupCollapsed: vi.fn(),
     onToggleTabSelected: vi.fn(),
     onUnpinTab: vi.fn(),
     onUnsuspendTab: vi.fn(),
@@ -52,6 +54,88 @@ function createProps(
     ...overrides,
   };
 }
+
+describe('WindowCard collapsed groups', () => {
+  function createCollapsedGroupProps(overrides: Partial<ComponentProps<typeof WindowCard>> = {}) {
+    const tabs = [
+      createManagedTab({ groupId: 7, index: 2 }),
+      createManagedTab({ groupId: 7, id: 102, index: 3, title: 'Hidden last tab' }),
+    ];
+    return createProps({
+      allWindowTabs: tabs,
+      collapsedGroupIds: new Set([7]),
+      draggedTabIds: new Set([201]),
+      window: createManagedWindow({
+        groups: [{ collapsed: false, color: 'blue', id: 7, title: 'Research', windowId: 1 }],
+        tabs: [tabs[0]!],
+      }),
+      ...overrides,
+    });
+  }
+
+  it('drops on a collapsed heading using the full group even without a preceding drag-over', () => {
+    const props = createCollapsedGroupProps();
+    render(<WindowCard {...props} />);
+    const heading = screen.getByRole('button', { name: 'Focus first tab in Research' });
+    fireEvent.drop(heading, { clientY: -1 });
+    expect(props.onTabDrop).toHaveBeenCalledExactlyOnceWith({
+      browserIndex: 4,
+      groupId: 7,
+      visualIndex: 0,
+      windowId: 1,
+    });
+    expect(screen.queryByRole('button', { name: 'Focus Example tab' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [-1, 2, 0],
+    [1, 4, 1],
+  ])(
+    'keeps whole-group drops outside the collapsed target at pointer Y %s',
+    (clientY, browserIndex, visualIndex) => {
+      const props = createCollapsedGroupProps({ draggedGroupId: 8 });
+      render(<WindowCard {...props} />);
+      const heading = screen.getByRole('button', { name: 'Focus first tab in Research' });
+      const dataTransfer = { dropEffect: 'none' };
+      for (const createDragEvent of [createEvent.dragOver, createEvent.drop]) {
+        const event = createDragEvent(heading, { dataTransfer });
+        Object.defineProperty(event, 'clientY', { value: clientY });
+        fireEvent(heading, event);
+      }
+      const target = { browserIndex, groupId: null, visualIndex, windowId: 1 };
+      expect(props.onTabDragOver).toHaveBeenCalledWith(target, expect.anything());
+      expect(props.onTabDrop).toHaveBeenCalledExactlyOnceWith(target);
+    },
+  );
+
+  it.each([{ disabled: true }, { closing: true }])(
+    'blocks collapse and drop while unavailable: %j',
+    async (overrides) => {
+      const user = userEvent.setup();
+      const props = createCollapsedGroupProps(overrides);
+      render(<WindowCard {...props} />);
+      const toggle = screen.getByRole('button', { name: 'Expand Research tab group' });
+      expect(toggle).toBeDisabled();
+      await user.click(toggle);
+      const heading = screen.getByRole('button', { name: 'Focus first tab in Research' });
+      fireEvent.dragOver(heading, { dataTransfer: {} });
+      fireEvent.drop(heading);
+      expect(props.onToggleGroupCollapsed).not.toHaveBeenCalled();
+      expect(props.onTabDrop).not.toHaveBeenCalled();
+      expect(props.onTabDragOver).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not start a first-tab drag from the disclosure control', () => {
+    const props = createCollapsedGroupProps({ collapsedGroupIds: new Set() });
+    render(<WindowCard {...props} />);
+    const toggle = screen.getByRole('button', { name: 'Collapse Research tab group' });
+    const event = createEvent.dragStart(toggle, { dataTransfer: { setData: vi.fn() } });
+    fireEvent(toggle, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(props.onTabDragStart).not.toHaveBeenCalled();
+  });
+});
 
 describe('WindowCard middle-click closing', () => {
   it.each([

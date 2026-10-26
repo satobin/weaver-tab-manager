@@ -27,6 +27,7 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
   return {
     allWindowTabs: window.tabs,
     collapsed,
+    collapsedGroupIds: new Set(),
     disabled: false,
     draggedGroupId: null,
     draggedTabIds: new Set(),
@@ -52,6 +53,7 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
     onTabDragStart: vi.fn(),
     onTabDrop: vi.fn(),
     onToggleCollapsed: vi.fn(),
+    onToggleGroupCollapsed: vi.fn(),
     onToggleTabSelected: vi.fn(),
     onUnpinTab: vi.fn(),
     onUnsuspendTab: vi.fn(),

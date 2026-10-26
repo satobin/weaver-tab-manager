@@ -1105,7 +1105,10 @@ describe('ActiveWindowsPage', () => {
     expect(summary.querySelector('.window-summary-compact')).not.toBeInTheDocument();
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Focus first tab in Planning' })).toBeInTheDocument();
-    expect(screen.getByText('Collapsed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse Planning tab group' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
     expect(
       screen.getByRole('button', { name: 'Unpin Quarterly plan', pressed: true }),
     ).toBeInTheDocument();
@@ -3419,6 +3422,100 @@ describe('ActiveWindowsPage', () => {
 
     await waitFor(() => expect(service.moveTab).toHaveBeenCalledWith(201, 1, 0, 7));
     expect(service.moveTabsToNewWindow).not.toHaveBeenCalled();
+  });
+
+  it('collapses a group with keyboard controls while retaining selection and whole-group dragging', async () => {
+    const user = userEvent.setup();
+    const service = createService();
+    render(<ActiveWindowsPage service={service} />);
+    const collapse = await screen.findByRole('button', { name: 'Collapse Planning tab group' });
+    collapse.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByRole('button', { name: 'Expand Planning tab group' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('button', { name: 'Focus Quarterly plan' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Focus Issue tracker' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Focus Reference' })).toBeVisible();
+    expect(service.focusTab).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('checkbox', { name: 'Select all tabs in Planning' }));
+    expect(screen.getByRole('button', { name: 'Close 2 selected tabs in Window 1' })).toBeEnabled();
+
+    const heading = screen.getByRole('button', { name: 'Focus first tab in Planning' });
+    const destination = screen.getByRole('button', { name: 'Focus Reference' }).closest('li')!;
+    const dataTransfer = { setData: vi.fn() };
+    fireEvent.dragStart(heading, { dataTransfer });
+    fireEvent.dragOver(destination, { clientY: -1, dataTransfer });
+    fireEvent.drop(destination.closest('ul')!, { dataTransfer });
+    fireEvent.dragEnd(heading, { dataTransfer });
+    await waitFor(() => expect(service.moveTabGroup).toHaveBeenCalledWith(7, 2, 0));
+
+    const expand = await screen.findByRole('button', { name: 'Expand Planning tab group' });
+    await waitFor(() => expect(expand).toBeEnabled());
+    expand.focus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('button', { name: 'Focus Quarterly plan' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Focus Issue tracker' })).toBeVisible();
+  });
+
+  it('reveals filtered group matches and restores normal collapse state after clearing the filter', async () => {
+    const user = userEvent.setup();
+    render(<ActiveWindowsPage service={createService()} />);
+    await user.click(await screen.findByRole('button', { name: 'Collapse Planning tab group' }));
+    const filter = screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' });
+    await user.type(filter, 'Quarterly');
+    expect(screen.getByRole('button', { name: 'Focus Quarterly plan' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Collapse Planning tab group' }));
+    expect(screen.queryByRole('button', { name: 'Focus Quarterly plan' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Expand Planning tab group' }));
+    expect(screen.getByRole('button', { name: 'Focus Quarterly plan' })).toBeVisible();
+    await user.clear(filter);
+    expect(screen.getByRole('button', { name: 'Expand Planning tab group' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Focus Quarterly plan' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { filtered: false, sameWindow: false },
+    { filtered: true, sameWindow: false },
+    { filtered: false, sameWindow: true },
+    { filtered: true, sameWindow: true },
+  ])('appends a dropped tab to a collapsed group: %j', async ({ filtered, sameWindow }) => {
+    const user = userEvent.setup();
+    const service = createService();
+    const snapshot = await service.loadSnapshot();
+    snapshot.windows[0]!.tabs[0]!.title = 'Matching plan';
+    snapshot.windows[1]!.tabs[0]!.title = 'Matching reference';
+    if (sameWindow) {
+      const source = snapshot.windows[1]!.tabs.pop()!;
+      source.windowId = 1;
+      source.index = 2;
+      snapshot.windows[0]!.tabs.push(source);
+      snapshot.windows.pop();
+    }
+    render(<ActiveWindowsPage service={service} />);
+    await screen.findByRole('button', { name: 'Focus Matching plan' });
+    if (filtered) {
+      await user.type(
+        screen.getByRole('searchbox', { name: 'Filter tabs by title or URL' }),
+        'Matching',
+      );
+    }
+    await user.click(screen.getByRole('button', { name: 'Collapse Planning tab group' }));
+    const heading = screen.getByRole('button', { name: 'Focus first tab in Planning' });
+    const source = screen.getByRole('button', { name: 'Focus Matching reference' });
+    const dataTransfer = { setData: vi.fn() };
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(heading, { clientY: -1, dataTransfer });
+    expect(heading.closest('li')).toHaveClass('is-tab-group-drop-target');
+    expect(screen.queryByRole('button', { name: 'Focus Matching plan' })).not.toBeInTheDocument();
+    fireEvent.drop(heading, { clientY: -1, dataTransfer });
+    fireEvent.dragEnd(source, { dataTransfer });
+
+    await waitFor(() => expect(service.moveTab).toHaveBeenCalledExactlyOnceWith(201, 1, 2, 7));
+    expect(service.moveTabsToNewWindow).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Expand Planning tab group' })).toBeVisible();
   });
 
   it('tells users to unpin first when a pinned tab is dropped on a group', async () => {

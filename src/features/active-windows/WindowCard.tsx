@@ -32,6 +32,7 @@ import { type SortCriterion, type SortDirection, type TabSortOptions } from './t
 interface WindowCardProps {
   allWindowTabs: readonly ManagedTab[];
   collapsed: boolean;
+  collapsedGroupIds: ReadonlySet<number>;
   closing?: boolean;
   closingTabIds?: ReadonlySet<number>;
   disabled: boolean;
@@ -69,6 +70,7 @@ interface WindowCardProps {
   ) => void;
   onToggleTabSelected: (selection: ToggleTabSelection) => void;
   onToggleCollapsed: (windowId: number) => void;
+  onToggleGroupCollapsed: (groupId: number) => void;
   selectedGroupIds: ReadonlySet<number>;
   selectedTabIds: ReadonlySet<number>;
   showTabUrls: boolean;
@@ -98,6 +100,7 @@ function pluralizeTabs(count: number) {
 export function WindowCard({
   allWindowTabs,
   collapsed,
+  collapsedGroupIds,
   closing = false,
   closingTabIds,
   disabled: disabledProp,
@@ -132,6 +135,7 @@ export function WindowCard({
   onSortWindow,
   onToggleTabSelected,
   onToggleCollapsed,
+  onToggleGroupCollapsed,
   selectedGroupIds,
   selectedTabIds,
   showTabUrls,
@@ -496,6 +500,10 @@ export function WindowCard({
             const group = tab.groupId === null ? undefined : groupsById.get(tab.groupId);
             const beginsGroup =
               group !== undefined && window.tabs[index - 1]?.groupId !== tab.groupId;
+            const groupCollapsed = group !== undefined && collapsedGroupIds.has(group.id);
+            if (groupCollapsed && !beginsGroup) {
+              return null;
+            }
             const groupTabs = group ? (groupTabsById.get(group.id) ?? [tab]) : [];
             const completeGroupTabs = group ? (completeGroupTabsById.get(group.id) ?? [tab]) : [];
             const groupTabIds = groupTabs.map((groupTab) => groupTab.id);
@@ -543,7 +551,21 @@ export function WindowCard({
               tab.discarded || tab.unloaded ? 'Reloads when opened.' : 'Resumes when opened.';
 
             const dropBefore =
-              dropTarget?.windowId === window.id && dropTarget.visualIndex === index;
+              dropTarget?.windowId === window.id &&
+              dropTarget.visualIndex === index &&
+              !(groupCollapsed && dropTarget.groupId === group?.id);
+            const getGroupHeadingDropTarget = (insertAfter: boolean): TabDropTarget => ({
+              browserIndex:
+                draggedGroupId === null || insertAfter
+                  ? (completeGroupTabs.at(-1)?.index ?? tab.index) + 1
+                  : (completeGroupTabs[0]?.index ?? tab.index),
+              groupId: draggedGroupId === null ? (group?.id ?? null) : null,
+              visualIndex:
+                draggedGroupId !== null && insertAfter
+                  ? (visibleGroupRangesById.get(group?.id ?? -1)?.last ?? index) + 1
+                  : index,
+              windowId: window.id,
+            });
 
             return (
               <Fragment key={tab.id}>
@@ -565,11 +587,11 @@ export function WindowCard({
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  draggable={!disabled}
+                  draggable={!disabled && !groupCollapsed}
                   onDragStart={(event) => {
                     if (
                       (event.target as Element).closest(
-                        '.tab-close-button, .tab-pin-button, .tab-suspended-button, .selection-checkbox',
+                        '.tab-close-button, .tab-pin-button, .tab-suspended-button, .selection-checkbox, .tab-group-heading',
                       )
                     ) {
                       event.preventDefault();
@@ -588,7 +610,7 @@ export function WindowCard({
                     const bounds = event.currentTarget.getBoundingClientRect();
                     const insertAfter = event.clientY >= bounds.top + bounds.height / 2;
                     if (draggedGroupId !== null && group) {
-                      const fullGroupTabs = groupTabsById.get(group.id) ?? [tab];
+                      const fullGroupTabs = completeGroupTabs;
                       const visibleRange = visibleGroupRangesById.get(group.id) ?? {
                         first: index,
                         last: index,
@@ -618,7 +640,37 @@ export function WindowCard({
                   }}
                 >
                   {beginsGroup ? (
-                    <div className="tab-group-heading">
+                    <div
+                      className="tab-group-heading has-collapse-control"
+                      onDragOver={(event) => {
+                        if (disabled || draggedTabIds.size === 0) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.dataTransfer.dropEffect = 'move';
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        onTabDragOver(
+                          getGroupHeadingDropTarget(
+                            event.clientY >= bounds.top + bounds.height / 2,
+                          ),
+                          { x: event.clientX, y: event.clientY },
+                        );
+                      }}
+                      onDrop={(event) => {
+                        if (disabled || draggedTabIds.size === 0) {
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        onTabDrop(
+                          getGroupHeadingDropTarget(
+                            event.clientY >= bounds.top + bounds.height / 2,
+                          ),
+                        );
+                      }}
+                    >
                       <SelectionCheckbox
                         ariaLabel={`Select all tabs in ${groupLabel}`}
                         checked={groupSelectedAsUnit}
@@ -626,6 +678,21 @@ export function WindowCard({
                         indeterminate={!groupSelectedAsUnit && groupSelectedCount > 0}
                         onChange={(checked) => onSetGroupSelected(group.id, groupTabIds, checked)}
                       />
+                      <button
+                        className="tab-group-collapse-button"
+                        type="button"
+                        aria-label={`${groupCollapsed ? 'Expand' : 'Collapse'} ${groupLabel} tab group`}
+                        aria-expanded={!groupCollapsed}
+                        disabled={disabled}
+                        draggable={false}
+                        onClick={() => onToggleGroupCollapsed(group.id)}
+                      >
+                        {groupCollapsed ? (
+                          <ChevronRight aria-hidden="true" size={14} />
+                        ) : (
+                          <ChevronDown aria-hidden="true" size={14} />
+                        )}
+                      </button>
                       <button
                         className="tab-group-focus-button"
                         type="button"
@@ -665,14 +732,15 @@ export function WindowCard({
                         }}
                       >
                         <span className="tab-group-color-dot" aria-hidden="true" />
-                        <span>{groupLabel}</span>
-                        {group.collapsed ? <small>Collapsed</small> : null}
+                        <span className="tab-group-title">{groupLabel}</span>
+                        {groupCollapsed ? <small>{pluralizeTabs(groupTabs.length)}</small> : null}
                       </button>
                     </div>
                   ) : null}
 
                   <div
                     className="tab-row"
+                    hidden={groupCollapsed}
                     onMouseDownCapture={(event) => {
                       if (event.button === 1) {
                         event.preventDefault();

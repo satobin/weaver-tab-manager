@@ -55,6 +55,7 @@ export function estimateWindowCardHeight(
   window: ManagedWindow,
   showTabUrls: boolean,
   collapsed = false,
+  collapsedGroupIds?: ReadonlySet<number>,
 ): number {
   if (collapsed) {
     return 88;
@@ -64,8 +65,10 @@ export function estimateWindowCardHeight(
       tab.groupId !== null && window.tabs[index - 1]?.groupId !== tab.groupId ? count + 1 : count,
     0,
   );
-  const tabRowsHeight =
-    window.tabs.length * (showTabUrls ? TAB_ROW_HEIGHT : COMPACT_TAB_ROW_HEIGHT);
+  const visibleTabCount = window.tabs.filter(
+    (tab) => tab.groupId === null || !collapsedGroupIds?.has(tab.groupId),
+  ).length;
+  const tabRowsHeight = visibleTabCount * (showTabUrls ? TAB_ROW_HEIGHT : COMPACT_TAB_ROW_HEIGHT);
   return Math.max(
     88,
     WINDOW_CARD_HEADER_HEIGHT + tabRowsHeight + groupHeaderCount * GROUP_HEADER_HEIGHT,
