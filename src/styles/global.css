@@ -4522,7 +4522,7 @@ h1.programmatic-focus-target[tabindex='-1']:focus {
   }
 }
 
-@container window-card (max-width: 440px) {
+@container window-card (max-width: 500px) {
   .window-sort-controls .sort-action-button {
     width: 30px;
     flex-basis: 30px;

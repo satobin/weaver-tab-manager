@@ -5,6 +5,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   CopyX,
+  ChevronDown,
+  Group,
   Eye,
   ListChecks,
   Merge,
@@ -44,6 +46,15 @@ import {
 import { useActiveWindows } from '../features/active-windows/useActiveWindows';
 import { useTabSelection } from '../features/active-windows/useTabSelection';
 import { SortCriterionMenu } from '../features/active-windows/SortCriterionMenu';
+import {
+  TabGroupPopover,
+  type GroupPopoverAction,
+  type GroupPopoverSession,
+} from '../features/active-windows/TabGroupPopover';
+import {
+  groupDetailsMatch,
+  groupSelectionMatches,
+} from '../features/active-windows/tabGroupManagement';
 import {
   type TabDragPayload,
   type TabDropTarget,
@@ -354,6 +365,14 @@ export function ActiveWindowsPage({
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
+  const [groupSession, setGroupSession] = useState<
+    (GroupPopoverSession & { anchor: HTMLButtonElement }) | null
+  >(null);
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [groupBusy, setGroupBusy] = useState(false);
+  const groupTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const groupSelectionButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingGroupFocusRef = useRef(false);
   const [windowCloseCompletionNotices, setWindowCloseCompletionNotices] = useState<
     readonly WindowCloseCompletionNotice[]
   >([]);
@@ -609,6 +628,30 @@ export function ActiveWindowsPage({
     );
   }, [actionSelectedTabIdsInOrder, snapshot]);
   const actionSelectedCount = actionSelectedTabIdsInOrder.length;
+  const actionSelectedTabs = useMemo(() => {
+    const ids = new Set(actionSelectedTabIdsInOrder);
+    return (
+      snapshot?.windows.flatMap((window) => window.tabs.filter((tab) => ids.has(tab.id))) ?? []
+    );
+  }, [actionSelectedTabIdsInOrder, snapshot]);
+  const groupSelectionRequirement = duplicatePreviewMode
+    ? 'Exit duplicate preview to manage tab groups.'
+    : actionSelectedTabs.length === 0
+      ? 'Select tabs to create a group or change their group.'
+      : null;
+  const groupWindow = snapshot?.windows.find((window) => window.id === groupSession?.windowId);
+  const currentEditGroup =
+    groupSession?.kind === 'edit'
+      ? groupWindow?.groups.find((group) => group.id === groupSession.group.id)
+      : undefined;
+  const groupSessionStale =
+    !groupWindow ||
+    pendingWindowCloses.has(groupWindow.id) ||
+    duplicatePreviewMode ||
+    (groupSession?.kind === 'selection'
+      ? !groupSelectionMatches(actionSelectedTabs, groupSession.tabs)
+      : groupSession?.kind === 'edit' &&
+        (!currentEditGroup || !groupDetailsMatch(currentEditGroup, groupSession.group)));
   const actionSelectedGroupIdsInOrder = useMemo(() => {
     if (!duplicatePreviewMode) {
       return selectedGroupIdsInOrder;
@@ -1153,6 +1196,111 @@ export function ActiveWindowsPage({
   const finishOperation = () => {
     operationInFlightRef.current = false;
     setOperationLabel(null);
+  };
+
+  const closeGroupPopover = useCallback((restoreFocus = true) => {
+    if (operationInFlightRef.current) return;
+    pendingGroupFocusRef.current = restoreFocus;
+    setGroupSession(null);
+    setGroupError(null);
+  }, []);
+
+  useEffect(() => {
+    if (groupSession || operationLabel || !pendingGroupFocusRef.current) return;
+    pendingGroupFocusRef.current = false;
+    const trigger = groupTriggerRef.current;
+    const target =
+      trigger?.isConnected && !trigger.disabled ? trigger : groupSelectionButtonRef.current;
+    target?.focus({ preventScroll: true });
+  }, [groupSession, operationLabel]);
+
+  const submitGroupAction = async (action: GroupPopoverAction) => {
+    if (
+      action.kind === 'create' &&
+      (pendingWindowCloses.has(action.windowId) ||
+        !snapshot?.windows.some((window) => window.id === action.windowId))
+    ) {
+      setGroupError(
+        'The destination window is unavailable or closing. Close this panel and reopen it to create a group.',
+      );
+      return;
+    }
+    if (action.kind === 'add') {
+      const destinationWindow = snapshot?.windows.find(
+        (window) => window.id === action.group.windowId,
+      );
+      const destinationGroup = destinationWindow?.groups.find(
+        (group) => group.id === action.group.id,
+      );
+      if (
+        pendingWindowCloses.has(action.group.windowId) ||
+        !destinationGroup ||
+        !groupDetailsMatch(destinationGroup, action.group)
+      ) {
+        setGroupError(
+          'The destination group changed or its window is closing. Choose another group or reopen this panel.',
+        );
+        return;
+      }
+    }
+    if (!groupSession || groupSessionStale || !beginOperation('Updating tab group')) return;
+    setGroupBusy(true);
+    setGroupError(null);
+    const individualRemoval = action.kind === 'remove' && action.groupId !== undefined;
+    let complete = false;
+    try {
+      if (groupSession.kind === 'edit' && action.kind === 'edit') {
+        await service.updateTabGroup(groupSession.group, action.details);
+        setOperationNotice('Updated the group name and color.');
+      } else if (groupSession.kind === 'selection' && action.kind !== 'edit') {
+        const result =
+          action.kind === 'create'
+            ? await service.createTabGroup(groupSession.tabs, action.details, action.windowId)
+            : action.kind === 'add'
+              ? await service.addTabsToGroup(groupSession.tabs, action.group)
+              : await service.removeTabsFromGroups(
+                  action.groupId === undefined
+                    ? groupSession.tabs
+                    : groupSession.tabs.filter((tab) => tab.groupId === action.groupId),
+                );
+        selection.setTabs(result.affectedTabIds, false);
+        setSelectedGroupIds(new Set());
+        const failureMessage = summarizeFailures('updated', result.failures, result.warnings);
+        if (individualRemoval) {
+          const affectedIds = new Set(result.affectedTabIds);
+          const remainingTabs = groupSession.tabs.filter((tab) => !affectedIds.has(tab.id));
+          setGroupSession((current) =>
+            current === groupSession
+              ? {
+                  ...current,
+                  tabs: remainingTabs,
+                  windowId: remainingTabs[0]?.windowId ?? current.windowId,
+                }
+              : current,
+          );
+          setGroupError(failureMessage);
+        } else setOperationError(failureMessage);
+        if (result.affectedTabIds.length > 0) {
+          setOperationNotice(
+            action.kind === 'remove'
+              ? `Removed ${pluralize(result.affectedTabIds.length, 'tab')} from groups. Tabs remain open.`
+              : `${pluralize(result.affectedTabIds.length, 'tab')} ${result.affectedTabIds.length === 1 ? 'is' : 'are'} now in ${action.kind === 'create' ? 'the new group' : `“${action.group.title || 'Tab group'}”`}.`,
+          );
+        }
+      } else {
+        return;
+      }
+      complete = true;
+    } catch (error) {
+      setGroupError(
+        error instanceof Error ? error.message : 'The browser could not update the group.',
+      );
+    } finally {
+      await refresh();
+      setGroupBusy(false);
+      finishOperation();
+      if (complete && !individualRemoval) closeGroupPopover();
+    }
   };
 
   const restoreTabActionFocus = (tabId: number, action: 'pin' | 'suspend') => {
@@ -2452,6 +2600,48 @@ export function ActiveWindowsPage({
           {actionPortalTarget === undefined ? windowActionControls : null}
 
           <Tooltip
+            content={
+              groupSelectionRequirement ?? 'Create a group or change the selected tabs’ group'
+            }
+            relationship="none"
+          >
+            <button
+              ref={groupSelectionButtonRef}
+              className="toolbar-button compact-toolbar-action toolbar-secondary-action tab-group-selection-button"
+              type="button"
+              aria-label={`Group ${pluralize(actionSelectedCount, 'selected tab')}`}
+              aria-haspopup="dialog"
+              aria-expanded={groupSession?.kind === 'selection'}
+              aria-disabled={groupSelectionRequirement !== null || operationLabel !== null}
+              onClick={(event) => {
+                if (groupSelectionRequirement || operationInFlightRef.current) return;
+                if (groupSession?.kind === 'selection') {
+                  closeGroupPopover();
+                  return;
+                }
+                groupTriggerRef.current = event.currentTarget;
+                setGroupError(null);
+                setMergeDialogOpen(false);
+                setGroupSession({
+                  kind: 'selection',
+                  tabs: actionSelectedTabs,
+                  windowId: actionSelectedTabs[0]!.windowId,
+                  anchor: event.currentTarget,
+                });
+              }}
+            >
+              <Group size={16} aria-hidden="true" />
+              <span className="toolbar-action-label" data-tooltip-label>
+                Group selected
+              </span>
+              <span className="toolbar-count" aria-hidden="true">
+                {actionSelectedCount}
+              </span>
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </Tooltip>
+
+          <Tooltip
             content="Open selected tabs in a new window"
             onlyWhenLabelHidden
             relationship="none"
@@ -2772,6 +2962,18 @@ export function ActiveWindowsPage({
                         onCloseSelectedTabs={(windowId) => void closeSelectedTabs(windowId)}
                         onCloseTab={(tabId) => void closeTab(tabId)}
                         onCloseWindow={(windowId) => void closeWindow(windowId)}
+                        onEditGroup={(group, trigger) => {
+                          if (operationInFlightRef.current) return;
+                          groupTriggerRef.current = trigger;
+                          setGroupError(null);
+                          setMergeDialogOpen(false);
+                          setGroupSession({
+                            kind: 'edit',
+                            group,
+                            windowId: group.windowId,
+                            anchor: trigger,
+                          });
+                        }}
                         onSortCriterionChange={(criterion) =>
                           updateWindowSortSelection(window.id, { criterion })
                         }
@@ -2853,6 +3055,23 @@ export function ActiveWindowsPage({
             )}
           </div>
         )
+      ) : null}
+
+      {groupSession ? (
+        <TabGroupPopover
+          key={groupSession.kind === 'edit' ? `group-${groupSession.group.id}` : 'group-selection'}
+          anchor={groupSession.anchor}
+          busy={groupBusy}
+          error={groupError}
+          onClose={closeGroupPopover}
+          onSubmit={(action) => void submitGroupAction(action)}
+          session={groupSession}
+          stale={!groupBusy && groupSessionStale}
+          window={groupWindow}
+          destinationWindows={
+            snapshot?.windows.filter((window) => !pendingWindowCloses.has(window.id)) ?? []
+          }
+        />
       ) : null}
 
       {saveWindowTarget ? (

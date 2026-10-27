@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   GripVertical,
+  Ellipsis,
   Pause,
   Pin,
   PinOff,
@@ -22,6 +23,7 @@ import {
   isNewTabUrl,
   isTabSuspended,
   type ManagedTab,
+  type ManagedTabGroup,
   type ManagedWindow,
 } from './model';
 import { type ToggleTabSelection } from './selection';
@@ -47,6 +49,7 @@ interface WindowCardProps {
   onCloseSelectedTabs: (windowId: number) => void;
   onCloseTab: (tabId: number) => void;
   onCloseWindow: (windowId: number) => void;
+  onEditGroup: (group: ManagedTabGroup, trigger: HTMLButtonElement) => void;
   onFocusTab: (windowId: number, tabId: number) => void;
   onFocusWindow: (windowId: number) => void;
   onPinTab: (tabId: number) => void;
@@ -115,6 +118,7 @@ export function WindowCard({
   onCloseSelectedTabs,
   onCloseTab,
   onCloseWindow,
+  onEditGroup,
   onFocusTab,
   onFocusWindow,
   onPinTab,
@@ -641,7 +645,7 @@ export function WindowCard({
                 >
                   {beginsGroup ? (
                     <div
-                      className="tab-group-heading has-collapse-control"
+                      className="tab-group-heading has-collapse-control has-management-control"
                       onDragOver={(event) => {
                         if (disabled || draggedTabIds.size === 0) {
                           return;
@@ -733,8 +737,27 @@ export function WindowCard({
                       >
                         <span className="tab-group-color-dot" aria-hidden="true" />
                         <span className="tab-group-title">{groupLabel}</span>
-                        {groupCollapsed ? <small>{pluralizeTabs(groupTabs.length)}</small> : null}
+                        <small className="tab-group-management-count">
+                          {pluralizeTabs(completeGroupTabs.length)}
+                        </small>
                       </button>
+                      <Tooltip content={`Edit ${groupLabel} group`} relationship="none">
+                        <button
+                          className="tab-group-edit-button"
+                          type="button"
+                          data-group-edit-id={group.id}
+                          aria-label={`Edit ${groupLabel} group`}
+                          aria-haspopup="dialog"
+                          disabled={disabled || !windowActionsAvailable}
+                          draggable={false}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onEditGroup(group, event.currentTarget);
+                          }}
+                        >
+                          <Ellipsis size={16} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
                     </div>
                   ) : null}
 

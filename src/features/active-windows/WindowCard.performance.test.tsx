@@ -37,6 +37,7 @@ function createProps(window: ManagedWindow, collapsed: boolean): ComponentProps<
     onCloseSelectedTabs: vi.fn(),
     onCloseTab: vi.fn(),
     onCloseWindow: vi.fn(),
+    onEditGroup: vi.fn(),
     onFocusTab: vi.fn(),
     onFocusWindow: vi.fn(),
     onPinTab: vi.fn(),

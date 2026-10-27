@@ -18,6 +18,8 @@ import {
   type RestorableTab,
 } from '../features/active-windows/chromeActiveWindowsService';
 import { type DedupeRule } from '../features/deduplication/deduplication';
+import { type GroupSelectionTab } from '../features/active-windows/tabGroupManagement';
+import { type ManagedTabGroup } from '../features/active-windows/model';
 import {
   type FastSourceWindowCloseOperation,
   type SaveWindowResult,
@@ -96,6 +98,31 @@ function createService(): ActiveWindowsService {
     focusTab: vi.fn(() => Promise.resolve()),
     focusWindow: vi.fn(() => Promise.resolve()),
     loadSnapshot: vi.fn(() => Promise.resolve(snapshot)),
+    createTabGroup: vi.fn((tabs: readonly GroupSelectionTab[]) =>
+      Promise.resolve({
+        affectedTabIds: tabs.map((tab) => tab.id),
+        failures: [],
+        groupId: 70,
+        warnings: [],
+      }),
+    ),
+    addTabsToGroup: vi.fn((tabs: readonly GroupSelectionTab[], group: ManagedTabGroup) =>
+      Promise.resolve({
+        affectedTabIds: tabs.map((tab) => tab.id),
+        failures: [],
+        groupId: group.id,
+        warnings: [],
+      }),
+    ),
+    removeTabsFromGroups: vi.fn((tabs: readonly GroupSelectionTab[]) =>
+      Promise.resolve({
+        affectedTabIds: tabs.filter((tab) => tab.groupId !== null).map((tab) => tab.id),
+        failures: [],
+        groupId: null,
+        warnings: [],
+      }),
+    ),
+    updateTabGroup: vi.fn(() => Promise.resolve()),
     mergeWindows: vi.fn(() =>
       Promise.resolve({
         destinationWindowId: 1,
@@ -4030,7 +4057,11 @@ describe('ActiveWindowsPage', () => {
     expect(closingStatus).toHaveAttribute('aria-atomic', 'true');
     expect(closingStatus).toHaveAccessibleName('Window 1, 2 tabs, closing');
     await waitFor(() => expect(closingStatus).toHaveFocus());
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     const closingList = closingCard?.querySelector('.tab-list');
     expect(closingList).toHaveClass('is-closing-snapshot');
     expect(closingList).not.toHaveAttribute('hidden');
@@ -4078,7 +4109,11 @@ describe('ActiveWindowsPage', () => {
     act(() => listeners.forEach((listener) => listener()));
 
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(closingStatus).toHaveFocus();
     expect(closingCard?.querySelector('.tab-list')).toBe(closingList);
@@ -4348,7 +4383,11 @@ describe('ActiveWindowsPage', () => {
     await waitFor(() => expect(finish).toHaveBeenCalledTimes(1));
     const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     expect(closingCard).toHaveClass('is-closing');
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
     expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
@@ -4454,7 +4493,11 @@ describe('ActiveWindowsPage', () => {
     expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
     expect(within(closingCard as HTMLElement).getByText('Quarterly plan')).toBeInTheDocument();
     expect(within(closingCard as HTMLElement).getByText('Issue tracker')).toBeInTheDocument();
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(
         within(closingCard as HTMLElement)
@@ -4596,7 +4639,11 @@ describe('ActiveWindowsPage', () => {
 
     await waitFor(() => expect(service.loadSnapshot).toHaveBeenCalledTimes(3));
     const closingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(closingCard?.querySelector('.tab-list')).toHaveClass('is-closing-snapshot');
     expect(closingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
@@ -4692,10 +4739,18 @@ describe('ActiveWindowsPage', () => {
     await saveAndClose('Window 2', 'Second project');
     const firstClosingCard = screen.getByRole('heading', { name: 'Window 1' }).closest('article');
     const secondClosingCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
-    expect(within(firstClosingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(firstClosingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(firstClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(firstClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(2);
-    expect(within(secondClosingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    expect(
+      within(secondClosingCard as HTMLElement).getByText('1 tab', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(secondClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(secondClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(1);
 
@@ -4716,7 +4771,11 @@ describe('ActiveWindowsPage', () => {
       .closest('article');
     expect(remainingClosingCard).toHaveClass('is-closing');
     expect(remainingClosingCard).toHaveAttribute('aria-busy', 'true');
-    expect(within(remainingClosingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    expect(
+      within(remainingClosingCard as HTMLElement).getByText('1 tab', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(within(remainingClosingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
     expect(remainingClosingCard?.querySelectorAll('.tab-list-item')).toHaveLength(1);
     expect(screen.getByText('2 windows · 3 tabs')).toBeInTheDocument();
@@ -4831,7 +4890,11 @@ describe('ActiveWindowsPage', () => {
 
     expect(delayedNotice).toBeInTheDocument();
     expect(screen.queryByText(/1\/2|1 of 2/)).not.toBeInTheDocument();
-    expect(within(closingCard as HTMLElement).getByText('2 tabs')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('2 tabs', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     expect(closingStatus).toHaveFocus();
     const focusWindowButton = screen.getByRole('button', { name: 'Focus window' });
     expect(focusWindowButton).toHaveAttribute('title', 'Focus the original window');
@@ -5017,7 +5080,11 @@ describe('ActiveWindowsPage', () => {
     expect(finish).toHaveBeenCalledTimes(1);
     const closingCard = screen.getByRole('heading', { name: 'Window 2' }).closest('article');
     expect(within(closingCard as HTMLElement).getByText('Closing…')).toBeInTheDocument();
-    expect(within(closingCard as HTMLElement).getByText('1 tab')).toBeInTheDocument();
+    expect(
+      within(closingCard as HTMLElement).getByText('1 tab', {
+        selector: '.window-heading-summary',
+      }),
+    ).toBeInTheDocument();
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
@@ -5173,5 +5240,1110 @@ describe('ActiveWindowsPage', () => {
     expect(await within(dialog).findByText('Storage quota exceeded')).toBeInTheDocument();
     expect(savedWindowsService.saveWindow).toHaveBeenCalledWith(1, 'Project work', true);
     expect(screen.getByRole('dialog', { name: 'Save window' })).toBeInTheDocument();
+  });
+});
+
+describe('Active Windows compact group management', () => {
+  function setupGroupFlow() {
+    const service = createService();
+    const group: ManagedTabGroup = {
+      id: 7,
+      title: 'Research',
+      color: 'orange',
+      collapsed: false,
+      windowId: 1,
+    };
+    const snapshot = createActiveWindowsSnapshot({
+      windows: [
+        createManagedWindow({
+          groups: [group],
+          tabs: [
+            createManagedTab({ id: 101, title: 'Alpha' }),
+            createManagedTab({ id: 102, title: 'Beta', index: 1 }),
+            createManagedTab({ id: 103, title: 'Research tab', index: 2, groupId: 7 }),
+          ],
+        }),
+        createManagedWindow({
+          id: 2,
+          isCurrent: false,
+          focused: false,
+          groups: [{ ...group, id: 8, title: 'Other window group', windowId: 2 }],
+          tabs: [createManagedTab({ id: 201, title: 'Elsewhere', windowId: 2, groupId: 8 })],
+        }),
+      ],
+    });
+    vi.mocked(service.loadSnapshot).mockResolvedValue(snapshot);
+    return { group, service, snapshot, user: userEvent.setup() };
+  }
+
+  it('creates a named/color group from the exact selection, including filtered-out selections', async () => {
+    const { service, user } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Beta' }));
+    await user.type(screen.getByRole('searchbox'), 'Alpha');
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    const dialog = screen.getByRole('dialog', { name: 'Group selected tabs' });
+    const createToggle = within(dialog).getByRole('button', { name: 'Create new group' });
+    expect(createToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(dialog).queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 2 tabs to Research, Window 1, 1 tab in group',
+      }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 2 tabs to Other window group, Window 2, 1 tab in group',
+      }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(createToggle).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(createToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(dialog).getByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(9);
+    expect(within(dialog).queryByText(/Add to a group in/)).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 2 tabs to Research, Window 1, 1 tab in group',
+      }),
+    ).toHaveTextContent(/^Move 2 tabs to Research Window 1$/);
+    expect(within(dialog).getByText('2 selected tabs · Window 1')).toBeInTheDocument();
+    await user.type(within(dialog).getByRole('textbox', { name: 'Group name' }), 'EM Test');
+    await user.click(within(dialog).getByRole('radio', { name: 'Orange' }));
+    await user.click(createToggle);
+    expect(createToggle).toHaveFocus();
+    expect(createToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(dialog).queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
+    await user.click(createToggle);
+    expect(within(dialog).getByRole('textbox', { name: 'Group name' })).toHaveValue('EM Test');
+    expect(within(dialog).getByRole('radio', { name: 'Orange' })).toBeChecked();
+    await user.click(within(dialog).getByRole('button', { name: 'Create group' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 101, windowId: 1 }),
+        expect.objectContaining({ id: 102, windowId: 1 }),
+      ],
+      { title: 'EM Test', color: 'orange' },
+      1,
+    );
+    expect(screen.getByRole('button', { name: 'Group 0 selected tabs' })).toHaveFocus();
+  });
+
+  it('counts only selected nonmembers for each destination, including hidden selections', async () => {
+    const { service, user, snapshot, group } = setupGroupFlow();
+    const sourceWindow = snapshot.windows[0]!;
+    sourceWindow.tabs[1]!.groupId = group.id;
+    sourceWindow.groups.push({ ...group, id: 9, title: 'Design' });
+    sourceWindow.tabs.push(
+      createManagedTab({ id: 104, title: 'Design selected', index: 3, groupId: 9 }),
+      createManagedTab({ id: 105, title: 'Design unselected', index: 4, groupId: 9 }),
+    );
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    for (const title of ['Beta', 'Research tab', 'Design selected']) {
+      await user.click(screen.getByRole('checkbox', { name: `Select ${title}` }));
+    }
+    await user.type(screen.getByRole('searchbox'), 'Alpha');
+    await user.click(screen.getByRole('button', { name: 'Group 4 selected tabs' }));
+    const move = screen.getByRole('button', {
+      name: 'Move 2 tabs to Research, Window 1, 2 tabs in group',
+    });
+    expect(move).toHaveTextContent(/^Move 2 tabs to Research Window 1$/);
+    expect(move).toHaveAttribute('title', 'Move 2 tabs to Research, Window 1');
+    expect(
+      screen.getByRole('button', { name: 'Move 3 tabs to Design, Window 1, 2 tabs in group' }),
+    ).toHaveTextContent(/^Move 3 tabs to Design Window 1$/);
+    expect(screen.queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
+    await user.click(move);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.addTabsToGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 101 }),
+        expect.objectContaining({ id: 102 }),
+        expect.objectContaining({ id: 103 }),
+        expect.objectContaining({ id: 104 }),
+      ],
+      group,
+    );
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+    expect(service.updateTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('keeps an expanded creation draft through a failed save and locks the disclosure while saving', async () => {
+    const { service, user } = setupGroupFlow();
+    let failSave!: (error: Error) => void;
+    const pendingSave = new Promise<never>((_resolve, reject) => {
+      failSave = reject;
+    });
+    vi.mocked(service.createTabGroup).mockReturnValue(pendingSave);
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    const toggle = screen.getByRole('button', { name: 'Create new group' });
+    await user.click(toggle);
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft');
+    await user.click(screen.getByRole('radio', { name: 'Green' }));
+    await user.click(screen.getByRole('button', { name: 'Create group' }));
+    expect(toggle).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Move 1 tab to Research, Window 1, 1 tab in group' }),
+    ).toBeDisabled();
+    await act(async () => {
+      failSave(new Error('Cannot create group'));
+      await pendingSave.catch(() => undefined);
+    });
+    expect(await screen.findByText('Cannot create group')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Draft');
+    expect(screen.getByRole('radio', { name: 'Green' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+  });
+
+  it('edits a collapsed group without expanding it or focusing a browser tab', async () => {
+    const { service, user, group, snapshot } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('button', { name: 'Collapse Research tab group' }));
+    expect(screen.queryByRole('button', { name: 'Focus Research tab' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit Research group' }));
+    const name = screen.getByRole('textbox', { name: 'Group name' });
+    await user.clear(name);
+    await user.type(name, 'Project research');
+    vi.mocked(service.loadSnapshot).mockResolvedValue({
+      ...snapshot,
+      windows: snapshot.windows.map((window) => ({
+        ...window,
+        groups: window.groups.map((item) =>
+          item.id === group.id ? { ...item, title: 'Project research' } : item,
+        ),
+      })),
+    });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.updateTabGroup).toHaveBeenCalledExactlyOnceWith(group, {
+      title: 'Project research',
+      color: 'orange',
+    });
+    expect(
+      screen.getByRole('button', { name: 'Expand Project research tab group' }),
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Focus Research tab' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Project research group' })).toHaveFocus();
+    expect(service.focusTab).not.toHaveBeenCalled();
+  });
+
+  it('offers groups across windows and retains failed tabs after a cross-window move', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    const destination = snapshot.windows[1]!.groups[0]!;
+    vi.mocked(service.addTabsToGroup).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      const moved = changed.windows[0]!.tabs.splice(0, 2);
+      changed.windows[1]!.tabs.push(
+        ...moved.map((tab) => ({
+          ...tab,
+          windowId: 2,
+          groupId: tab.id === 101 ? destination.id : null,
+        })),
+      );
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.resolve({
+        affectedTabIds: [101],
+        failures: [{ tabId: 102, message: 'Tab busy' }],
+        groupId: destination.id,
+        warnings: [],
+      });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Beta' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    const dialog = screen.getByRole('dialog', { name: 'Group selected tabs' });
+    expect(within(dialog).getByText('Other window group')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Create new group' }));
+    await user.type(within(dialog).getByRole('textbox', { name: 'Group name' }), 'Unused draft');
+    await user.click(within(dialog).getByRole('radio', { name: 'Green' }));
+    await user.click(
+      within(dialog).getByRole('button', {
+        name: 'Move 2 tabs to Other window group, Window 2, 1 tab in group',
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.addTabsToGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 101, windowId: 1 }),
+        expect.objectContaining({ id: 102, windowId: 1 }),
+      ],
+      destination,
+    );
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+    expect(service.updateTabGroup).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Beta' })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent('Tab busy');
+    expect(
+      screen.getByRole('checkbox', { name: 'Select Beta' }).closest('article'),
+    ).toHaveTextContent('Window 2');
+  });
+
+  it('keeps creation collapsed with only remote groups and creates in the source window', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[0]!.groups = [];
+    snapshot.windows[0]!.tabs.forEach((tab) => {
+      tab.groupId = null;
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.type(screen.getByRole('searchbox'), 'Alpha');
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(
+      screen.getByRole('button', {
+        name: 'Move 1 tab to Other window group, Window 2, 1 tab in group',
+      }),
+    ).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Create new group' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Local group{Enter}');
+    await waitFor(() =>
+      expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+        [expect.objectContaining({ id: 101, windowId: 1 })],
+        { title: 'Local group', color: 'blue' },
+        1,
+      ),
+    );
+  });
+
+  it('distinguishes identically named groups and clears selection when multiple source windows disappear', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    const destination = snapshot.windows[1]!.groups[0]!;
+    destination.title = 'Research';
+    snapshot.windows.push(
+      createManagedWindow({
+        id: 3,
+        isCurrent: false,
+        focused: false,
+        tabs: [createManagedTab({ id: 301, windowId: 3, title: 'Third source' })],
+      }),
+    );
+    vi.mocked(service.addTabsToGroup).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      const sources = changed.windows.filter((window) => window.id !== 2);
+      changed.windows = changed.windows.filter((window) => window.id === 2);
+      changed.windows[0]!.tabs.push(
+        ...sources.flatMap((window) =>
+          window.tabs.map((tab) => ({ ...tab, windowId: 2, groupId: destination.id })),
+        ),
+      );
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.resolve({
+        affectedTabIds: [101, 102, 103, 301],
+        failures: [],
+        groupId: destination.id,
+        warnings: [],
+      });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select all visible tabs in Window 1' }),
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Select Third source' }));
+    await user.click(screen.getByRole('button', { name: 'Group 4 selected tabs' }));
+    expect(
+      screen.getByRole('button', { name: 'Move 3 tabs to Research, Window 1, 1 tab in group' }),
+    ).toBeEnabled();
+    await user.click(
+      screen.getByRole('button', { name: 'Move 4 tabs to Research, Window 2, 1 tab in group' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.addTabsToGroup).toHaveBeenCalledExactlyOnceWith(expect.any(Array), destination);
+    expect(document.getElementById('window-1-title')).not.toBeInTheDocument();
+    expect(document.getElementById('window-3-title')).not.toBeInTheDocument();
+    expect(document.getElementById('window-2-title')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Group 0 selected tabs' })).toHaveFocus();
+  });
+
+  it('omits destinations whose windows are still closing after Save & close', async () => {
+    const { service, user } = setupGroupFlow();
+    const savedWindowsService = createSavedWindowsService();
+    const result = createSaveWindowResult('Remote work', true, [], 2);
+    result.sourceWindowClose = {
+      ...requireFastClose(result),
+      finish: vi.fn(() =>
+        Promise.resolve({
+          completion: new Promise<{ errorMessage: string | null }>(() => undefined),
+          errorMessage: null,
+          status: 'close-requested' as const,
+        }),
+      ),
+    };
+    vi.mocked(savedWindowsService.saveWindow).mockResolvedValue(result);
+    render(<ActiveWindowsPage savedWindowsService={savedWindowsService} service={service} />);
+    await user.click(await screen.findByRole('button', { name: 'Save Window 2' }));
+    await user.type(screen.getByRole('textbox', { name: 'Name' }), 'Remote work');
+    await user.click(screen.getByRole('button', { name: 'Save & close' }));
+    await screen.findByText('Closing…');
+    await user.click(screen.getByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(
+      screen.getByRole('button', { name: 'Move 1 tab to Research, Window 1, 1 tab in group' }),
+    ).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Move .*Window 2/ })).not.toBeInTheDocument();
+    expect(service.addTabsToGroup).not.toHaveBeenCalled();
+  });
+
+  it('removes selected group members without closing them or their other group members', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[1]!.groups = [];
+    snapshot.windows[1]!.tabs[0]!.groupId = null;
+    vi.mocked(service.removeTabsFromGroups).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      changed.windows[0]!.groups = [];
+      changed.windows[0]!.tabs[2]!.groupId = null;
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.resolve({ affectedTabIds: [103], failures: [], groupId: null, warnings: [] });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Research tab' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(screen.getByRole('button', { name: 'Create new group' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByRole('button', { name: /^Move .* to Research/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }),
+    ).toHaveFocus();
+    expect(screen.queryByRole('button', { name: /^Remove all/ })).not.toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Create new group' })).toHaveFocus();
+    await user.keyboard(' ');
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Unused draft');
+    await user.click(screen.getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }));
+    expect(await screen.findByText('No selected tabs remaining.')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Close group panel' })).toHaveFocus(),
+    );
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Unused draft');
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^(Move|Remove) / })).not.toBeInTheDocument();
+    expect(service.removeTabsFromGroups).toHaveBeenCalledExactlyOnceWith([
+      expect.objectContaining({ id: 103, groupId: 7 }),
+    ]);
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+    expect(service.updateTabGroup).not.toHaveBeenCalled();
+    expect(service.closeTabs).not.toHaveBeenCalled();
+    expect(service.closeWindow).not.toHaveBeenCalled();
+    expect(screen.getByText('Removed 1 tab from groups. Tabs remain open.')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Group 0 selected tabs' })).toHaveFocus();
+  });
+
+  it('hides the current group and focuses the next destination for a fully grouped selection', async () => {
+    const { service, user, snapshot, group } = setupGroupFlow();
+    snapshot.windows[0]!.groups.push({ ...group, id: 9, title: 'Design' });
+    snapshot.windows[0]!.tabs.push(
+      createManagedTab({ id: 104, title: 'Design tab', index: 3, groupId: 9 }),
+    );
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Research tab' }));
+    await user.type(screen.getByRole('searchbox'), 'Alpha');
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    const dialog = screen.getByRole('dialog', { name: 'Group selected tabs' });
+    expect(
+      within(dialog).queryByRole('button', { name: /^Move .* to Research/ }),
+    ).not.toBeInTheDocument();
+    expect(within(dialog).getAllByRole('button', { name: /^Move / })).toHaveLength(2);
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 1 tab to Design, Window 1, 1 tab in group',
+      }),
+    ).toHaveFocus();
+    expect(
+      within(dialog).getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }),
+    ).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Create new group' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(service.addTabsToGroup).not.toHaveBeenCalled();
+  });
+
+  it('explains pinned selections and prevents grouping them', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[0]!.tabs[0]!.pinned = true;
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(screen.getByText(/Unpin the selected pinned tab/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new group' })).toBeDisabled();
+    expect(screen.queryByRole('textbox', { name: 'Group name' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Move 1 tab to Research, Window 1, 1 tab in group' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Close group panel' })).toHaveFocus();
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('moves a multi-window selection including hidden tabs and selected destination members', async () => {
+    const { service, user, group } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Research tab' }));
+    await user.type(screen.getByRole('searchbox'), 'Alpha');
+    const trigger = screen.getByRole('button', { name: 'Group 3 selected tabs' });
+    expect(trigger).toHaveAttribute('aria-disabled', 'false');
+    await user.click(trigger);
+    expect(screen.getByText('3 selected tabs · 2 windows')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new group' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Remove all 2 grouped tabs Keep tabs open' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText('Select tabs in one window to create a group or remove tabs from groups.'),
+    ).not.toBeInTheDocument();
+    const move = screen.getByRole('button', {
+      name: 'Move 2 tabs to Research, Window 1, 1 tab in group',
+    });
+    expect(move).toHaveFocus();
+    expect(
+      screen.getByRole('button', {
+        name: 'Move 2 tabs to Other window group, Window 2, 1 tab in group',
+      }),
+    ).toBeEnabled();
+    await user.click(move);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.addTabsToGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 101, windowId: 1 }),
+        expect.objectContaining({ id: 103, windowId: 1, groupId: 7 }),
+        expect.objectContaining({ id: 201, windowId: 2 }),
+      ],
+      group,
+    );
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+    expect(service.removeTabsFromGroups).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Group 0 selected tabs' })).toHaveFocus();
+  });
+
+  it('retains failed tabs from a multi-window selection while clearing confirmed destination members', async () => {
+    const { service, user, group, snapshot } = setupGroupFlow();
+    vi.mocked(service.addTabsToGroup).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      const moved = changed.windows[1]!.tabs.splice(0, 1)[0]!;
+      changed.windows[0]!.tabs[0]!.groupId = group.id;
+      changed.windows[0]!.tabs.push({ ...moved, windowId: 1, groupId: null });
+      changed.windows.pop();
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.resolve({
+        affectedTabIds: [101, 103],
+        failures: [{ tabId: 201, message: 'Could not group the moved tab' }],
+        groupId: group.id,
+        warnings: [],
+      });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Research tab' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 3 selected tabs' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Move 2 tabs to Research, Window 1, 1 tab in group' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Research tab' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not group the moved tab');
+    expect(screen.getByRole('button', { name: 'Group 1 selected tab' })).toHaveFocus();
+  });
+
+  it('blocks moves when a tab in a secondary source window changes', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    const changed = structuredClone(snapshot);
+    changed.windows[1]!.tabs[0]!.groupId = null;
+    vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+    act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+    expect(await screen.findByText(/The tabs or group changed/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Move 2 tabs to Research, Window 1, 1 tab in group' }),
+    ).toBeDisabled();
+    expect(service.addTabsToGroup).not.toHaveBeenCalled();
+  });
+
+  it('creates from multiple sources in the current window even when that window has no selected tabs', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows.push(
+      createManagedWindow({
+        id: 3,
+        isCurrent: false,
+        focused: false,
+        tabs: [createManagedTab({ id: 301, windowId: 3, title: 'Third source' })],
+      }),
+    );
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Third source' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    expect(screen.getByRole('button', { name: 'Create new group' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    expect(screen.getByText('Creates in Window 1 (current window).')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).queryByRole('combobox')).not.toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Combined');
+    await user.click(screen.getByRole('radio', { name: 'Green' }));
+    await user.click(screen.getByRole('button', { name: 'Create group' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 201, windowId: 2 }),
+        expect.objectContaining({ id: 301, windowId: 3 }),
+      ],
+      { title: 'Combined', color: 'green' },
+      1,
+    );
+    expect(screen.getByRole('button', { name: 'Group 0 selected tabs' })).toHaveFocus();
+  });
+
+  it('keeps single-window creation in the selected window instead of the current window', async () => {
+    const { service, user } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    expect(screen.queryByText(/Creates in/)).not.toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Local{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [expect.objectContaining({ id: 201, windowId: 2 })],
+      { title: 'Local', color: 'blue' },
+      2,
+    );
+  });
+
+  it.each(['closed', 'changed'] as const)(
+    'blocks creation without changing its destination when the current window is %s',
+    async (change) => {
+      const { service, user, snapshot } = setupGroupFlow();
+      snapshot.windows.push(
+        createManagedWindow({
+          id: 3,
+          isCurrent: false,
+          focused: false,
+          tabs: [createManagedTab({ id: 301, windowId: 3, title: 'Third source' })],
+        }),
+      );
+      render(<ActiveWindowsPage service={service} />);
+      await user.click(await screen.findByRole('checkbox', { name: 'Select Elsewhere' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Select Third source' }));
+      await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+      await user.click(screen.getByRole('button', { name: 'Create new group' }));
+      await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft');
+      const changed = structuredClone(snapshot);
+      if (change === 'closed') changed.windows.shift();
+      else {
+        changed.windows[0]!.isCurrent = false;
+        changed.windows[2]!.isCurrent = true;
+      }
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+      expect(
+        await screen.findByText(
+          'Current window unavailable. Close this panel and reopen it to create a group.',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create group' })).toBeDisabled();
+      expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Draft');
+      expect(
+        screen.getByRole('button', { name: /^Remove 1 tab from Other window group, Window / }),
+      ).toBeEnabled();
+      expect(
+        screen.getByRole('button', { name: /Move 1 tab to Other window group/ }),
+      ).toBeEnabled();
+      expect(service.createTabGroup).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retains the selection and draft after creation rejects following partial relocation', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    vi.mocked(service.createTabGroup).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      const moved = changed.windows.pop()!.tabs[0]!;
+      changed.windows[0]!.tabs.push({ ...moved, windowId: 1, groupId: null });
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.reject(
+        new Error('Cannot create group. Some tabs may have moved to the destination window.'),
+      );
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft{Enter}');
+    expect(await screen.findByText(/Some tabs may have moved/)).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Draft');
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).toBeChecked();
+    expect(service.createTabGroup).toHaveBeenCalledOnce();
+    expect(service.updateTabGroup).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'removes group members across windows in place, retaining failures: %s',
+    async (partial) => {
+      const { service, user, snapshot } = setupGroupFlow();
+      vi.mocked(service.removeTabsFromGroups).mockImplementation(() => {
+        const changed = structuredClone(snapshot);
+        changed.windows[0]!.tabs[2]!.groupId = null;
+        changed.windows[0]!.groups = [];
+        if (!partial) {
+          changed.windows[1]!.tabs[0]!.groupId = null;
+          changed.windows[1]!.groups = [];
+        }
+        vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+        return Promise.resolve({
+          affectedTabIds: partial ? [103] : [103, 201],
+          failures: partial ? [{ tabId: 201, message: 'Remote tab is busy' }] : [],
+          groupId: null,
+          warnings: [],
+        });
+      });
+      render(<ActiveWindowsPage service={service} />);
+      await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Select Research tab' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+      await user.click(screen.getByRole('button', { name: 'Group 3 selected tabs' }));
+      await user.click(
+        screen.getByRole('button', { name: 'Remove all 2 grouped tabs Keep tabs open' }),
+      );
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(service.removeTabsFromGroups).toHaveBeenCalledExactlyOnceWith([
+        expect.objectContaining({ id: 101, windowId: 1 }),
+        expect.objectContaining({ id: 103, windowId: 1, groupId: 7 }),
+        expect.objectContaining({ id: 201, windowId: 2, groupId: 8 }),
+      ]);
+      expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Select Research tab' })).not.toBeChecked();
+      expect(
+        screen.getByRole('checkbox', { name: 'Select Elsewhere' }).closest('article'),
+      ).toHaveAttribute('data-window-id', '2');
+      if (partial) {
+        expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).toBeChecked();
+        expect(screen.getByRole('alert')).toHaveTextContent('Remote tab is busy');
+      } else expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).not.toBeChecked();
+      expect(service.closeTabs).not.toHaveBeenCalled();
+      expect(service.closeWindow).not.toHaveBeenCalled();
+      expect(service.addTabsToGroup).not.toHaveBeenCalled();
+      expect(service.createTabGroup).not.toHaveBeenCalled();
+    },
+  );
+
+  it('removes one selected group at a time while retaining the draft, remaining selection, and keyboard focus', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[0]!.tabs.push(
+      createManagedTab({ id: 104, title: 'Unselected member', index: 3, groupId: 7 }),
+    );
+    let current = structuredClone(snapshot);
+    vi.mocked(service.removeTabsFromGroups).mockImplementation((tabs) => {
+      const ids = tabs.map((tab) => tab.id);
+      current = structuredClone(current);
+      current.windows.forEach((window) => {
+        window.tabs.forEach((tab) => {
+          if (ids.includes(tab.id)) tab.groupId = null;
+        });
+        window.groups = window.groups.filter((group) =>
+          window.tabs.some((tab) => tab.groupId === group.id),
+        );
+      });
+      vi.mocked(service.loadSnapshot).mockResolvedValue(current);
+      return Promise.resolve({ affectedTabIds: ids, failures: [], groupId: null, warnings: [] });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Research tab' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 3 selected tabs' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByRole('button', { name: /^Remove / })).toHaveLength(3);
+    expect(
+      within(dialog).getByRole('button', { name: 'Remove all 2 grouped tabs Keep tabs open' }),
+    ).toBeEnabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Create new group' }));
+    await user.type(within(dialog).getByRole('textbox', { name: 'Group name' }), 'Retained draft');
+    await user.click(within(dialog).getByRole('radio', { name: 'Purple' }));
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }),
+    );
+    const nextRemove = within(dialog).getByRole('button', {
+      name: 'Remove 1 tab from Other window group, Window 2',
+    });
+    await waitFor(() => expect(nextRemove).toHaveFocus());
+    expect(service.removeTabsFromGroups).toHaveBeenCalledExactlyOnceWith([
+      expect.objectContaining({ id: 103, groupId: 7 }),
+    ]);
+    expect(within(dialog).getByText('2 selected tabs · 2 windows')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /^Remove all/ })).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 2 tabs to Research, Window 1, 1 tab in group',
+      }),
+    ).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'Select Research tab' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select Unselected member' })).not.toBeChecked();
+    expect(within(dialog).getByRole('textbox', { name: 'Group name' })).toHaveValue(
+      'Retained draft',
+    );
+    expect(within(dialog).getByRole('radio', { name: 'Purple' })).toBeChecked();
+    await user.keyboard('{Enter}');
+    await waitFor(() =>
+      expect(within(dialog).queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument(),
+    );
+    expect(service.removeTabsFromGroups).toHaveBeenNthCalledWith(2, [
+      expect.objectContaining({ id: 201, groupId: 8 }),
+    ]);
+    expect(
+      within(dialog).getByRole('button', {
+        name: 'Move 1 tab to Research, Window 1, 1 tab in group',
+      }),
+    ).toHaveFocus();
+    expect(within(dialog).getByText('1 selected tab · Window 1')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+    await user.click(within(dialog).getByRole('button', { name: 'Create group' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [expect.objectContaining({ id: 101 })],
+      { title: 'Retained draft', color: 'purple' },
+      1,
+    );
+  });
+
+  it('focuses creation when the last group disappears and ungrouped selections remain', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[1]!.groups = [];
+    snapshot.windows[1]!.tabs[0]!.groupId = null;
+    vi.mocked(service.removeTabsFromGroups).mockImplementation(() => {
+      const changed = structuredClone(snapshot);
+      changed.windows[0]!.groups = [];
+      changed.windows[0]!.tabs[2]!.groupId = null;
+      vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+      return Promise.resolve({ affectedTabIds: [103], failures: [], groupId: null, warnings: [] });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Research tab' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    await user.click(screen.getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeEnabled();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+    expect(screen.queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument();
+  });
+
+  it('creates in the remaining source window after an individual removal leaves one source', async () => {
+    const { service, user } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Research tab' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Remote draft');
+    await user.click(screen.getByRole('button', { name: 'Remove 1 tab from Research, Window 1' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create group' })).toBeEnabled());
+    expect(screen.getByText('1 selected tab · Window 2')).toBeInTheDocument();
+    expect(screen.queryByText(/Creates in Window/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create group' }));
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [expect.objectContaining({ id: 201, windowId: 2 })],
+      { title: 'Remote draft', color: 'blue' },
+      2,
+    );
+  });
+
+  it.each([false, true])(
+    'retains failed group members and protects unrelated external changes after individual removal: %s',
+    async (externalChange) => {
+      const { service, user, snapshot } = setupGroupFlow();
+      snapshot.windows[0]!.tabs.push(
+        createManagedTab({ id: 104, title: 'Busy member', index: 3, groupId: 7 }),
+      );
+      vi.mocked(service.removeTabsFromGroups).mockImplementationOnce(() => {
+        const changed = structuredClone(snapshot);
+        changed.windows[0]!.tabs[2]!.groupId = null;
+        if (externalChange) changed.windows[1]!.tabs[0]!.groupId = null;
+        vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+        return Promise.resolve({
+          affectedTabIds: [103],
+          failures: [{ tabId: 104, message: 'Tab is busy' }],
+          groupId: null,
+          warnings: [],
+        });
+      });
+      render(<ActiveWindowsPage service={service} />);
+      await user.click(await screen.findByRole('checkbox', { name: 'Select Research tab' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Select Busy member' }));
+      await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+      await user.click(screen.getByRole('button', { name: 'Group 3 selected tabs' }));
+      await user.click(
+        screen.getByRole('button', { name: 'Remove 2 tabs from Research, Window 1' }),
+      );
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByText(/Tab is busy/)).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: 'Select Research tab' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Select Busy member' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Select Elsewhere' })).toBeChecked();
+      const retry = within(dialog).getByRole('button', {
+        name: 'Remove 1 tab from Research, Window 1',
+      });
+      if (externalChange) {
+        expect(await within(dialog).findByText(/The tabs or group changed/)).toBeInTheDocument();
+        expect(retry).toBeDisabled();
+        expect(within(dialog).getByRole('button', { name: 'Close group panel' })).toHaveFocus();
+      } else {
+        await waitFor(() => expect(retry).toHaveFocus());
+        expect(within(dialog).queryByText(/The tabs or group changed/)).not.toBeInTheDocument();
+        await user.keyboard('{Enter}');
+        expect(service.removeTabsFromGroups).toHaveBeenNthCalledWith(2, [
+          expect.objectContaining({ id: 104, groupId: 7 }),
+        ]);
+        await waitFor(() =>
+          expect(
+            within(dialog).getByRole('button', {
+              name: 'Remove 1 tab from Other window group, Window 2',
+            }),
+          ).toHaveFocus(),
+        );
+      }
+    },
+  );
+
+  it('creates immediately in the current window from multiple sources when no groups exist', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows.forEach((window) => {
+      window.groups = [];
+      window.tabs.forEach((tab) => {
+        tab.groupId = null;
+      });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    expect(screen.getByRole('heading', { name: 'Create new group' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeEnabled();
+    expect(screen.getByText('Creates in Window 1 (current window).')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [
+        expect.objectContaining({ id: 101, windowId: 1 }),
+        expect.objectContaining({ id: 201, windowId: 2 }),
+      ],
+      { title: '', color: 'blue' },
+      1,
+    );
+  });
+
+  it('keeps focus inside the panel when the last group disappears with multiple sources selected', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows[1]!.groups = [];
+    snapshot.windows[1]!.tabs[0]!.groupId = null;
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Select Elsewhere' }));
+    await user.click(screen.getByRole('button', { name: 'Group 2 selected tabs' }));
+    expect(
+      screen.getByRole('button', { name: 'Move 2 tabs to Research, Window 1, 1 tab in group' }),
+    ).toHaveFocus();
+    const changed = structuredClone(snapshot);
+    changed.windows[0]!.groups = [];
+    changed.windows[0]!.tabs.forEach((tab) => {
+      tab.groupId = null;
+    });
+    vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+    act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+    expect(await screen.findByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    expect(screen.getByText('Creates in Window 1 (current window).')).toBeInTheDocument();
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('creates an unnamed group with Enter from the initial form when no groups exist', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    snapshot.windows.forEach((window) => {
+      window.groups = [];
+      window.tabs.forEach((tab) => {
+        tab.groupId = null;
+      });
+    });
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    expect(screen.queryByText(/Add to a group in/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Remove .* from groups/ })).not.toBeInTheDocument();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.createTabGroup).toHaveBeenCalledExactlyOnceWith(
+      [expect.objectContaining({ id: 101, windowId: 1 })],
+      { title: '', color: 'blue' },
+      1,
+    );
+    expect(service.addTabsToGroup).not.toHaveBeenCalled();
+    expect(service.removeTabsFromGroups).not.toHaveBeenCalled();
+  });
+
+  it('opens and focuses creation if the last destination group disappears', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    expect(
+      screen.getByRole('button', { name: 'Move 1 tab to Research, Window 1, 1 tab in group' }),
+    ).toHaveFocus();
+    const changed = structuredClone(snapshot);
+    changed.windows.forEach((window) => {
+      window.groups = [];
+      window.tabs.forEach((tab) => {
+        tab.groupId = null;
+      });
+    });
+    vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+    act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+    expect(await screen.findByRole('textbox', { name: 'Group name' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeEnabled();
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('cancels a draft with Escape without clearing selection or mutating browser groups', async () => {
+    const { service, user } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    const trigger = screen.getByRole('button', { name: 'Group 1 selected tab' });
+    await user.click(trigger);
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select Alpha' })).toBeChecked();
+    expect(trigger).toHaveFocus();
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('edits name/color through the group ellipsis without focusing or dragging tabs', async () => {
+    const { service, user, group } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    const trigger = await screen.findByRole('button', { name: 'Edit Research group' });
+    await user.click(trigger);
+    const name = screen.getByRole('textbox', { name: 'Group name' });
+    expect(name).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await user.clear(name);
+    await user.type(name, 'Reading');
+    await user.click(screen.getByRole('radio', { name: 'Green' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(service.updateTabGroup).toHaveBeenCalledExactlyOnceWith(group, {
+      title: 'Reading',
+      color: 'green',
+    });
+    expect(service.focusTab).not.toHaveBeenCalled();
+    expect(service.moveTabGroup).not.toHaveBeenCalled();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('retains a failed edit draft and explains recognition changes for agent groups', async () => {
+    const { service, user, group } = setupGroupFlow();
+    group.title = 'Claude';
+    vi.mocked(service.updateTabGroup).mockRejectedValue(new Error('Group is busy'));
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Claude group' }));
+    const name = screen.getByRole('textbox', { name: 'Group name' });
+    await user.clear(name);
+    await user.type(name, 'Research');
+    expect(screen.getByText(/may remove the group’s agent badges/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Group is busy')).toBeInTheDocument();
+    expect(name).toHaveValue('Research');
+    expect(screen.getByRole('radio', { name: 'Orange' })).toBeChecked();
+  });
+
+  it('blocks a stale selection while preserving the draft for review', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Alpha' }));
+    await user.click(screen.getByRole('button', { name: 'Group 1 selected tab' }));
+    await user.click(screen.getByRole('button', { name: 'Create new group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Draft');
+    const changed = structuredClone(snapshot);
+    changed.windows[0]!.tabs[0]!.groupId = 7;
+    vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+    act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+    expect(await screen.findByText(/The tabs or group changed/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new group' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create group' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Draft');
+    expect(service.createTabGroup).not.toHaveBeenCalled();
+  });
+
+  it('keeps one save in flight and restores focus after the controls unlock', async () => {
+    const { service, user } = setupGroupFlow();
+    let finishSave!: () => void;
+    const pendingSave = new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    vi.mocked(service.updateTabGroup).mockReturnValue(pendingSave);
+    render(<ActiveWindowsPage service={service} />);
+    const trigger = await screen.findByRole('button', { name: 'Edit Research group' });
+    await user.click(trigger);
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), ' notes');
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await user.keyboard('{Escape}');
+    expect(service.updateTabGroup).toHaveBeenCalledOnce();
+    expect(screen.getByRole('dialog', { name: 'Edit group' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('button', { name: 'Close group panel' })).toBeDisabled();
+    expect(trigger).toBeDisabled();
+    await act(async () => {
+      finishSave();
+      await pendingSave;
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('preserves the draft but blocks saving over an external group edit', async () => {
+    const { service, user, snapshot } = setupGroupFlow();
+    render(<ActiveWindowsPage service={service} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit Research group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), ' draft');
+    const changed = structuredClone(snapshot);
+    changed.windows[0]!.groups[0]!.color = 'red';
+    vi.mocked(service.loadSnapshot).mockResolvedValue(changed);
+    act(() => vi.mocked(service.subscribe).mock.calls[0]![0]());
+    expect(await screen.findByText(/The tabs or group changed/)).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveValue('Research draft');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(service.updateTabGroup).not.toHaveBeenCalled();
   });
 });

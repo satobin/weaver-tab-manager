@@ -57,6 +57,16 @@ function createService(windowCount = 1): ActiveWindowsService {
     focusTab: () => Promise.resolve(),
     focusWindow: () => Promise.resolve(),
     loadSnapshot: vi.fn(() => Promise.resolve(snapshot)),
+    createTabGroup: vi.fn(() =>
+      Promise.resolve({ affectedTabIds: [], failures: [], groupId: 70, warnings: [] }),
+    ),
+    addTabsToGroup: vi.fn(() =>
+      Promise.resolve({ affectedTabIds: [], failures: [], groupId: 7, warnings: [] }),
+    ),
+    removeTabsFromGroups: vi.fn(() =>
+      Promise.resolve({ affectedTabIds: [], failures: [], groupId: null, warnings: [] }),
+    ),
+    updateTabGroup: vi.fn(() => Promise.resolve()),
     loadWindowCount: vi.fn(() => Promise.resolve(windowCount)),
     mergeWindows: () =>
       Promise.resolve({

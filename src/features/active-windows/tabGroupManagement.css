@@ -1,0 +1,284 @@
+.tab-group-popover {
+  position: fixed;
+  z-index: 60;
+  visibility: hidden;
+  width: min(352px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 26px var(--shadow);
+  color: var(--text);
+}
+
+.tab-group-popover header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tab-group-popover h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.tab-group-popover header p,
+.tab-group-help,
+.tab-group-choices small {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tab-group-popover-close {
+  margin-left: auto;
+}
+.tab-group-popover .tab-group-help {
+  margin: 10px 0;
+}
+.tab-group-create-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+}
+.tab-group-name {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.tab-group-name input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.tab-group-colors {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
+  margin: 16px 0;
+  padding: 0;
+  border: 0;
+}
+
+.tab-group-colors legend {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.tab-group-colors label {
+  position: relative;
+  display: grid;
+  width: min(28px, 100%);
+  height: 28px;
+  place-items: center;
+  justify-self: center;
+}
+.tab-group-colors input {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.tab-group-colors label > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--swatch-color);
+  color: #fff;
+  pointer-events: none;
+}
+.tab-group-colors input:checked + span {
+  outline: 2px solid var(--swatch-color);
+  outline-offset: 2px;
+}
+.tab-group-colors input:focus-visible + span {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+.tab-group-colors:disabled {
+  opacity: 0.6;
+}
+.tab-group-popover footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.tab-group-choices {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.tab-group-existing {
+  max-height: 240px;
+  overflow: auto;
+}
+.tab-group-choices button,
+.tab-group-create-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+}
+.tab-group-choices button:hover:not(:disabled),
+.tab-group-choices button:focus-visible,
+.tab-group-create-toggle:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--surface-hover);
+}
+.tab-group-choices button:disabled,
+.tab-group-create-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tab-group-action-icon {
+  flex-shrink: 0;
+}
+.tab-group-move .tab-group-action-icon {
+  color: var(--accent);
+}
+.tab-group-choices strong {
+  flex-shrink: 0;
+  font-weight: 650;
+}
+.tab-group-choices .tab-group-move:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--accent-soft);
+}
+.tab-group-create-toggle {
+  color: var(--accent);
+}
+.tab-group-create-toggle[aria-expanded='true'] {
+  margin-bottom: 12px;
+}
+.tab-group-create-toggle strong {
+  font-weight: 650;
+}
+.tab-group-create-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.tab-group-create-toggle[aria-expanded='true'] .tab-group-create-chevron {
+  transform: rotate(180deg);
+}
+.tab-group-choice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tab-group-choice-name {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.tab-group-destination-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.tab-group-destination-window {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.tab-group-choices .tab-group-remove {
+  color: var(--danger-muted);
+}
+.tab-group-existing + .tab-group-removals {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.tab-group-remove-all {
+  margin-bottom: 4px;
+}
+.tab-group-choices .tab-group-remove:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.tab-group-remove-label {
+  min-width: 0;
+}
+.tab-group-remove small {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.tab-group-heading.has-management-control {
+  grid-template-columns: 34px minmax(0, 1fr) 30px;
+}
+.tab-group-heading.has-collapse-control.has-management-control {
+  grid-template-columns: 34px 26px minmax(0, 1fr) 30px;
+}
+.tab-group-edit-button {
+  display: grid;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tab-group-edit-button:hover:not(:disabled),
+.tab-group-edit-button:focus-visible {
+  background: color-mix(in srgb, var(--tab-group-color) 25%, var(--surface));
+  color: var(--text);
+}
+.tab-group-edit-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tab-group-focus-button > .tab-group-management-count {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.has-management-control .tab-group-focus-button > span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-group-selection-button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+}
+.tab-group-selection-button[aria-expanded='true'] {
+  background: var(--accent-soft);
+}

@@ -23,6 +23,7 @@ import {
   type AgentTabDetection,
 } from './agentTabAssociation';
 import { planTabSort, type TabSortOptions } from './tabSort';
+import { createTabGroupManagement, type TabGroupManagementService } from './tabGroupManagement';
 import { formatWindowLabel } from './windowLabel';
 
 interface ChromeEvent<TArgs extends unknown[]> {
@@ -90,7 +91,7 @@ export interface ActiveWindowsChromeApi extends RestoredTabMetadataChromeApi {
   };
 }
 
-export interface ActiveWindowsService {
+export interface ActiveWindowsService extends TabGroupManagementService {
   closeDuplicateTabs: (request: CloseDuplicateTabsRequest) => Promise<CloseDuplicateTabsResult>;
   closeTabs: (tabIds: readonly number[]) => Promise<CloseTabsResult>;
   closeWindow: (windowId: number) => Promise<void>;
@@ -1064,6 +1065,8 @@ export function createChromeActiveWindowsService(
         skippedPinnedTabIds,
       };
     },
+
+    ...createTabGroupManagement(api),
 
     async closeTabs(tabIds) {
       const requestedTabIds = [...new Set(tabIds)];

@@ -23,6 +23,7 @@ function createProps(
     onCloseSelectedTabs: vi.fn(),
     onCloseTab: vi.fn(),
     onCloseWindow: vi.fn(),
+    onEditGroup: vi.fn(),
     onFocusTab: vi.fn(),
     onFocusWindow: vi.fn(),
     onPinTab: vi.fn(),
